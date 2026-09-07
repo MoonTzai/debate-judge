@@ -12,7 +12,7 @@ Debate-Judge is an open research-software project. Contributions should improve 
 
 ## Verification
 
-A release-quality contribution should preserve the three Markdown distribution mirrors, the `install-skill.js::BLOCKS` closure, and generated-Web/source relationships. Run the project tests applicable to the changed area and report failures or skipped tests exactly. Passing software tests is not evidence that an adjudication is scientifically correct.
+A release-quality contribution should preserve `Skill-Judge.md` as the single canonical Skill, the `install-skill.js::BLOCKS` closure, and generated-Web/source relationships. Run the project tests applicable to the changed area and report failures or skipped tests exactly. Passing software tests is not evidence that an adjudication is scientifically correct.
 
 ## Rights and licensing
 
