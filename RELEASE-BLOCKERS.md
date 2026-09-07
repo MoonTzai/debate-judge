@@ -14,7 +14,7 @@ The first public run exposed and then fixed one non-semantic repository-boundary
 
 ## B3 — Generated HTML rebuild — RESOLVED AFTER RIGHTS HARDENING
 
-`web/judge.html` was regenerated from the current MIT/CSS source; hand-patching was not used. Current accepted SHA-256: `7753c917b0b9097f53cbeec894b48734a4ddf86b9f91cccd7523c65860688710`. The generated `web/dist` closure was rebuilt in the same run.
+`web/judge.html` was regenerated from the current MIT/CSS source; hand-patching was not used. Current reproducible SHA-256: `326d9156d61b071a66b4d9d4a323e72a99078fee04e778f4b38edc46612234dd`; consecutive local rebuilds are byte-identical after removing build-time timestamp injection. The generated `web/dist` closure was rebuilt in the same run.
 
 ## B4 — Public test subset execution — RESOLVED AFTER RIGHTS HARDENING
 
@@ -30,14 +30,14 @@ The two Sanctum WebP derivatives were moved out of the public candidate into pri
 
 ## B7 — Local clean build/reproduction — RESOLVED AFTER RIGHTS HARDENING
 
-The current nested candidate completed source synchronization, browser rebuild, public tests, executable secret scan, path/privacy postconditions, and manifest regeneration under Node v24.16.0 / Windows x64. A fresh external clone remains required after the first Git commit/push.
+The current nested candidate completed source synchronization, reproducible browser rebuild, public tests, executable secret scan, path/privacy postconditions, and manifest regeneration under Node v24.16.0 / Windows x64. The first public push exposed a non-semantic build timestamp that changed the generated HTML hash in a fresh clone; that timestamp injection is now removed locally. Fresh-clone equality must be rerun after the follow-up fix is pushed.
 
-## B8 — Git/publication bootstrap — PARTIALLY RESOLVED
+## B8 — Git/publication bootstrap — RESOLVED
 
 FolderBridge 0.8.27 / Git Publisher 1.5.0 now supports a workspace-relative nested `repo_path`, so `Debate-Judge-Public/` can be a dedicated Git repository while remaining inside the single `Debate-Judge` FolderBridge workspace. The private parent root is not a Git repository and has not been initialized.
 
-Post-hardening engineering re-acceptance has closed B3/B4/B7. The remaining release action is now Git bootstrap/publication: initialize `Debate-Judge-Public/` as `main`, create the first honest commit, create the public GitHub repository, push, then fresh-clone and rerun acceptance. The authenticated GitHub identity is `MoonTzai`; intended remote: `MoonTzai/debate-judge`.
+`Debate-Judge-Public/` is now an independent `main` repository and `MoonTzai/debate-judge` is public. Initial public HEAD was `07b3bcbee011af69bec965e9f5f6ce2b1ff67e95`; Git Publisher verified the remote branch was up to date. The remaining publication-quality gate is fresh-clone equality after the deterministic-builder follow-up commit.
 
 ## B9 — JOSS temporal/impact requirements not yet mature
 
-The JOSS six-month public-development clock has not started because no public repository exists yet. Research-use/impact evidence must also be accumulated and documented before submission.
+The honest JOSS public-development clock starts from the repository's actual public history on **7 September 2026**. The six-month duration is therefore not yet mature. Research-use/impact evidence must also be accumulated and documented before submission.

@@ -36,7 +36,7 @@ DUG 在研理论版本与 Wayfinder 设计方案有独立状态，不能直接�
 
 当前有较完整的工程原型、提示词与产物契约，但本次准备没有产生裁判准确率、专家一致性、跨赛制泛化或教育效果结果。模型解释错误、领域启发式未校准、逐字稿丢失现场信息、评委合理分歧均需单独讨论。软件门禁通过不等于裁判判断正确。
 
-截至 2026-09-07 post-hardening 验收，三份 public-candidate Markdown 分发镜像 `Skill-Judge.md`、`Debate-Judge.md` 与 `.claude/skills/debate-judge/SKILL.md` 逐字节一致，SHA-256 均为 `81863147ed0a9833e1380e92e631022b5b5c63157822c874f981c5d30413ba09`，frontmatter 为 MIT；新 `web/judge.html` SHA-256 为 `7753c917b0b9097f53cbeec894b48734a4ddf86b9f91cccd7523c65860688710`。`tests/run-public.js` 最终 `PUBLIC TEST SUITE PASS`，可执行密钥扫描对 84 个文件 PASS，三镜像/MIT 传播/图片排除/private path/API config 等 release postcondition 全部通过。文档更新后会再次重生成 manifest，再进入 Git bootstrap。
+截至 2026-09-07 post-hardening 验收，三份 public-candidate Markdown 分发镜像 `Skill-Judge.md`、`Debate-Judge.md` 与 `.claude/skills/debate-judge/SKILL.md` 逐字节一致，SHA-256 均为 `81863147ed0a9833e1380e92e631022b5b5c63157822c874f981c5d30413ba09`，frontmatter 为 MIT；当前可复现 `web/judge.html` SHA-256 为 `326d9156d61b071a66b4d9d4a323e72a99078fee04e778f4b38edc46612234dd`，连续两次本地 rebuild 得到完全相同的 hash。`tests/run-public.js` 最终 `PUBLIC TEST SUITE PASS`，可执行密钥扫描对 84 个文件 PASS，三镜像/MIT 传播/图片排除/private path/API config 等 release postcondition 全部通过。public GitHub repository 已于 2026-09-07 建立；当前只剩这次确定性构建修复 push 后的 fresh-clone equality 验收。
 
 当前本地候选已使用 Node v24.16.0 / Windows x64 实际执行以下入口；未来公开前须在 fresh clone 再跑一次：
 

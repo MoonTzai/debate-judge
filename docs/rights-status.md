@@ -17,7 +17,7 @@ The public candidate now contains a top-level MIT `LICENSE`. On 7 September 2026
 
 ## Remaining release closure
 
-Rights/licensing preference and the current public source boundary are closed for the candidate: MIT is granted for project-owned content; scholarly attributions are recorded; unresolved artwork is excluded. Post-hardening engineering re-acceptance is also GREEN: browser rebuild, public test suite, executable secret scan, path/privacy postconditions, and manifest generation all passed on the current source. The next gate is Git bootstrap/publication followed by fresh-clone acceptance.
+Rights/licensing preference and the current public source boundary are closed for the candidate: MIT is granted for project-owned content; scholarly attributions are recorded; unresolved artwork is excluded. Post-hardening engineering re-acceptance is also GREEN: browser rebuild, public test suite, executable secret scan, path/privacy postconditions, and manifest generation all passed on the current source. Git bootstrap/publication is complete. The remaining gate is fresh-clone byte-equality after the deterministic generated-artifact fix; rights/licensing are not blocking that check.
 
 Any future copied/adapted prose, dataset, fixture, media, font, vendor code, or artwork reopens a file-level rights review.
 

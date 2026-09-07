@@ -882,7 +882,7 @@ function inlineAppCssAssets(css) {
 
 function buildBundle() {
   const parts = [];
-  parts.push('/* judge-web bundle v1 · 生成于 ' + new Date().toISOString() + ' */');
+  parts.push('/* judge-web bundle v1 · reproducible build */');
   // 种子文件以 JSON 字符串嵌入；</script 需转义（JSON 中 \/ 合法且解析回 /）
   parts.push('var SEED_FILES = ' + JSON.stringify(
     Object.fromEntries(STATIC_FILES.map(([vp, fp]) => [vp, fs.readFileSync(fp, 'utf-8')]))
@@ -909,7 +909,6 @@ function buildBundle() {
 }
 
 function buildHtml(bundleJs, appCss, uiJs, sourceOf) {
-  const ver = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const summary = Object.entries(sourceOf).map(([vp, src]) => vp + ' (' + src.length + 'B)').join('\n  ');
   return `<!DOCTYPE html>
 <html lang="zh-CN">

@@ -7,7 +7,7 @@ Status: local candidate planning record. No JOSS submission, public-repository a
 | Area | Current candidate state | Required next evidence |
 |---|---|---|
 | OSI-compatible software license | **MIT / current rights boundary accepted** | Keep `THIRD_PARTY_NOTICES.md` current for future additions |
-| Public development history | **Not started** | Publish the real repository and maintain >6 months of distributed public development |
+| Public development history | **Started 2026-09-07** | Maintain >6 months of genuine distributed public development; do not backdate or reconstruct history |
 | Research use / impact | **Not yet established for JOSS** | Document real research use, citations/preprints, external use, or research-workflow integration |
 | Maintainable software | **Local post-hardening acceptance green** | Publish the accepted source, then repeat from a fresh clone |
 | Installation / local testing | **PASS locally on current candidate** | Repeat the same acceptance chain from a fresh external clone after push |
@@ -17,7 +17,7 @@ Status: local candidate planning record. No JOSS submission, public-repository a
 
 ## Public-development clock
 
-The clock begins from the **actual public repository history**, not from this local staging directory, private file timestamps, or reconstructed/backdated commits.
+The clock began on **7 September 2026**, from the actual public repository history. It does not inherit private file timestamps, local staging age, or reconstructed/backdated commits.
 
 After publication, maintain an honest record of:
 
@@ -50,8 +50,7 @@ Do not use software self-checks as evidence of adjudication correctness. Do not 
 
 ## Current blocking sequence
 
-1. regenerate `MANIFEST.sha256` after the final documentation updates and freeze the accepted hashes;
-2. initialize the nested Git repository and create the first honest local commit;
-3. create/publish the public GitHub repository with the already stated publication intent;
-4. perform fresh-clone rebuild/test/scan acceptance;
-5. accumulate genuine public development history and research-use/impact evidence before JOSS submission.
+1. commit and push the deterministic Web-build fix that removes build-time timestamp injection;
+2. perform fresh-clone rebuild/test/scan/manifest byte-equality acceptance;
+3. continue genuine public development, releases, issues/tests/docs, and research-use evidence from the 2026-09-07 public-history start;
+4. only pursue JOSS submission after the >6-month public-history and research-use/impact gates are genuinely mature.

@@ -4,15 +4,16 @@ Snapshot date: 2026-09-07.
 
 Status: **static and executable candidate scans completed; no secret/private-path blocker found**.
 
-## Intended remote identity
+## Public remote identity
 
 The currently authenticated GitHub identity was fresh-read from an existing Git repository through FolderBridge:
 
 - owner: `MoonTzai`
-- intended repository: `debate-judge`
-- intended future URL: `https://github.com/MoonTzai/debate-judge`
+- repository: `debate-judge`
+- public URL: `https://github.com/MoonTzai/debate-judge`
+- initial public HEAD: `07b3bcbee011af69bec965e9f5f6ce2b1ff67e95`
 
-The `debate-judge` repository has **not yet been created or published**. This document records the intended remote identity only.
+The repository was created and first pushed on 7 September 2026. Git Publisher subsequently verified `main` was up to date at the initial public HEAD. A deterministic-build follow-up is being prepared because fresh-clone reconstruction exposed a timestamp-only generated-artifact drift.
 
 ## Candidate inventory
 
