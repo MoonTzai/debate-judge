@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>辩论裁判报告 · [辩题]</title>
+<style>/* R6a-3 完整CSS */</style></head>
+<body>
+<div class="theme-bar"><button id="themeBtn" onclick="toggleTheme()">深色模式</button></div>
+<!-- API配置面板（折叠式·注入固定模板） -->
+<div class="api-config-wrap">
+  <div class="api-config-header" onclick="toggleApiConfig()">
+    <span>⚙️ API 配置 <span class="badge">共用</span></span>
+    <span id="api-config-arrow">▶</span>
+  </div>
+  <div class="api-config-body" id="api-config-body">
+    <div class="row"><label>API URL</label><input id="cfg-api-url" type="text" placeholder="https://api.deepseek.com/v1/chat/completions"></div>
+    <div class="row"><label>模型名称</label><input id="cfg-model" type="text" placeholder="deepseek-v4-pro"></div>
+    <div class="row"><label>API Key</label><input id="cfg-api-key" type="password" placeholder="sk-..."></div>
+    <div class="key-hint">💡 API Key 仅保存在本地浏览器，不会上传到任何服务器。</div>
+    <div class="actions">
+      <button class="primary" onclick="saveApiConfig()">💾 保存配置</button>
+      <button onclick="clearApiConfig()">🗑️ 清除</button>
+      <button onclick="testApiConnection()">🔗 测试连接</button>
+      <span class="status" id="api-status">就绪</span>
+    </div>
+  </div>
+</div>
+<div class="container">
+  <!-- 页头（260805：辩题/场次由 render-report 从 S1 DATA 与 transition-final 首段填充） -->
+  <div class="sk" style="text-align:center">
+    <h1 style="font-size:1.6em;margin:0 0 8px 0">辩论裁判报告</h1>
+    <p style="font-size:1.1em;color:var(--gray);margin:4px 0">【辩题】</p>
+    <p style="font-size:0.9em;color:var(--dim);margin:4px 0">【场次】</p>
+  </div>
+  <!-- 目录 -->
+  <nav class="toc">
+  <a href="#c1">C1胜负判决</a> ·
+  <a href="#c2">C2主线类型</a> ·
+  <a href="#c3">C3主线全景图</a> ·
+  <a href="#c4">C4视角识别</a> ·
+  <a href="#c5">C5论证展开</a> ·
+  <a href="#c6">C6关键交锋</a> ·
+  <a href="#c7">C7结构性交锋</a> ·
+  <a href="#c8">C8修辞动力</a> ·
+  <a href="#c9">C9三维六向度</a> ·
+  <a href="#c10">C10发展空间</a> ·
+  <a href="#c11">C11选手表现</a> ·
+  <a href="#c12">C12总体评价</a>
+  </nav>
+  <!-- SVG图表嵌入对应C章节内部（雷达图→C1·柱状图→C5·环形图→C6·SC柱状图→C7） -->
+  <div class="sk sk-g c-module c1" id="c1"><h2 class="st">C1 胜负判决</h2><p class="xp"><!--INSERT_C1_XP--></p><!--INSERT_C1_01_POEM--><!--INSERT_C1_02_REASON--><!--INSERT_C1_CHART_RADAR--><!--INSERT_C1_03_HEXAD--><!--INSERT_C1_04_JUDGMENT--></div>
+  <div class="sk c-module c2" id="c2"><h2 class="st">C2 主线类型</h2><p class="xp"><!--INSERT_C2_XP--></p><!-- R6a预建: 类型徽章.tg(S11数据驱动) --><!--INSERT_C2_01_PHASETABLE--><!-- R6a预建: SC追迹面板<details>(仅2b型触发) --><!--INSERT_C2_02_BADGE--><!--INSERT_C2_03_ANALYSIS--><div class="pw"><div class="pz pz-zh"><b style="color:var(--green);font-size:13px">本体论层面</b><!--INSERT_C2_04_ONTOLOGY--></div><div class="pz pz-fh"><b style="color:var(--blue);font-size:13px">认识论层面</b><!--INSERT_C2_05_EPISTEMOLOGY--></div><div class="pz" style="border-left:3px solid #f9a825"><b style="color:var(--gold);font-size:13px">价值论层面</b><!--INSERT_C2_06_AXIOLOGY--></div></div></div>
+  <div class="sk c-module c3" id="c3"><h2 class="st">C3 主线全景图</h2><p class="xp"><!--INSERT_C3_XP--></p><!-- R6a-5生成的C3全景图·Phase面板 + 聚合/碰撞区 --><hr style="border:none;border-top:1px solid var(--border);margin:32px 0 24px 0"><details style="margin:16px 0"><summary style="cursor:pointer;font-weight:bold;font-size:1.05em;color:var(--blue)">评委解读（展开查看）</summary><div style="margin-top:16px"><!--INSERT_C3_PROSE--></div></details></div>
+  <div class="sk c-module c4" id="c4">
+    <h2 class="st">C4 视角识别</h2>
+    <p class="xp"><!--INSERT_C4_XP--></p>
+    <div class="pw">
+      <div class="pz pz-zh"><b style="color:var(--green);font-size:13px;margin-bottom:6px">正方聚焦</b><!--INSERT_C4_01_FOCUS_ZHENG--></div>
+      <div class="pz pz-fh"><b style="color:var(--blue);font-size:13px;margin-bottom:6px">反方聚焦</b><!--INSERT_C4_01_FOCUS_FAN--></div>
+    </div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:32px 0 24px 0">
+    <div data-condition="def=是">
+      <div style="border:2px solid var(--border);border-radius:8px;padding:10px 20px;margin:16px auto 12px auto;background:var(--card);text-align:center;display:table"><p style="font-weight:bold;font-size:1.1em;margin:0;color:var(--text);white-space:nowrap">框架合法性争议审查</p></div>
+      <div style="text-align:center;font-size:1.3em;color:var(--dim);padding:4px 0">↓</div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;background:var(--card)"><p style="font-weight:bold;font-size:1.05em;margin:0 0 4px 0">第零步·约定俗成语义基线</p><p style="color:var(--gray);font-size:0.85em;margin:0 0 6px 0;padding-bottom:6px;border-bottom:1px solid var(--border)">在比较谁的定义更权威之前，先看看一般中文使用者日常怎么理解这个词</p><!--INSERT_C4_B0_SEMANTIC--></div>
+      <div style="text-align:center;font-size:1.3em;color:var(--dim);padding:4px 0">↓</div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;background:var(--card)"><p style="font-weight:bold;font-size:1.05em;margin:0 0 4px 0">第一步·可辩性层面定位</p><p style="color:var(--gray);font-size:0.85em;margin:0 0 6px 0;padding-bottom:6px;border-bottom:1px solid var(--border)">争议在哪里——是定义篡改、范畴错误、还是边界模糊？</p><!--INSERT_C4_B1_LEVEL--></div>
+      <div style="text-align:center;font-size:1.3em;color:var(--dim);padding:4px 0">↓</div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;background:var(--card)"><p style="font-weight:bold;font-size:1.05em;margin:0 0 4px 0">第二步·三道门覆核</p><p style="color:var(--gray);font-size:0.85em;margin:0 0 6px 0;padding-bottom:6px;border-bottom:1px solid var(--border)">复用立论阶段的三道门检测</p><!--INSERT_C4_B2_GATES--></div>
+      <div style="text-align:center;font-size:1.3em;color:var(--dim);padding:4px 0">↓</div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;background:var(--card)"><p style="font-weight:bold;font-size:1.05em;margin:0 0 4px 0">第三步·包着打/霸道定义判定</p><p style="color:var(--gray);font-size:0.85em;margin:0 0 6px 0;padding-bottom:6px;border-bottom:1px solid var(--border)">有没有一方突破常识边界、对自己有利、还不给充分理由？</p><!--INSERT_C4_B3_WRAPPING--></div>
+      <div style="border:2px solid var(--gold);border-radius:8px;padding:14px;margin:16px 0;background:var(--card);text-align:center"><p style="font-weight:bold;font-size:1.1em;margin:0 0 6px 0;color:var(--text)">审查结论</p><!--INSERT_C4_B5_CONCLUSION--></div>
+      <!--INSERT_C4_B6_TABLE-->
+    </div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:32px 0 24px 0">
+    <div style="border:2px solid var(--border);border-radius:8px;padding:10px 20px;margin:0 auto 12px auto;background:var(--card);text-align:center;display:table"><p style="font-weight:bold;font-size:1.1em;margin:0;color:var(--text);white-space:nowrap">Toulmin场碰撞分析</p></div>
+    <div style="text-align:center;font-size:1.3em;color:var(--dim);padding:4px 0">↓</div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;background:var(--card)"><p style="font-weight:bold;font-size:1.05em;margin:0 0 4px 0">场A·场内碰撞</p><p style="color:var(--gray);font-size:0.85em;margin:0 0 6px 0;padding-bottom:6px;border-bottom:1px solid var(--border)">双方在同一论证场内的数据/推理/结论直接对撞</p><!--INSERT_C4_C1_FIELD_A--></div>
+    <div style="text-align:center;font-size:1.3em;color:var(--dim);padding:4px 0">↓</div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;background:var(--card)"><p style="font-weight:bold;font-size:1.05em;margin:0 0 4px 0">场B·场选择</p><p style="color:var(--gray);font-size:0.85em;margin:0 0 6px 0;padding-bottom:6px;border-bottom:1px solid var(--border)">双方各自选择的论证场是否相容、相邻还是相斥</p><!--INSERT_C4_C2_FIELD_B--></div>
+    <div style="text-align:center;font-size:1.3em;color:var(--dim);padding:4px 0">↓</div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0;background:var(--card)"><p style="font-weight:bold;font-size:1.05em;margin:0 0 4px 0">场C·元场</p><p style="color:var(--gray);font-size:0.85em;margin:0 0 6px 0;padding-bottom:6px;border-bottom:1px solid var(--border)">双方就"什么样的论证更有效"是否共享同一套元规则</p><!--INSERT_C4_C3_FIELD_C--></div>
+    <div style="border:2px solid var(--gold);border-radius:8px;padding:14px;margin:16px 0;background:var(--card);text-align:center"><p style="font-weight:bold;font-size:1.1em;margin:0 0 6px 0;color:var(--text)">综合诊断</p><!--INSERT_C4_C4_DIAGNOSIS--></div>
+    <!--INSERT_C4_C5_TABLE-->
+  </div>
+  <div class="sk c-module c5" id="c5"><h2 class="st">C5 论证展开</h2><p class="xp"><!--INSERT_C5_XP--></p><!--INSERT_C5_01_COMPARISON--><!--INSERT_C5_CHART_BAR--><!--INSERT_C5_02_COMPLETION--></div>
+  <div class="sk c-module c6" id="c6"><h2 class="st">C6 关键交锋</h2><p class="xp"><!--INSERT_C6_XP--></p><!--INSERT_C6_01_TABLE--><!--INSERT_C6_CHART_DONUT--><!--INSERT_C6_02_SUMMARY--></div>
+  <div class="sk c-module c7" id="c7"><h2 class="st">C7 结构性交锋</h2><p class="xp"><!--INSERT_C7_XP--></p><!--INSERT_C7_01_SC_TABLE--><!--INSERT_C7_02_INSTANCES--><!--INSERT_C7_CHART_SC--><!--O5_SC_PROGRESS--><!--INSERT_C7_03_CHAIN--><!--INSERT_C7_04_SIGNALS--></div>
+  <!-- C8（10 INSERT 交叉排布·图表+解读+散文+总评） -->
+  <div class="sk c-module c8" id="c8"><h2 class="st">C8 修辞动力分析</h2><p class="xp"><!--INSERT_C8_XP--></p><!--INSERT_C8_PROSE_PART1--><div class="chart-grid"><div class="chart-item"><!--INSERT_C8_CHART_1--><div class="chart-guide"><!--INSERT_C8_GUIDE_1--></div></div><div class="chart-divider"></div><div class="chart-item"><!--INSERT_C8_CHART_2--><div class="chart-guide"><!--INSERT_C8_GUIDE_2--></div></div><div class="chart-divider"></div><div class="chart-item"><!--INSERT_C8_CHART_3--><div class="chart-guide"><!--INSERT_C8_GUIDE_3--></div></div></div><!--INSERT_C8_PROSE_PART2--><div class="insight-box"><h4>📊 修辞格局总评</h4><!--INSERT_C8_SUMMARY--></div></div>
+  <!-- C9（三列卡片骨架·内联） -->
+  <div class="sk c-module c9" id="c9"><h2 class="st">C9 辩论的三维度六向度</h2><p class="xp"><!--INSERT_C9_XP--></p><h3 style="font-size:1.05em;margin:16px 0 8px 0">我的裁判倾向</h3><div style="margin:20px 0"><b style="font-size:1.05em">证明轴</b><div class="pw" style="margin:8px 0"><div class="pz pz-zh"><b style="color:var(--green);font-size:13px;margin-bottom:6px">证伪</b><!--INSERT_C9_01_ZHENG_WEI--></div><div style="display:flex;align-items:center;padding:0 10px;font-size:1.5em;color:var(--dim)">↔</div><div class="pz pz-fh"><b style="color:var(--blue);font-size:13px;margin-bottom:6px">证成</b><!--INSERT_C9_02_ZHENG_CHENG--></div></div><!--INSERT_C9_TABLE_ZHENGMING--><!--INSERT_C9_CHART_ZHENGMING--></div><div style="margin:20px 0"><b style="font-size:1.05em">说服轴</b><div class="pw" style="margin:8px 0"><div class="pz pz-zh"><b style="color:var(--green);font-size:13px;margin-bottom:6px">理性</b><!--INSERT_C9_03_LI_XING--></div><div style="display:flex;align-items:center;padding:0 10px;font-size:1.5em;color:var(--dim)">↔</div><div class="pz pz-fh"><b style="color:var(--blue);font-size:13px;margin-bottom:6px">感性</b><!--INSERT_C9_04_GAN_XING--></div></div><!--INSERT_C9_TABLE_SHUOFU--><!--INSERT_C9_CHART_SHUOFU--></div><div style="margin:20px 0"><b style="font-size:1.05em">第三方轴</b><div class="pw" style="margin:8px 0"><div class="pz pz-zh"><b style="color:var(--green);font-size:13px;margin-bottom:6px">场面感</b><!--INSERT_C9_05_CHANG_MIAN--></div><div style="display:flex;align-items:center;padding:0 10px;font-size:1.5em;color:var(--dim)">↔</div><div class="pz pz-fh"><b style="color:var(--blue);font-size:13px;margin-bottom:6px">意义感</b><!--INSERT_C9_06_YI_YI--></div></div><!--INSERT_C9_TABLE_DISAN--><!--INSERT_C9_CHART_DISAN--></div><!--INSERT_C9_09_IDENTITY--><strong>综合倾向</strong>：<!--INSERT_C9_07_ZONG_HE--><div style="margin-top:10px"></div><strong>三维度冲突处理</strong>：<!--INSERT_C9_08_CONFLICT--></div>
+  <!-- C10（单占位符模式） -->
+  <div class="sk c-module c10" id="c10"><h2 class="st">C10 发展空间</h2><p class="xp"><!--INSERT_C10_XP--></p><!--INSERT_C10_PROSE--><!--O4_CONTENT_PROGRESS--><!--INSERT_C10_TABLE--></div>
+  <!-- C11（双列卡片骨架·内联） -->
+  <div class="sk c-module c11" id="c11"><h2 class="st">C11 选手表现</h2><p class="xp"><!--INSERT_C11_XP--></p><h3 style="font-size:1.05em;margin:16px 0 8px 0">正方</h3><!--INSERT_C11_TABLE_ZHENG--><h3 style="font-size:1.05em;margin:16px 0 8px 0">反方</h3><!--INSERT_C11_TABLE_FAN--></div>
+  <!-- C12（金框骨架·8槽拆分） -->
+  <div class="sk c-module c12" id="c12"><h2 class="st">C12 总体评价</h2><p class="xp"><!--INSERT_C12_XP--></p><h3 style="font-size:1.05em;margin:16px 0 8px 0">(1) 水平定位</h3><!--INSERT_C12_01_HORIZON--><h3 style="font-size:1.05em;margin:16px 0 8px 0">(2) 认知贡献</h3><!--INSERT_C12_02_COGNITION--><h3 style="font-size:1.05em;margin:16px 0 8px 0">(3) SC完成度评估</h3><!--INSERT_C12_03_SC_COMPLETE--><h3 style="font-size:1.05em;margin:16px 0 8px 0">(4) 应达 vs 实际</h3><!--INSERT_C12_04_BENCHMARK--><h3 style="font-size:1.05em;margin:16px 0 8px 0">(5) 训练价值</h3><!--INSERT_C12_05_VALUE--><h3 style="font-size:1.05em;margin:16px 0 8px 0">(6) 裁判分歧</h3><!--INSERT_C12_06_DISAGREEMENT--><h3 style="font-size:1.05em;margin:16px 0 8px 0">(7) 心证张力</h3><!--INSERT_C12_07_TENSION--><h3 style="font-size:1.05em;margin:16px 0 8px 0">(8) 体系闭环</h3><!--INSERT_C12_08_CLOSURE--><h3 style="font-size:1.05em;margin:16px 0 8px 0">（9）辩题思路分享</h3><!--INSERT_C11_06_INSIGHT--><div class="pw"><div class="pz pz-zh"><b style="color:var(--green);font-size:13px;margin-bottom:6px">正方思路</b><!--INSERT_C11_04_ZHENG_SI_LU--></div><div class="pz pz-fh"><b style="color:var(--blue);font-size:13px;margin-bottom:6px">反方思路</b><!--INSERT_C11_05_FAN_SI_LU--></div></div><h3 style="font-size:1.05em;margin:16px 0 8px 0">（10）成长建议</h3><!--INSERT_C12_14_GROWTH--><div style="border:2px solid var(--gold);border-radius:12px;padding:16px;margin:16px 0;background:var(--card);text-align:center"><p style="font-weight:bold;font-size:1.1em;color:var(--text)">🏛 最终判决</p><!--INSERT_C12_09_VERDICT--><h3 style="font-size:1.05em;margin:16px 0 8px 0">总评</h3><!--INSERT_C12_10_SUMMARY--><h3 style="font-size:1.05em;margin:16px 0 8px 0">判决理由</h3><!--INSERT_C12_12_REASON--><h3 style="font-size:1.05em;margin:16px 0 8px 0">推理链</h3><!--INSERT_C12_11_CHAIN--></div><details style="margin:16px 0"><summary style="cursor:pointer;font-size:0.95em;color:var(--dim)">📋 数据校验（展开查看）</summary><div style="margin-top:12px"><!--INSERT_C12_13_INTEGRITY--></div></details></div>
+  <!-- 页脚 -->
+</div>
+<script>/* toggleTheme */</script>
+</body></html>

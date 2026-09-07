@@ -1,0 +1,3462 @@
+{
+  "schema": "input-contract",
+  "schema_version": "0.1.0",
+  "note": "双向投影核心字典机器可读版 v1（由 scripts/generate-input-contract.js 自动生成，勿手改）",
+  "data": [
+    {
+      "id": "C7.SC总览.反方.有效微消化",
+      "type": "data",
+      "producer": "R5A",
+      "consumer": [
+        "checkNarrative.L2"
+      ],
+      "required": true,
+      "default": "缺失=BLOCKING",
+      "cross_checks": [
+        "C7 五键自洽→L2"
+      ]
+    },
+    {
+      "id": "C7.SC总览.正方.有效微消化",
+      "type": "data",
+      "producer": "R5A",
+      "consumer": [
+        "checkNarrative.L2"
+      ],
+      "required": true,
+      "default": "缺失=BLOCKING",
+      "cross_checks": [
+        "C7 五键自洽→L2"
+      ]
+    },
+    {
+      "id": "C7.微消化.反方.实例表行数",
+      "type": "data",
+      "producer": "R5A",
+      "consumer": [
+        "checkNarrative.L2"
+      ],
+      "required": true,
+      "default": "缺失=BLOCKING",
+      "cross_checks": [
+        "C7 五键自洽→L2"
+      ]
+    },
+    {
+      "id": "C7.微消化.总有效数",
+      "type": "data",
+      "producer": "R5A",
+      "consumer": [
+        "checkNarrative.L2"
+      ],
+      "required": true,
+      "default": "缺失=BLOCKING",
+      "cross_checks": [
+        "S8 有效数↔C7→L2",
+        "C7 五键自洽→L2"
+      ]
+    },
+    {
+      "id": "C7.微消化.正方.实例表行数",
+      "type": "data",
+      "producer": "R5A",
+      "consumer": [
+        "checkNarrative.L2"
+      ],
+      "required": true,
+      "default": "缺失=BLOCKING",
+      "cross_checks": [
+        "C7 五键自洽→L2"
+      ]
+    },
+    {
+      "id": "C8.人格胜负",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "validateP2_5",
+        "renderC8Persona",
+        "checkS15"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "C8.判准校准.反方.意义感加权",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "C8.判准校准.反方.推导",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "C8.判准校准.正方.意义感加权",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "C8.判准校准.正方.推导",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "C8.反方.对角对子非空数",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "C8.反方.被对方对抗象限数",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "C8.叙事人格.反方",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "validateP2_5",
+        "renderC8Persona"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "C8.叙事人格.正方",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "validateP2_5",
+        "renderC8Persona"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "C8.正方.对角对子非空数",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "C8.正方.被对方对抗象限数",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "R2.5.COMPLETE",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "c8Chart1",
+        "c8Chart2",
+        "c8Chart3",
+        "validateP2_5"
+      ],
+      "required": true,
+      "default": "空缺",
+      "cross_checks": []
+    },
+    {
+      "id": "R2.5.反方.Q1.对方对抗象限",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "c8Chart1",
+        "c8Chart2",
+        "c8Chart3",
+        "validateP2_5"
+      ],
+      "required": true,
+      "default": "空缺",
+      "cross_checks": []
+    },
+    {
+      "id": "R2.5.反方.Q2.对方对抗象限",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "c8Chart1",
+        "c8Chart2",
+        "c8Chart3",
+        "validateP2_5"
+      ],
+      "required": true,
+      "default": "空缺",
+      "cross_checks": []
+    },
+    {
+      "id": "R2.5.反方.Q3.对方对抗象限",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "c8Chart1",
+        "c8Chart2",
+        "c8Chart3",
+        "validateP2_5"
+      ],
+      "required": true,
+      "default": "空缺",
+      "cross_checks": []
+    },
+    {
+      "id": "R2.5.反方.Q4.对方对抗象限",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "c8Chart1",
+        "c8Chart2",
+        "c8Chart3",
+        "validateP2_5"
+      ],
+      "required": true,
+      "default": "空缺",
+      "cross_checks": []
+    },
+    {
+      "id": "R2.5.正方.Q1.对方对抗象限",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "c8Chart1",
+        "c8Chart2",
+        "c8Chart3",
+        "validateP2_5"
+      ],
+      "required": true,
+      "default": "空缺",
+      "cross_checks": []
+    },
+    {
+      "id": "R2.5.正方.Q2.对方对抗象限",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "c8Chart1",
+        "c8Chart2",
+        "c8Chart3",
+        "validateP2_5"
+      ],
+      "required": true,
+      "default": "空缺",
+      "cross_checks": []
+    },
+    {
+      "id": "R2.5.正方.Q3.对方对抗象限",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "c8Chart1",
+        "c8Chart2",
+        "c8Chart3",
+        "validateP2_5"
+      ],
+      "required": true,
+      "default": "空缺",
+      "cross_checks": []
+    },
+    {
+      "id": "R2.5.正方.Q4.对方对抗象限",
+      "type": "data",
+      "producer": "R2.5",
+      "consumer": [
+        "c8Chart1",
+        "c8Chart2",
+        "c8Chart3",
+        "validateP2_5"
+      ],
+      "required": true,
+      "default": "空缺",
+      "cross_checks": []
+    },
+    {
+      "id": "S1.COMPLETE",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S1.反方人数",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "validate.V-S8E-A1"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S1.正方人数",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "validate.V-S8E-A1"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S1.赛制",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S1.辩词完整度",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S1.辩题",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "renderHTML.title"
+      ],
+      "required": true,
+      "default": "（辩题未提供）",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.1.不通过项号",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "validate.V4"
+      ],
+      "required": false,
+      "default": "缺失警告",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.1.总数",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "validate.V4"
+      ],
+      "required": false,
+      "default": "缺失警告",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.1.通过数",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "validate.V4"
+      ],
+      "required": false,
+      "default": "缺失警告",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.1.通過数",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "validate.V4"
+      ],
+      "required": false,
+      "default": "缺失警告",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.2.通过",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S11.压缩度",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "validate.V6"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S11.类型",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "checkEffectiveType",
+        "c2ScPanelHTML",
+        "checkHtml.D5"
+      ],
+      "required": true,
+      "default": "缺失=G0-0 阻断",
+      "cross_checks": [
+        "S11 类型→G0/D5/G0-1",
+        "1d 双完成方→C14/C15/C16/C17"
+      ]
+    },
+    {
+      "id": "S11.闭合",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "validate.C11a"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S14.SC完成方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "o4ContentProgress",
+        "validate.C6"
+      ],
+      "required": false,
+      "default": "缺失警告",
+      "cross_checks": []
+    },
+    {
+      "id": "S14.内容感",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "o4ContentProgress",
+        "validate.C6"
+      ],
+      "required": false,
+      "default": "缺失警告",
+      "cross_checks": []
+    },
+    {
+      "id": "S14.教育洞察.反方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "validate.S14E"
+      ],
+      "required": false,
+      "default": "缺失警告",
+      "cross_checks": []
+    },
+    {
+      "id": "S14.教育洞察.正方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "validate.S14E"
+      ],
+      "required": false,
+      "default": "缺失警告",
+      "cross_checks": []
+    },
+    {
+      "id": "S15.反方得分",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "verdictText",
+        "checkVerdictConsistency",
+        "diffConflicts"
+      ],
+      "required": true,
+      "default": "缺失=S15 阻断",
+      "cross_checks": [
+        "S15 三元组→V2/D1/D2/diffConflicts",
+        "S9 六向度↔S15→diffConflicts/V2"
+      ]
+    },
+    {
+      "id": "S15.正方得分",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "verdictText",
+        "checkVerdictConsistency",
+        "diffConflicts"
+      ],
+      "required": true,
+      "default": "缺失=S15 阻断",
+      "cross_checks": [
+        "S15 三元组→V2/D1/D2/diffConflicts",
+        "S9 六向度↔S15→diffConflicts/V2"
+      ]
+    },
+    {
+      "id": "S15.比分",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "validate.V2"
+      ],
+      "required": false,
+      "default": "legacy 兼容警告",
+      "cross_checks": []
+    },
+    {
+      "id": "S15.获胜方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "verdictText",
+        "checkVerdictConsistency",
+        "diffConflicts"
+      ],
+      "required": true,
+      "default": "缺失=S15 阻断",
+      "cross_checks": [
+        "S15 三元组→V2/D1/D2/diffConflicts"
+      ]
+    },
+    {
+      "id": "S17.COMPLETE",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "validate.S17",
+        "checkStructure.V-B9",
+        "validate.V-S17H"
+      ],
+      "required": false,
+      "default": "缺失警告",
+      "cross_checks": []
+    },
+    {
+      "id": "S2.COMPLETE",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S2.反方.B0",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "c2ScPanelHTML"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S2.反方.SC容量预判",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S2.反方.论证完成度.充分",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": [
+        "S2 矩阵↔DATA→A7"
+      ]
+    },
+    {
+      "id": "S2.反方.论证完成度.初步",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": [
+        "S2 矩阵↔DATA→A7"
+      ]
+    },
+    {
+      "id": "S2.反方.论证完成度.未论证",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": [
+        "S2 矩阵↔DATA→A7"
+      ]
+    },
+    {
+      "id": "S2.反方.论证完成度.被击穿",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": [
+        "S2 矩阵↔DATA→A7"
+      ]
+    },
+    {
+      "id": "S2.正方.B0",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "c2ScPanelHTML"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S2.正方.SC容量预判",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S2.正方.论证完成度.充分",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": [
+        "S2 矩阵↔DATA→A7"
+      ]
+    },
+    {
+      "id": "S2.正方.论证完成度.初步",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": [
+        "S2 矩阵↔DATA→A7"
+      ]
+    },
+    {
+      "id": "S2.正方.论证完成度.未论证",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": [
+        "S2 矩阵↔DATA→A7"
+      ]
+    },
+    {
+      "id": "S2.正方.论证完成度.被击穿",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": [
+        "S2 矩阵↔DATA→A7"
+      ]
+    },
+    {
+      "id": "S2.预判SC方向",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "checkS1_S7"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S3.COMPLETE",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "donutSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S3.交锋点总数",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "donutSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S3.反驳路径①数",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "donutSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S3.反驳路径②数",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "donutSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S3.反驳路径③数",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "donutSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S4.COMPLETE",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S4.包着打.反方",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S4.包着打.正方",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S4.定义争议触发",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "removeDataConditionBlocks",
+        "checkR5Contract",
+        "checkHtml.scaffold"
+      ],
+      "required": true,
+      "default": "≠是→移除条件块",
+      "cross_checks": [
+        "S4 条件→A1/A4/B6/REG-MISS"
+      ]
+    },
+    {
+      "id": "S4.碰撞诊断",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "checkS1_S7"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S5.COMPLETE",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S5.反方.因向果向",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S5.反方.真假价值",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S5.正方.因向果向",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S5.正方.真假价值",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "UNKNOWN"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S7.COMPLETE",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "c7 进度"
+      ],
+      "required": false,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S7.CP入选列表",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "c7 进度"
+      ],
+      "required": false,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S7.SC角色.推进节点数",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "c7 进度"
+      ],
+      "required": false,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S7.关键交锋数",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "c6 表头/进度"
+      ],
+      "required": false,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S7.反方赢.致命",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "c7 进度"
+      ],
+      "required": false,
+      "default": "0",
+      "cross_checks": [
+        "S7 赢家↔SC 完成方→diffConflicts"
+      ]
+    },
+    {
+      "id": "S7.正方赢.致命",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "c7 进度"
+      ],
+      "required": false,
+      "default": "0",
+      "cross_checks": [
+        "S7 赢家↔SC 完成方→diffConflicts"
+      ]
+    },
+    {
+      "id": "S7.逐回合轨迹.CP数",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "c7 进度"
+      ],
+      "required": false,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S8.7.质量诊断触发",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "c7 条件块"
+      ],
+      "required": false,
+      "default": "未触发",
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseI.反方",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8",
+        "o5ScProgress"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseI.正方",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8",
+        "o5ScProgress"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseII.反方.有效数",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "scBarSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": [
+        "S8 有效数↔C7→L2"
+      ]
+    },
+    {
+      "id": "S8.PhaseII.反方.节点列表",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "scBarSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseII.正方.有效数",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "scBarSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": [
+        "S8 有效数↔C7→L2"
+      ]
+    },
+    {
+      "id": "S8.PhaseII.正方.节点列表",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "scBarSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.③显性程度",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.④外延漂移.S4关联",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.④外延漂移.合理性",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.④外延漂移.检查完成",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.④外延漂移信号",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.④容纳自洽",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.④致命交锋复核",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.④致命交锋复核.未覆盖数",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.⑤价值深度",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.⑥双方SC关系",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.压缩度",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.压缩度类型",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.完成方",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": [
+        "S7 赢家↔SC 完成方→diffConflicts",
+        "1d 双完成方→C14/C15/C16/C17"
+      ]
+    },
+    {
+      "id": "S8.PhaseIII.状态",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.PhaseIII.被覆盖完成方",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8",
+        "checkEffectiveType"
+      ],
+      "required": false,
+      "default": "仅 1d 预判（⑥=上位覆盖 且 ⑤=通过）时必出；其余类型禁止",
+      "cross_checks": [
+        "1d 双完成方→C14/C15/C16/C17"
+      ]
+    },
+    {
+      "id": "S8.S11类型方向",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8Coherence"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.SC完成度",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8Coherence"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.SC完成度.判据",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkCompletionConsistency"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.碰撞终判",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "checkS8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.第一层完成",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "validate.S8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S8.第二层完成",
+      "type": "data",
+      "producer": "R2",
+      "consumer": [
+        "validate.S8"
+      ],
+      "required": true,
+      "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S9.场面感.反方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S9.场面感.正方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S9.意义感.反方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S9.意义感.正方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S9.感性.反方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S9.感性.正方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S9.感性.质量降权已执行",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "validate.C11b"
+      ],
+      "required": false,
+      "default": "未触发",
+      "cross_checks": []
+    },
+    {
+      "id": "S9.理性.反方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S9.理性.正方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S9.证伪.反方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": [
+        "S9 六向度↔S15→diffConflicts/V2"
+      ]
+    },
+    {
+      "id": "S9.证伪.正方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": [
+        "S9 六向度↔S15→diffConflicts/V2"
+      ]
+    },
+    {
+      "id": "S9.证成.反方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    },
+    {
+      "id": "S9.证成.正方",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "radarSVG",
+        "c9GaugeSVG"
+      ],
+      "required": true,
+      "default": "0",
+      "cross_checks": []
+    }
+  ],
+  "inserts": [
+    {
+      "id": "C1_01_POEM",
+      "type": "poem",
+      "ch": "C1",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C1_02_REASON",
+      "type": "prose",
+      "ch": "C1",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C1_03_HEXAD",
+      "type": "table",
+      "ch": "C1",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C1_04_JUDGMENT",
+      "type": "table",
+      "ch": "C1",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C1_CHART_RADAR",
+      "type": "chart",
+      "ch": "C1",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C1_XP",
+      "type": "xp",
+      "ch": "C1",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C10_PROSE",
+      "type": "prose",
+      "ch": "C10",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C10_TABLE",
+      "type": "table",
+      "ch": "C10",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C10_XP",
+      "type": "xp",
+      "ch": "C10",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C11_04_ZHENG_SI_LU",
+      "type": "prose",
+      "ch": "C11",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C11_05_FAN_SI_LU",
+      "type": "prose",
+      "ch": "C11",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C11_06_INSIGHT",
+      "type": "prose",
+      "ch": "C11",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C11_TABLE_FAN",
+      "type": "table",
+      "ch": "C11",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C11_TABLE_ZHENG",
+      "type": "table",
+      "ch": "C11",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C11_XP",
+      "type": "xp",
+      "ch": "C11",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C12_01_HORIZON",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_02_COGNITION",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_03_SC_COMPLETE",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_04_BENCHMARK",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_05_VALUE",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_06_DISAGREEMENT",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_07_TENSION",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_08_CLOSURE",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_09_VERDICT",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_10_SUMMARY",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_11_CHAIN",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_12_REASON",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_13_INTEGRITY",
+      "type": "table+prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_14_GROWTH",
+      "type": "prose",
+      "ch": "C12",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C12_XP",
+      "type": "xp",
+      "ch": "C12",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C2_01_PHASETABLE",
+      "type": "table",
+      "ch": "C2",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C2_02_BADGE",
+      "type": "badge",
+      "ch": "C2",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C2_03_ANALYSIS",
+      "type": "prose",
+      "ch": "C2",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C2_04_ONTOLOGY",
+      "type": "prose",
+      "ch": "C2",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C2_05_EPISTEMOLOGY",
+      "type": "prose",
+      "ch": "C2",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C2_06_AXIOLOGY",
+      "type": "prose",
+      "ch": "C2",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C2_XP",
+      "type": "xp",
+      "ch": "C2",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C3_PROSE",
+      "type": "prose",
+      "ch": "C3",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C3_XP",
+      "type": "xp",
+      "ch": "C3",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C4_01_FOCUS_FAN",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_01_FOCUS_ZHENG",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_B0_SEMANTIC",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": "def=是",
+      "required": false,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_B1_LEVEL",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": "def=是",
+      "required": false,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_B2_GATES",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": "def=是",
+      "required": false,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_B3_WRAPPING",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": "def=是",
+      "required": false,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_B5_CONCLUSION",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": "def=是",
+      "required": false,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_B6_TABLE",
+      "type": "table",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": "def=是",
+      "required": false,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_C1_FIELD_A",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_C2_FIELD_B",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_C3_FIELD_C",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_C4_DIAGNOSIS",
+      "type": "prose",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_C5_TABLE",
+      "type": "table",
+      "ch": "C4",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C4_XP",
+      "type": "xp",
+      "ch": "C4",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C5_01_COMPARISON",
+      "type": "table+prose",
+      "ch": "C5",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C5_02_COMPLETION",
+      "type": "table+prose",
+      "ch": "C5",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C5_CHART_BAR",
+      "type": "chart",
+      "ch": "C5",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C5_XP",
+      "type": "xp",
+      "ch": "C5",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C6_01_TABLE",
+      "type": "table",
+      "ch": "C6",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C6_02_SUMMARY",
+      "type": "prose",
+      "ch": "C6",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C6_CHART_DONUT",
+      "type": "chart",
+      "ch": "C6",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C6_XP",
+      "type": "xp",
+      "ch": "C6",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C7_01_SC_TABLE",
+      "type": "table",
+      "ch": "C7",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C7_02_INSTANCES",
+      "type": "table",
+      "ch": "C7",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C7_03_CHAIN",
+      "type": "prose",
+      "ch": "C7",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C7_04_SIGNALS",
+      "type": "prose",
+      "ch": "C7",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C7_CHART_SC",
+      "type": "chart",
+      "ch": "C7",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C7_XP",
+      "type": "xp",
+      "ch": "C7",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C8_CHART_1",
+      "type": "chart",
+      "ch": "C8",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C8_CHART_2",
+      "type": "chart",
+      "ch": "C8",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C8_CHART_3",
+      "type": "chart",
+      "ch": "C8",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C8_GUIDE_1",
+      "type": "plain",
+      "ch": "C8",
+      "producer": "R2.5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C8_GUIDE_2",
+      "type": "plain",
+      "ch": "C8",
+      "producer": "R2.5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C8_GUIDE_3",
+      "type": "plain",
+      "ch": "C8",
+      "producer": "R2.5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C8_PROSE_PART1",
+      "type": "table+prose",
+      "ch": "C8",
+      "producer": "R2.5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C8_PROSE_PART2",
+      "type": "prose",
+      "ch": "C8",
+      "producer": "R2.5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C8_SUMMARY",
+      "type": "plain",
+      "ch": "C8",
+      "producer": "R2.5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C8_XP",
+      "type": "xp",
+      "ch": "C8",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C9_01_ZHENG_WEI",
+      "type": "prose",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_02_ZHENG_CHENG",
+      "type": "prose",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_03_LI_XING",
+      "type": "prose",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_04_GAN_XING",
+      "type": "prose",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_05_CHANG_MIAN",
+      "type": "prose",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_06_YI_YI",
+      "type": "prose",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_07_ZONG_HE",
+      "type": "prose",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_08_CONFLICT",
+      "type": "prose",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_09_IDENTITY",
+      "type": "table",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_CHART_DISAN",
+      "type": "chart",
+      "ch": "C9",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C9_CHART_SHUOFU",
+      "type": "chart",
+      "ch": "C9",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C9_CHART_ZHENGMING",
+      "type": "chart",
+      "ch": "C9",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    },
+    {
+      "id": "C9_TABLE_DISAN",
+      "type": "table",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_TABLE_SHUOFU",
+      "type": "table",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_TABLE_ZHENGMING",
+      "type": "table",
+      "ch": "C9",
+      "producer": "R5",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "narrative"
+    },
+    {
+      "id": "C9_XP",
+      "type": "xp",
+      "ch": "C9",
+      "producer": "R6a",
+      "consumer": "R6b",
+      "condition": null,
+      "required": true,
+      "owner": "skeleton"
+    }
+  ],
+  "round_contracts": [
+    {
+      "round": "R1",
+      "data_keys": [
+        {
+          "id": "S1.COMPLETE",
+          "required": true
+        },
+        {
+          "id": "S1.反方人数",
+          "required": true
+        },
+        {
+          "id": "S1.正方人数",
+          "required": true
+        },
+        {
+          "id": "S1.赛制",
+          "required": true
+        },
+        {
+          "id": "S1.辩词完整度",
+          "required": true
+        },
+        {
+          "id": "S1.辩题",
+          "required": true
+        },
+        {
+          "id": "S2.COMPLETE",
+          "required": true
+        },
+        {
+          "id": "S2.反方.B0",
+          "required": true
+        },
+        {
+          "id": "S2.反方.SC容量预判",
+          "required": true
+        },
+        {
+          "id": "S2.反方.论证完成度.充分",
+          "required": true
+        },
+        {
+          "id": "S2.反方.论证完成度.初步",
+          "required": true
+        },
+        {
+          "id": "S2.反方.论证完成度.未论证",
+          "required": true
+        },
+        {
+          "id": "S2.反方.论证完成度.被击穿",
+          "required": true
+        },
+        {
+          "id": "S2.正方.B0",
+          "required": true
+        },
+        {
+          "id": "S2.正方.SC容量预判",
+          "required": true
+        },
+        {
+          "id": "S2.正方.论证完成度.充分",
+          "required": true
+        },
+        {
+          "id": "S2.正方.论证完成度.初步",
+          "required": true
+        },
+        {
+          "id": "S2.正方.论证完成度.未论证",
+          "required": true
+        },
+        {
+          "id": "S2.正方.论证完成度.被击穿",
+          "required": true
+        },
+        {
+          "id": "S2.预判SC方向",
+          "required": true
+        },
+        {
+          "id": "S3.COMPLETE",
+          "required": true
+        },
+        {
+          "id": "S3.交锋点总数",
+          "required": true
+        },
+        {
+          "id": "S3.反驳路径①数",
+          "required": true
+        },
+        {
+          "id": "S3.反驳路径②数",
+          "required": true
+        },
+        {
+          "id": "S3.反驳路径③数",
+          "required": true
+        },
+        {
+          "id": "S4.COMPLETE",
+          "required": true
+        },
+        {
+          "id": "S4.包着打.反方",
+          "required": true
+        },
+        {
+          "id": "S4.包着打.正方",
+          "required": true
+        },
+        {
+          "id": "S4.定义争议触发",
+          "required": true
+        },
+        {
+          "id": "S4.碰撞诊断",
+          "required": true
+        },
+        {
+          "id": "S5.COMPLETE",
+          "required": true
+        },
+        {
+          "id": "S5.反方.因向果向",
+          "required": true
+        },
+        {
+          "id": "S5.反方.真假价值",
+          "required": true
+        },
+        {
+          "id": "S5.正方.因向果向",
+          "required": true
+        },
+        {
+          "id": "S5.正方.真假价值",
+          "required": true
+        },
+        {
+          "id": "S7.COMPLETE",
+          "required": false
+        },
+        {
+          "id": "S7.CP入选列表",
+          "required": false
+        },
+        {
+          "id": "S7.SC角色.推进节点数",
+          "required": false
+        },
+        {
+          "id": "S7.关键交锋数",
+          "required": false
+        },
+        {
+          "id": "S7.反方赢.致命",
+          "required": false
+        },
+        {
+          "id": "S7.正方赢.致命",
+          "required": false
+        },
+        {
+          "id": "S7.逐回合轨迹.CP数",
+          "required": false
+        }
+      ],
+      "insert_ids": [],
+      "structure_fields": null,
+      "format": "DATA 标记格式：<!--DATA: 键=值 -->；键名与清单逐字一致；S1.辩题=辩题原文"
+    },
+    {
+      "round": "R2",
+      "data_keys": [
+        {
+          "id": "S17.COMPLETE",
+          "required": false
+        },
+        {
+          "id": "S8.7.质量诊断触发",
+          "required": false
+        },
+        {
+          "id": "S8.PhaseI.反方",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseI.正方",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseII.反方.有效数",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseII.反方.节点列表",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseII.正方.有效数",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseII.正方.节点列表",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.③显性程度",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.④外延漂移.S4关联",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.④外延漂移.合理性",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.④外延漂移.检查完成",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.④外延漂移信号",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.④容纳自洽",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.④致命交锋复核",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.④致命交锋复核.未覆盖数",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.⑤价值深度",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.⑥双方SC关系",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.压缩度",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.压缩度类型",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.完成方",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.状态",
+          "required": true
+        },
+        {
+          "id": "S8.PhaseIII.被覆盖完成方",
+          "required": false
+        },
+        {
+          "id": "S8.S11类型方向",
+          "required": true
+        },
+        {
+          "id": "S8.SC完成度",
+          "required": true
+        },
+        {
+          "id": "S8.SC完成度.判据",
+          "required": true
+        },
+        {
+          "id": "S8.碰撞终判",
+          "required": true
+        },
+        {
+          "id": "S8.第一层完成",
+          "required": true
+        },
+        {
+          "id": "S8.第二层完成",
+          "required": true
+        }
+      ],
+      "insert_ids": [],
+      "structure_fields": null,
+      "format": "DATA 标记格式同 R1；S17.1 节点表必须输出（V-B9 交叉校验源）；S8.PhaseII.*.节点列表 M-ID 规范为 M-ZH-n/M-FA-n"
+    },
+    {
+      "round": "R2.5",
+      "data_keys": [
+        {
+          "id": "C8.人格胜负",
+          "required": true
+        },
+        {
+          "id": "C8.判准校准.反方.意义感加权",
+          "required": true
+        },
+        {
+          "id": "C8.判准校准.反方.推导",
+          "required": true
+        },
+        {
+          "id": "C8.判准校准.正方.意义感加权",
+          "required": true
+        },
+        {
+          "id": "C8.判准校准.正方.推导",
+          "required": true
+        },
+        {
+          "id": "C8.反方.对角对子非空数",
+          "required": true
+        },
+        {
+          "id": "C8.反方.被对方对抗象限数",
+          "required": true
+        },
+        {
+          "id": "C8.叙事人格.反方",
+          "required": true
+        },
+        {
+          "id": "C8.叙事人格.正方",
+          "required": true
+        },
+        {
+          "id": "C8.正方.对角对子非空数",
+          "required": true
+        },
+        {
+          "id": "C8.正方.被对方对抗象限数",
+          "required": true
+        },
+        {
+          "id": "R2.5.COMPLETE",
+          "required": true
+        },
+        {
+          "id": "R2.5.反方.Q1.对方对抗象限",
+          "required": true
+        },
+        {
+          "id": "R2.5.反方.Q2.对方对抗象限",
+          "required": true
+        },
+        {
+          "id": "R2.5.反方.Q3.对方对抗象限",
+          "required": true
+        },
+        {
+          "id": "R2.5.反方.Q4.对方对抗象限",
+          "required": true
+        },
+        {
+          "id": "R2.5.正方.Q1.对方对抗象限",
+          "required": true
+        },
+        {
+          "id": "R2.5.正方.Q2.对方对抗象限",
+          "required": true
+        },
+        {
+          "id": "R2.5.正方.Q3.对方对抗象限",
+          "required": true
+        },
+        {
+          "id": "R2.5.正方.Q4.对方对抗象限",
+          "required": true
+        }
+      ],
+      "insert_ids": [],
+      "structure_fields": null,
+      "format": "8 个对方对抗象限 DATA 必出；C8 预制散文用 PROSE:XXX_START/END 包裹；C8.叙事人格/人格胜负（Step 8）必出且回引仅限 M-ZH-n/M-FA-n/CP-n"
+    },
+    {
+      "round": "R3",
+      "data_keys": [
+        {
+          "id": "S10.1.不通过项号",
+          "required": false
+        },
+        {
+          "id": "S10.1.总数",
+          "required": false
+        },
+        {
+          "id": "S10.1.通过数",
+          "required": false
+        },
+        {
+          "id": "S10.1.通過数",
+          "required": false
+        },
+        {
+          "id": "S10.2.通过",
+          "required": true
+        },
+        {
+          "id": "S11.压缩度",
+          "required": true
+        },
+        {
+          "id": "S11.类型",
+          "required": true
+        },
+        {
+          "id": "S11.闭合",
+          "required": true
+        },
+        {
+          "id": "S14.SC完成方",
+          "required": false
+        },
+        {
+          "id": "S14.内容感",
+          "required": false
+        },
+        {
+          "id": "S14.教育洞察.反方",
+          "required": false
+        },
+        {
+          "id": "S14.教育洞察.正方",
+          "required": false
+        },
+        {
+          "id": "S15.反方得分",
+          "required": true
+        },
+        {
+          "id": "S15.正方得分",
+          "required": true
+        },
+        {
+          "id": "S15.比分",
+          "required": false
+        },
+        {
+          "id": "S15.获胜方",
+          "required": true
+        },
+        {
+          "id": "S9.场面感.反方",
+          "required": true
+        },
+        {
+          "id": "S9.场面感.正方",
+          "required": true
+        },
+        {
+          "id": "S9.意义感.反方",
+          "required": true
+        },
+        {
+          "id": "S9.意义感.正方",
+          "required": true
+        },
+        {
+          "id": "S9.感性.反方",
+          "required": true
+        },
+        {
+          "id": "S9.感性.正方",
+          "required": true
+        },
+        {
+          "id": "S9.感性.质量降权已执行",
+          "required": false
+        },
+        {
+          "id": "S9.理性.反方",
+          "required": true
+        },
+        {
+          "id": "S9.理性.正方",
+          "required": true
+        },
+        {
+          "id": "S9.证伪.反方",
+          "required": true
+        },
+        {
+          "id": "S9.证伪.正方",
+          "required": true
+        },
+        {
+          "id": "S9.证成.反方",
+          "required": true
+        },
+        {
+          "id": "S9.证成.正方",
+          "required": true
+        }
+      ],
+      "insert_ids": [],
+      "structure_fields": null,
+      "format": "S15 判决行原料（获胜方/正方得分/反方得分）必出；S14.教育洞察 回引仅限 M-ZH-n/M-FA-n/CP-n，禁止字段名；每条精炼为宜，无硬性字数限制；如含多段以 | 连接（回引必须为末段）"
+    },
+    {
+      "round": "R4",
+      "data_keys": [],
+      "insert_ids": [],
+      "structure_fields": {
+        "top": [
+          "meta",
+          "layers",
+          "cross_reference"
+        ],
+        "meta": [
+          "schema_version",
+          "total_layers",
+          "s11_original_type",
+          "type_override",
+          "override_reason",
+          "dominant_narrative"
+        ],
+        "layer": [
+          "id",
+          "type",
+          "nodes",
+          "opponent_nodes",
+          "citation_basis",
+          "friction_nodes"
+        ],
+        "node": [
+          "id",
+          "side",
+          "label",
+          "event_type",
+          "sc_mark"
+        ]
+      },
+      "format": "structure.json 按 R4 合同输出：顶层/meta/层/节点字段齐全，v2 对象节点"
+    },
+    {
+      "round": "R5A",
+      "data_keys": [
+        {
+          "id": "C7.SC总览.反方.有效微消化",
+          "required": true
+        },
+        {
+          "id": "C7.SC总览.正方.有效微消化",
+          "required": true
+        },
+        {
+          "id": "C7.微消化.反方.实例表行数",
+          "required": true
+        },
+        {
+          "id": "C7.微消化.总有效数",
+          "required": true
+        },
+        {
+          "id": "C7.微消化.正方.实例表行数",
+          "required": true
+        }
+      ],
+      "insert_ids": [
+        "C1_01_POEM",
+        "C1_02_REASON",
+        "C1_03_HEXAD",
+        "C1_04_JUDGMENT",
+        "C2_01_PHASETABLE",
+        "C2_02_BADGE",
+        "C2_03_ANALYSIS",
+        "C2_04_ONTOLOGY",
+        "C2_05_EPISTEMOLOGY",
+        "C2_06_AXIOLOGY",
+        "C3_PROSE",
+        "C4_01_FOCUS_FAN",
+        "C4_01_FOCUS_ZHENG",
+        "C4_C1_FIELD_A",
+        "C4_C2_FIELD_B",
+        "C4_C3_FIELD_C",
+        "C4_C4_DIAGNOSIS",
+        "C4_C5_TABLE",
+        "C5_01_COMPARISON",
+        "C5_02_COMPLETION",
+        "C6_01_TABLE",
+        "C6_02_SUMMARY",
+        "C7_01_SC_TABLE",
+        "C7_02_INSTANCES",
+        "C7_03_CHAIN",
+        "C7_04_SIGNALS"
+      ],
+      "structure_fields": null,
+      "format": "每章 XP 必出；无条件 INSERT 出现且非空；C4 条件项仅 S4=是 时输出；C7 五个 DATA 标记必出"
+    },
+    {
+      "round": "R5B",
+      "data_keys": [],
+      "insert_ids": [
+        "C10_PROSE",
+        "C10_TABLE",
+        "C11_04_ZHENG_SI_LU",
+        "C11_05_FAN_SI_LU",
+        "C11_06_INSIGHT",
+        "C11_TABLE_FAN",
+        "C11_TABLE_ZHENG",
+        "C12_01_HORIZON",
+        "C12_02_COGNITION",
+        "C12_03_SC_COMPLETE",
+        "C12_04_BENCHMARK",
+        "C12_05_VALUE",
+        "C12_06_DISAGREEMENT",
+        "C12_07_TENSION",
+        "C12_08_CLOSURE",
+        "C12_09_VERDICT",
+        "C12_10_SUMMARY",
+        "C12_11_CHAIN",
+        "C12_12_REASON",
+        "C12_13_INTEGRITY",
+        "C12_14_GROWTH",
+        "C8_GUIDE_1",
+        "C8_GUIDE_2",
+        "C8_GUIDE_3",
+        "C8_PROSE_PART1",
+        "C8_PROSE_PART2",
+        "C8_SUMMARY",
+        "C9_01_ZHENG_WEI",
+        "C9_02_ZHENG_CHENG",
+        "C9_03_LI_XING",
+        "C9_04_GAN_XING",
+        "C9_05_CHANG_MIAN",
+        "C9_06_YI_YI",
+        "C9_07_ZONG_HE",
+        "C9_08_CONFLICT",
+        "C9_09_IDENTITY",
+        "C9_TABLE_DISAN",
+        "C9_TABLE_SHUOFU",
+        "C9_TABLE_ZHENGMING"
+      ],
+      "structure_fields": null,
+      "format": "每章 XP 必出；无条件 INSERT 出现且非空（C8 的 6 个 R2.5 槽由本半区拼装）"
+    },
+    {
+      "round": "R6a",
+      "data_keys": [],
+      "insert_ids": [
+        "C1_CHART_RADAR",
+        "C1_XP",
+        "C10_XP",
+        "C11_XP",
+        "C12_XP",
+        "C2_XP",
+        "C3_XP",
+        "C4_XP",
+        "C5_CHART_BAR",
+        "C5_XP",
+        "C6_CHART_DONUT",
+        "C6_XP",
+        "C7_CHART_SC",
+        "C7_XP",
+        "C8_CHART_1",
+        "C8_CHART_2",
+        "C8_CHART_3",
+        "C8_XP",
+        "C9_CHART_DISAN",
+        "C9_CHART_SHUOFU",
+        "C9_CHART_ZHENGMING",
+        "C9_XP"
+      ],
+      "structure_fields": null,
+      "format": "渲染侧预建：XP/图表占位由机械渲染填充，无 LLM"
+    },
+    {
+      "round": "R6b",
+      "data_keys": [],
+      "insert_ids": [],
+      "structure_fields": null,
+      "format": "机械渲染轮：render-report.js 消费全部源信息，无 LLM"
+    }
+  ],
+  "adjudication": {
+    "whitelist": [
+      "C7.SC总览.反方.有效微消化",
+      "C7.SC总览.正方.有效微消化",
+      "C7.微消化.反方.实例表行数",
+      "C7.微消化.总有效数",
+      "C7.微消化.正方.实例表行数",
+      "S11.压缩度",
+      "S11.类型",
+      "S11.闭合",
+      "S15.反方得分",
+      "S15.正方得分",
+      "S15.比分",
+      "S15.获胜方",
+      "S7.COMPLETE",
+      "S7.CP入选列表",
+      "S7.SC角色.推进节点数",
+      "S7.关键交锋数",
+      "S7.反方赢.致命",
+      "S7.正方赢.致命",
+      "S7.逐回合轨迹.CP数",
+      "S8.7.质量诊断触发",
+      "S8.PhaseI.反方",
+      "S8.PhaseI.正方",
+      "S8.PhaseII.反方.有效数",
+      "S8.PhaseII.反方.节点列表",
+      "S8.PhaseII.正方.有效数",
+      "S8.PhaseII.正方.节点列表",
+      "S8.PhaseIII.③显性程度",
+      "S8.PhaseIII.④外延漂移.S4关联",
+      "S8.PhaseIII.④外延漂移.合理性",
+      "S8.PhaseIII.④外延漂移.检查完成",
+      "S8.PhaseIII.④外延漂移信号",
+      "S8.PhaseIII.④容纳自洽",
+      "S8.PhaseIII.④致命交锋复核",
+      "S8.PhaseIII.④致命交锋复核.未覆盖数",
+      "S8.PhaseIII.⑤价值深度",
+      "S8.PhaseIII.⑥双方SC关系",
+      "S8.PhaseIII.压缩度",
+      "S8.PhaseIII.压缩度类型",
+      "S8.PhaseIII.完成方",
+      "S8.PhaseIII.状态",
+      "S8.PhaseIII.被覆盖完成方",
+      "S8.S11类型方向",
+      "S8.SC完成度",
+      "S8.SC完成度.判据",
+      "S8.碰撞终判",
+      "S8.第一层完成",
+      "S8.第二层完成",
+      "S9.场面感.反方",
+      "S9.场面感.正方",
+      "S9.意义感.反方",
+      "S9.意义感.正方",
+      "S9.感性.反方",
+      "S9.感性.正方",
+      "S9.感性.质量降权已执行",
+      "S9.理性.反方",
+      "S9.理性.正方",
+      "S9.证伪.反方",
+      "S9.证伪.正方",
+      "S9.证成.反方",
+      "S9.证成.正方",
+      "S7.赢家"
+    ],
+    "field_paradigms": {
+      "S11.类型": [
+        "semantic_fit",
+        "structural_coherence"
+      ],
+      "S8.PhaseIII.完成方": [
+        "semantic_fit"
+      ],
+      "S8.PhaseIII.被覆盖完成方": [
+        "semantic_fit",
+        "provenance"
+      ],
+      "S9.*": [
+        "explanatory_power",
+        "criteria_derivation"
+      ],
+      "C7.*": [
+        "structural_coherence"
+      ],
+      "S7.*": [
+        "structural_coherence",
+        "provenance"
+      ],
+      "S15.*": [
+        "criteria_derivation",
+        "explanatory_power"
+      ]
+    },
+    "semantics": {
+      "S11.类型": "主线类型：1a=三阶段集中在单次交锋；1b=分布全场渐进；1c=立论预置容纳通道；1d=双SC链·后完成方B''上位覆盖先完成方B'（决胜层在最外层）；2a/2b/2c=双边碰撞无统一结晶（2b 含 B0=B' 容纳）；0=无真正交锋。",
+      "S8.PhaseIII.完成方": "结构性交锋结晶归属方（正方/反方/无）。",
+      "S8.PhaseIII.被覆盖完成方": "1d 中先完成第一层 SC（B'）的一方；后完成方 B'' 上位覆盖该方。仅 S11=1d 时输出；枚举 {正方,反方}，无“无”值。",
+      "S9.*": "六向度各轴双方得分 0-10，判定哪方在该轴更优（数值语义=相对强度，非证据计数）。",
+      "C7.*": "微消化计数：C7 总有效数=S8 PhaseII 正方+反方有效数；实例表行数=SC总览有效微消化。",
+      "S7.*": "关键交锋推进/赢家计数，与 S8.PhaseIII.完成方 交叉。",
+      "S15.*": "最终比分/胜方：由判准链（S7 权重 × S9 倾向）推导；固定 正方:反方 顺序。"
+    }
+  },
+  "non_registry_inputs": [
+    {
+      "id": "NR-1",
+      "name": "transition-final.md",
+      "itemCount": 71,
+      "detail": "DATA 键 69（67 语义 + 2 别名）+ S2 矩阵表 2",
+      "producer": "R1-R3/R2.5 合并",
+      "consumer": [
+        "normalizePhase1",
+        "A7",
+        "D5"
+      ],
+      "required": true
+    },
+    {
+      "id": "NR-2",
+      "name": "叙事.md",
+      "itemCount": 106,
+      "detail": "XP 12 + INSERT 槽 70（64 无条件 = 58 R5 + 6 C8/R2.5；6 条件）+ raw 12 + pre 12",
+      "producer": "R5-A/R5-B",
+      "consumer": [
+        "extractModules",
+        "checkNarrative"
+      ],
+      "required": true
+    },
+    {
+      "id": "NR-3",
+      "name": "structure.json",
+      "itemCount": 88,
+      "detail": "实场示例：顶层 4 + meta 6 + 层字段 40（3 层·29 种）+ 节点字段 30（6 节点·5 种）+ mechanisms 4 + cross_reference 4；字段类型固定 52 种",
+      "producer": "R4",
+      "consumer": [
+        "renderC3Panel",
+        "checkEffectiveType",
+        "checkStructure",
+        "diffConflicts"
+      ],
+      "required": true
+    },
+    {
+      "id": "NR-4",
+      "name": "S1.辩题→title",
+      "itemCount": 1,
+      "detail": "已含于 NR-1 的 69 键",
+      "producer": "R1",
+      "consumer": [
+        "renderHTML.title"
+      ],
+      "required": true
+    },
+    {
+      "id": "NR-5",
+      "name": "S4.定义争议触发→条件块",
+      "itemCount": 1,
+      "detail": "已含于 NR-1 的 69 键",
+      "producer": "R1",
+      "consumer": [
+        "removeDataConditionBlocks",
+        "A1",
+        "A4"
+      ],
+      "required": true
+    },
+    {
+      "id": "NR-6",
+      "name": "depth 参数",
+      "itemCount": 3,
+      "detail": "参数 3 个（verdict/mainline/clash），取值 9 个",
+      "producer": "用户/CLI",
+      "consumer": [
+        "renderHTML",
+        "checkHtml.D3"
+      ],
+      "required": false
+    },
+    {
+      "id": "NR-7",
+      "name": "资产",
+      "itemCount": 4,
+      "detail": "skeleton.html / report.css / charts-constants.js / frontendJs",
+      "producer": "仓库",
+      "consumer": [
+        "renderHTML"
+      ],
+      "required": true
+    },
+    {
+      "id": "NR-8",
+      "name": "落盘文件",
+      "itemCount": 2,
+      "detail": ".tmp-validate-warnings.json / .tmp-conflicts.json",
+      "producer": "validate-final/executor",
+      "consumer": [
+        "R5 参考",
+        "R4.5 统筹轮"
+      ],
+      "required": false
+    },
+    {
+      "id": "NR-9",
+      "name": "source-anchor.json",
+      "itemCount": 9,
+      "detail": "名册锚（源锚层 v1）：roster/bench/candidates/other_speakers/integrity/typeA/typeB/disclaimer/rosterHash",
+      "producer": "抽取器（机械，无模型参与）",
+      "consumer": [
+        "validate.V-S8E-A1",
+        "validate.V-S8E-A2/A3",
+        "renderHTML.disclaimer",
+        "checkHtml.H2"
+      ],
+      "required": false
+    }
+  ],
+  "cross_check_rules": [
+    {
+      "id": "S15 三元组",
+      "keys": [
+        "S15.正方得分",
+        "S15.反方得分",
+        "S15.获胜方"
+      ],
+      "impl": [
+        "V2",
+        "D1",
+        "D2",
+        "diffConflicts"
+      ],
+      "executed_at": "R3"
+    },
+    {
+      "id": "S4 条件",
+      "keys": [
+        "S4.定义争议触发"
+      ],
+      "impl": [
+        "A1",
+        "A4",
+        "B6",
+        "REG-MISS"
+      ],
+      "executed_at": "R5A"
+    },
+    {
+      "id": "S11 类型",
+      "keys": [
+        "S11.类型"
+      ],
+      "impl": [
+        "G0",
+        "D5",
+        "G0-1"
+      ],
+      "executed_at": "R6a"
+    },
+    {
+      "id": "S8 有效数↔C7",
+      "keys": [
+        "S8.PhaseII.正方.有效数",
+        "S8.PhaseII.反方.有效数",
+        "C7.微消化.总有效数"
+      ],
+      "impl": [
+        "L2"
+      ],
+      "executed_at": "R5A"
+    },
+    {
+      "id": "S7 赢家↔SC 完成方",
+      "keys": [
+        "S7.正方赢.致命",
+        "S7.反方赢.致命",
+        "S8.PhaseIII.完成方"
+      ],
+      "impl": [
+        "diffConflicts"
+      ],
+      "executed_at": "R3"
+    },
+    {
+      "id": "S9 六向度↔S15",
+      "keys": [
+        "S9.证伪.正方",
+        "S9.证伪.反方",
+        "S15.正方得分",
+        "S15.反方得分"
+      ],
+      "impl": [
+        "diffConflicts",
+        "V2"
+      ],
+      "executed_at": "R3"
+    },
+    {
+      "id": "1d 双完成方",
+      "keys": [
+        "S11.类型",
+        "S8.PhaseIII.完成方",
+        "S8.PhaseIII.被覆盖完成方"
+      ],
+      "impl": [
+        "C14",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "executed_at": "R3"
+    },
+    {
+      "id": "S2 矩阵↔DATA",
+      "keys": [
+        "S2.正方.论证完成度.充分",
+        "S2.正方.论证完成度.初步",
+        "S2.正方.论证完成度.未论证",
+        "S2.正方.论证完成度.被击穿",
+        "S2.反方.论证完成度.充分",
+        "S2.反方.论证完成度.初步",
+        "S2.反方.论证完成度.未论证",
+        "S2.反方.论证完成度.被击穿"
+      ],
+      "impl": [
+        "A7"
+      ],
+      "executed_at": "R1"
+    },
+    {
+      "id": "C7 五键自洽",
+      "keys": [
+        "C7.微消化.正方.实例表行数",
+        "C7.微消化.反方.实例表行数",
+        "C7.微消化.总有效数",
+        "C7.SC总览.正方.有效微消化",
+        "C7.SC总览.反方.有效微消化"
+      ],
+      "impl": [
+        "L2"
+      ],
+      "executed_at": "R5A"
+    }
+  ]
+}

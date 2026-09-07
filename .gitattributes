@@ -1,0 +1,10 @@
+.gitattributes text eol=lf
+.gitignore text eol=lf
+LICENSE text eol=lf
+MANIFEST.sha256 text eol=lf
+*.md text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.txt text eol=lf

@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "presentation.schema.json",
+  "title": "呈现决策（PRES 轮）",
+  "type": "object",
+  "required": ["模板族", "图表清单", "C3节点命名", "条件面板"],
+  "properties": {
+    "模板族": {"enum": ["0", "1a", "1b", "1c", "1d", "2a", "2b", "2c"]},
+    "图表清单": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["图表ID", "数据源"],
+        "properties": {
+          "图表ID": {"enum": ["RADAR", "BAR", "DONUT", "SC", "C8_1", "C8_2", "C8_3", "C9_ZHENGMING", "C9_SHUOFU", "C9_DISAN"]},
+          "数据源": {"type": "string"},
+          "条件": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "C3节点命名": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["N", "名称"],
+        "properties": {
+          "N": {"type": "string", "pattern": "^N\\d+$"},
+          "名称": {"type": "string"}
+        }
+      }
+    },
+    "条件面板": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["面板ID", "触发"],
+        "properties": {
+          "面板ID": {"type": "string"},
+          "触发": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

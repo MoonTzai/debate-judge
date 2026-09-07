@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "tendency.schema.json",
+  "title": "前端倾向配置（AI裁判所直出）",
+  "type": "object",
+  "required": ["api", "倾向"],
+  "properties": {
+    "api": {
+      "type": "object",
+      "required": ["provider", "model"],
+      "properties": {
+        "provider": {"enum": ["deepseek", "openai", "custom"]},
+        "base_url": {"type": "string"},
+        "model": {"type": "string"},
+        "api_key": {"type": "string"},
+        "max_tokens": {"type": ["string", "integer"]}
+      }
+    },
+    "调度": {
+      "type": "object",
+      "properties": {
+        "模式": {"enum": ["完整报告", "自定义深度"]},
+        "质量档": {"enum": ["标准", "严格", "极致"]},
+        "验证级别": {"enum": ["机械门禁", "+窄检查器", "+修复环"]},
+        "预算上限": {"type": "string"},
+        "深度": {
+          "type": "object",
+          "properties": {
+            "verdict": {"enum": ["简明", "标准", "详细"]},
+            "mainline": {"enum": ["简述类型", "标准全景图", "逐环节追踪"]},
+            "clash": {"enum": ["仅关键2-3个", "标准5-8个", "逐回合全部"]}
+          }
+        }
+      }
+    },
+    "倾向": {
+      "type": "object",
+      "required": ["模式", "权重"],
+      "properties": {
+        "模式": {"enum": ["auto", "manual"]},
+        "权重": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": -10, "maximum": 10},
+          "minProperties": 0
+        },
+        "人格预设": {
+          "type": "object",
+          "properties": {
+            "证明轴": {"enum": ["中立", "批判者", "审判者"]},
+            "说服轴": {"enum": ["中立", "卫道者", "问道者"]},
+            "第三方轴": {"enum": ["中立", "技术者", "艺术者"]}
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "criteria.schema.json",
+  "title": "判准输出（CRIT 轮）",
+  "type": "object",
+  "required": ["mode", "declaration"],
+  "properties": {
+    "mode": {"enum": ["auto", "manual"]},
+    "weights": {
+      "type": ["object", "null"],
+      "properties": {
+        "证伪": {"type": "integer", "minimum": -10, "maximum": 10},
+        "证成": {"type": "integer", "minimum": -10, "maximum": 10},
+        "理性": {"type": "integer", "minimum": -10, "maximum": 10},
+        "感性": {"type": "integer", "minimum": -10, "maximum": 10},
+        "场面感": {"type": "integer", "minimum": -10, "maximum": 10},
+        "意义感": {"type": "integer", "minimum": -10, "maximum": 10}
+      }
+    },
+    "persona": {
+      "type": "object",
+      "properties": {
+        "证明轴": {"enum": ["中立", "批判者", "审判者"]},
+        "说服轴": {"enum": ["中立", "卫道者", "问道者"]},
+        "第三方轴": {"enum": ["中立", "技术者", "艺术者"]}
+      }
+    },
+    "declaration": {
+      "type": "object",
+      "required": ["a", "b", "c", "d"],
+      "properties": {
+        "a": {"type": "string"},
+        "b": {"type": "string"},
+        "c": {"type": "string"},
+        "d": {"type": "string"}
+      }
+    },
+    "dual_track": {
+      "type": "object",
+      "properties": {
+        "技术轨": {"type": "string"},
+        "观感轨": {"type": "string"},
+        "采纳规则": {"enum": ["观感优先", "技术优先", "等权"]}
+      }
+    },
+    "derivation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["维度", "依据"],
+        "properties": {
+          "维度": {"enum": ["证伪", "证成", "理性", "感性", "场面感", "意义感"]},
+          "依据": {"type": "string"},
+          "span": {"type": "string", "pattern": "^seg\\d+:\\d+-\\d+$"}
+        }
+      }
+    }
+  }
+}

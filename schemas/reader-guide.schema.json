@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "reader-guide.schema.json",
+  "title": "R8 读者导览输入与输出契约",
+  "oneOf": [
+    { "$ref": "#/definitions/guideInput" },
+    { "$ref": "#/definitions/readerGuide" }
+  ],
+  "definitions": {
+    "source": {
+      "type": "object",
+      "required": ["id", "text"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "anchor": {
+          "type": "object",
+          "required": ["speaker", "stage", "quote", "sectionId"],
+          "properties": {
+            "speaker": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "stage": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "quote": { "type": "string", "minLength": 1, "maxLength": 240 },
+            "sectionId": { "type": "string", "pattern": "^C(?:[1-9]|1[0-2])$" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "guideInput": {
+      "type": "object",
+      "required": ["schemaVersion", "sections"],
+      "properties": {
+        "schemaVersion": { "const": "r8-reader-guide-v2" },
+        "sections": {
+          "type": "array", "minItems": 12, "maxItems": 12,
+          "items": { "type": "object", "required": ["sectionId", "sources"], "properties": { "sectionId": { "pattern": "^C(?:[1-9]|1[0-2])$" }, "sources": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/source" } } }, "additionalProperties": false }
+        }
+      },
+      "additionalProperties": false
+    },
+    "readerGuide": {
+      "type": "object",
+      "required": ["schemaVersion", "inputHash", "promptVersion", "modelSnapshot", "cards"],
+      "properties": {
+        "schemaVersion": { "const": "r8-reader-guide-v2" },
+        "inputHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "promptVersion": { "const": "r8-reader-guide-prompt-v2" },
+        "modelSnapshot": { "type": "object" },
+        "cards": {
+          "type": "array", "minItems": 12, "maxItems": 12,
+          "items": {
+            "type": "object",
+            "required": ["sectionId", "what", "why", "conclusion", "evidence", "anchors"],
+            "properties": {
+              "sectionId": { "pattern": "^C(?:[1-9]|1[0-2])$" },
+              "what": { "type": "string", "minLength": 1, "maxLength": 240 },
+              "why": { "type": "string", "minLength": 1, "maxLength": 240 },
+              "conclusion": { "type": "string", "minLength": 1, "maxLength": 240 },
+              "evidence": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+              "anchors": {
+                "type": "array", "minItems": 1, "maxItems": 2,
+                "items": {
+                  "type": "object",
+                  "required": ["sourceId", "speaker", "stage", "quote"],
+                  "properties": {
+                    "sourceId": { "type": "string", "pattern": "^SPEECH:" },
+                    "speaker": { "type": "string", "minLength": 1, "maxLength": 80 },
+                    "stage": { "type": "string", "minLength": 1, "maxLength": 80 },
+                    "quote": { "type": "string", "minLength": 1, "maxLength": 240 }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

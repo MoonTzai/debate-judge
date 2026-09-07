@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "model-snapshot.schema.json",
+  "title": "DATA 机械聚合快照（阶段一单一权威）",
+  "type": "object",
+  "required": ["values", "source_files", "generated_at", "schema_version"],
+  "properties": {
+    "values": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "integer", "number"]
+      }
+    },
+    "source_files": {"type": "array", "items": {"type": "string"}},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "schema_version": {"type": "string"}
+  }
+}

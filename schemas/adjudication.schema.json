@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "R4.5 信息统筹裁决表",
+  "type": "object",
+  "required": ["schema_version", "meta", "conflicts", "authoritative", "structure_meta_override", "audit"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "meta": {
+      "type": "object",
+      "required": ["round", "output_dir", "generated_at", "source_conflicts_file", "source_warnings_file", "tendency"],
+      "properties": {
+        "round": { "const": "R4.5" },
+        "output_dir": { "type": "string" },
+        "generated_at": { "type": "string" },
+        "source_conflicts_file": { "type": "string" },
+        "source_warnings_file": { "type": "string" },
+        "tendency": { "type": "string" }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["conflict_id", "dimension", "pair", "left", "right", "adjudicated", "reason", "confidence", "reviewed_by", "paradigm"],
+        "properties": {
+          "conflict_id": { "type": "string", "pattern": "^CF-[0-9]{3}$" },
+          "dimension": { "type": "string", "minLength": 1 },
+          "pair": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "string" } },
+          "left": { "type": "string" },
+          "right": { "type": "string" },
+          "adjudicated": { "type": "string", "enum": ["left", "right", "reject"] },
+          "reason": { "type": "string", "minLength": 30 },
+          "paradigm": {
+            "type": "string",
+            "enum": ["semantic_fit", "explanatory_power", "structural_coherence", "provenance", "criteria_derivation"]
+          },
+          "confidence": { "type": "string", "enum": ["高", "中", "低"] },
+          "reviewed_by": { "const": "R4.5" }
+        }
+      }
+    },
+    "authoritative": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "structure_meta_override": {
+      "type": ["object", "null"],
+      "properties": {
+        "type_override": { "type": "string", "enum": ["2b", "2c", "0"] },
+        "override_reason": { "type": "string", "minLength": 10 }
+      },
+      "required": ["type_override", "override_reason"]
+    },
+    "audit": {
+      "type": "object",
+      "required": ["merged_validate", "post_diff_conflicts", "structure_check", "recheck_notes"],
+      "properties": {
+        "merged_validate": {
+          "type": "object",
+          "required": ["passed", "blocking"],
+          "properties": { "passed": { "type": "boolean" }, "blocking": { "type": "integer", "minimum": 0 } }
+        },
+        "post_diff_conflicts": { "type": "integer", "minimum": 0 },
+        "structure_check": {
+          "type": "object",
+          "required": ["passed"],
+          "properties": { "passed": { "type": "boolean" } }
+        },
+        "recheck_notes": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "index.schema.json",
+  "title": "P0 机械索引输出",
+  "type": "object",
+  "required": ["segments", "clusters", "cross_phase_clusters"],
+  "properties": {
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "phase", "speaker", "char_span", "headline"],
+        "properties": {
+          "id": {"type": "integer"},
+          "phase": {"type": "string"},
+          "speaker": {"type": "string"},
+          "char_span": {
+            "type": "object",
+            "required": ["start", "end"],
+            "properties": {
+              "start": {"type": "integer", "minimum": 0},
+              "end": {"type": "integer", "minimum": 1}
+            }
+          },
+          "headline": {"type": "string"}
+        }
+      }
+    },
+    "clusters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "segments", "phases_span", "keywords"],
+        "properties": {
+          "id": {"type": "integer"},
+          "segments": {"type": "array", "items": {"type": "integer"}},
+          "phases_span": {
+            "type": "object",
+            "required": ["start", "end"],
+            "properties": {
+              "start": {"type": "integer"},
+              "end": {"type": "integer"}
+            }
+          },
+          "keywords": {"type": "array", "items": {"type": "string"}, "maxItems": 5}
+        }
+      }
+    },
+    "cross_phase_clusters": {"type": "array", "items": {"type": "integer"}}
+  }
+}
