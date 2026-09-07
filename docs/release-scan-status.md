@@ -13,7 +13,7 @@ The currently authenticated GitHub identity was fresh-read from an existing Git 
 - public URL: `https://github.com/MoonTzai/debate-judge`
 - initial public HEAD: `07b3bcbee011af69bec965e9f5f6ce2b1ff67e95`
 
-The repository was created and first pushed on 7 September 2026. Git Publisher subsequently verified `main` was up to date at the initial public HEAD. A deterministic-build follow-up is being prepared because fresh-clone reconstruction exposed a timestamp-only generated-artifact drift.
+The repository was created and first pushed on 7 September 2026. Initial public HEAD was `07b3bcbee011af69bec965e9f5f6ce2b1ff67e95`; deterministic-build fix `be93dde964f6a236102cb73003e8799fa8ab9181` is also public. Git Publisher verified `main` is synchronized, and a fresh clone of the fix commit passed rebuild/test/scan with byte-identical publishable manifest.
 
 ## Candidate inventory
 

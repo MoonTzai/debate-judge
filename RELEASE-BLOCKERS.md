@@ -30,13 +30,13 @@ The two Sanctum WebP derivatives were moved out of the public candidate into pri
 
 ## B7 — Local clean build/reproduction — RESOLVED AFTER RIGHTS HARDENING
 
-The current nested candidate completed source synchronization, reproducible browser rebuild, public tests, executable secret scan, path/privacy postconditions, and manifest regeneration under Node v24.16.0 / Windows x64. The first public push exposed a non-semantic build timestamp that changed the generated HTML hash in a fresh clone; that timestamp injection is now removed locally. Fresh-clone equality must be rerun after the follow-up fix is pushed.
+The current candidate completed source synchronization, reproducible browser rebuild, public tests, executable secret scan, path/privacy postconditions, and manifest regeneration under Node v24.16.0 / Windows x64. The first public push exposed a non-semantic build timestamp; commit `be93dde964f6a236102cb73003e8799fa8ab9181` removed it. A fresh clone of that public commit then reproduced the same HTML SHA `326d9156d61b071a66b4d9d4a323e72a99078fee04e778f4b38edc46612234dd` and the same manifest SHA `cb678f81fff7f083eaa46c5fe08628061482048df91dd4da9f68a544f3ba2ab3` while all public tests/scans passed.
 
 ## B8 — Git/publication bootstrap — RESOLVED
 
 FolderBridge 0.8.27 / Git Publisher 1.5.0 now supports a workspace-relative nested `repo_path`, so `Debate-Judge-Public/` can be a dedicated Git repository while remaining inside the single `Debate-Judge` FolderBridge workspace. The private parent root is not a Git repository and has not been initialized.
 
-`Debate-Judge-Public/` is now an independent `main` repository and `MoonTzai/debate-judge` is public. Initial public HEAD was `07b3bcbee011af69bec965e9f5f6ce2b1ff67e95`; Git Publisher verified the remote branch was up to date. The remaining publication-quality gate is fresh-clone equality after the deterministic-builder follow-up commit.
+`Debate-Judge-Public/` is an independent `main` repository and `MoonTzai/debate-judge` is public. Initial public HEAD was `07b3bcbee011af69bec965e9f5f6ce2b1ff67e95`; deterministic-builder follow-up `be93dde964f6a236102cb73003e8799fa8ab9181` is pushed, and Git Publisher/fresh-clone acceptance verified the public branch and reproducible tree. No Git/publication blocker remains for the current research-preview source.
 
 ## B9 — JOSS temporal/impact requirements not yet mature
 

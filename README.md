@@ -4,7 +4,7 @@
 
 [中文](README.zh-CN.md)
 
-> Local public-candidate snapshot, 7 September 2026. Project-owned code, rule text, documentation, tests, and generated artifacts are prepared under the repository MIT License. A targeted rights scan found no bundled long-form third-party publication/handbook/course excerpt; the two previously uncertain Sanctum background images were removed from the public closure. The post-hardening source has now completed a fresh rebuild, public test suite, executable secret scan, path/privacy postconditions, and manifest regeneration. Git/publication and JOSS public-history/impact requirements remain next. No benchmark superiority or independent scientific replication is claimed.
+> Local public-candidate snapshot, 7 September 2026. Project-owned code, rule text, documentation, tests, and generated artifacts are prepared under the repository MIT License. A targeted rights scan found no bundled long-form third-party publication/handbook/course excerpt; the two previously uncertain Sanctum background images were removed from the public closure. The post-hardening source has now completed a fresh rebuild, public test suite, executable secret scan, path/privacy postconditions, and manifest regeneration. Git/publication and fresh-clone reproduction are now complete; JOSS public-history/impact requirements remain time- and evidence-dependent. No benchmark superiority or independent scientific replication is claimed.
 
 Debate-Judge investigates how an LLM-based adjudicator can connect a team's case, the development of clashes across speeches, and a context-sensitive final judgment. It combines explicit domain representations and staged LLM analysis with machine-readable intermediate artifacts, contract checks, and a browser report.
 
@@ -52,11 +52,11 @@ The inspected materials establish a substantial research prototype with explicit
 
 Important limitations include model dependence, interpretation errors, uncalibrated domain heuristics, transcript-only evidence, and possible disagreement among qualified human judges. Structural validity, institutional match outcome, audience persuasion, and educational usefulness are different evaluation targets. Model self-review and passing software checks cannot substitute for independent human assessment.
 
-As of the post-hardening acceptance on 7 September 2026, the three public-candidate Markdown distribution mirrors (`Skill-Judge.md`, `Debate-Judge.md`, and `.claude/skills/debate-judge/SKILL.md`) are byte-identical at SHA-256 `81863147ed0a9833e1380e92e631022b5b5c63157822c874f981c5d30413ba09`, with MIT frontmatter. The reproducible `web/judge.html` is SHA-256 `326d9156d61b071a66b4d9d4a323e72a99078fee04e778f4b38edc46612234dd`; two consecutive local rebuilds produced the same hash. `tests/run-public.js` ended with `PUBLIC TEST SUITE PASS`; the executable secret scan passed across 84 scanned files; and all release postconditions (mirror equality, MIT propagation, artwork exclusion, private-path exclusion, no API-config instance) passed. The public GitHub repository was established on 7 September 2026; a follow-up fresh-clone equality check is the remaining publication acceptance gate for this deterministic-build fix.
+As of the post-hardening acceptance on 7 September 2026, the three public-candidate Markdown distribution mirrors (`Skill-Judge.md`, `Debate-Judge.md`, and `.claude/skills/debate-judge/SKILL.md`) are byte-identical at SHA-256 `81863147ed0a9833e1380e92e631022b5b5c63157822c874f981c5d30413ba09`, with MIT frontmatter. The reproducible `web/judge.html` is SHA-256 `326d9156d61b071a66b4d9d4a323e72a99078fee04e778f4b38edc46612234dd`; two consecutive local rebuilds produced the same hash. `tests/run-public.js` ended with `PUBLIC TEST SUITE PASS`; the executable secret scan passed across 84 scanned files; and all release postconditions (mirror equality, MIT propagation, artwork exclusion, private-path exclusion, no API-config instance) passed. The public GitHub repository was established on 7 September 2026. Deterministic-build commit `be93dde964f6a236102cb73003e8799fa8ab9181` passed a fresh-clone rebuild/test/scan with byte-identical `web/judge.html` and `MANIFEST.sha256` (`cb678f81fff7f083eaa46c5fe08628061482048df91dd4da9f68a544f3ba2ab3`).
 
 ## Using the reviewed local candidate
 
-The current entry points below were executed from the nested local candidate using Node v24.16.0 on Windows x64. Repeat them from a fresh clone before any external release.
+The entry points below were executed locally and again from a fresh clone of the public repository using Node v24.16.0 on Windows x64.
 
 From a reviewed source distribution, inspect the browser entry `web/judge.html`. The existing Node entry points include:
 
@@ -65,7 +65,7 @@ node pipeline-controller.js self-check
 node tests/run-public.js
 ```
 
-These are software checks, not scientific evaluation. `tests/run-public.js` is the public, rights/privacy-cleared subset; it is not the private upstream all-tests runner. Run tests in an isolated copy because they may create temporary or generated files. Current local Node acceptance is v24.16.0 on Windows x64; a fresh-clone/browser acceptance record and exact dependency requirements must accompany the release.
+These are software checks, not scientific evaluation. `tests/run-public.js` is the public, rights/privacy-cleared subset; it is not the private upstream all-tests runner. Run tests in an isolated copy because they may create temporary or generated files. Current local and fresh-clone Node acceptance is v24.16.0 on Windows x64. Future releases should repeat the same acceptance and record any dependency/runtime changes.
 
 For an authorized transcript, after explicitly configuring a supported model provider:
 

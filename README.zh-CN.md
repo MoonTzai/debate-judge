@@ -4,7 +4,7 @@
 
 [English](README.md)
 
-> 2026-09-07 本地 public-candidate 快照。项目有权再许可的代码、规则文本、文档、测试与生成产物已按 MIT 路线收口；定向权利扫描未发现被打包进来的第三方出版物/赛事手册/课程材料长段原文，两张权利尚未单独确认的 Sanctum 背景图也已从 public 闭包移除。当前 MIT/CSS hardening 后的 source 已重新完成 build、public tests、可执行密钥扫描、路径/隐私 postcondition 与 manifest 生成；下一门已切换为 Git/publication 与 JOSS 公开历史/影响积累。
+> 2026-09-07 本地 public-candidate 快照。项目有权再许可的代码、规则文本、文档、测试与生成产物已按 MIT 路线收口；定向权利扫描未发现被打包进来的第三方出版物/赛事手册/课程材料长段原文，两张权利尚未单独确认的 Sanctum 背景图也已从 public 闭包移除。当前 MIT/CSS hardening 后的 source 已完成 build、public tests、可执行密钥扫描、路径/隐私 postcondition、Git/publication 与 fresh-clone byte-equality 验收；后续主要是 JOSS 公开历史与研究影响的真实积累。
 
 Judge 研究如何将一方的持方架构、跨发言展开的交锋过程和有语境的裁决连接起来。系统结合领域表示、分阶段 LLM 分析、机器可读中间产物和契约检查，输出可回查的裁判报告。学术重点是**论证结构—交锋过程—裁决之间的连接**，不是调用次数或报告美观程度。
 
@@ -36,16 +36,16 @@ DUG 在研理论版本与 Wayfinder 设计方案有独立状态，不能直接�
 
 当前有较完整的工程原型、提示词与产物契约，但本次准备没有产生裁判准确率、专家一致性、跨赛制泛化或教育效果结果。模型解释错误、领域启发式未校准、逐字稿丢失现场信息、评委合理分歧均需单独讨论。软件门禁通过不等于裁判判断正确。
 
-截至 2026-09-07 post-hardening 验收，三份 public-candidate Markdown 分发镜像 `Skill-Judge.md`、`Debate-Judge.md` 与 `.claude/skills/debate-judge/SKILL.md` 逐字节一致，SHA-256 均为 `81863147ed0a9833e1380e92e631022b5b5c63157822c874f981c5d30413ba09`，frontmatter 为 MIT；当前可复现 `web/judge.html` SHA-256 为 `326d9156d61b071a66b4d9d4a323e72a99078fee04e778f4b38edc46612234dd`，连续两次本地 rebuild 得到完全相同的 hash。`tests/run-public.js` 最终 `PUBLIC TEST SUITE PASS`，可执行密钥扫描对 84 个文件 PASS，三镜像/MIT 传播/图片排除/private path/API config 等 release postcondition 全部通过。public GitHub repository 已于 2026-09-07 建立；当前只剩这次确定性构建修复 push 后的 fresh-clone equality 验收。
+截至 2026-09-07 post-hardening 验收，三份 public-candidate Markdown 分发镜像 `Skill-Judge.md`、`Debate-Judge.md` 与 `.claude/skills/debate-judge/SKILL.md` 逐字节一致，SHA-256 均为 `81863147ed0a9833e1380e92e631022b5b5c63157822c874f981c5d30413ba09`，frontmatter 为 MIT；当前可复现 `web/judge.html` SHA-256 为 `326d9156d61b071a66b4d9d4a323e72a99078fee04e778f4b38edc46612234dd`，连续两次本地 rebuild 得到完全相同的 hash。`tests/run-public.js` 最终 `PUBLIC TEST SUITE PASS`，可执行密钥扫描对 84 个文件 PASS，三镜像/MIT 传播/图片排除/private path/API config 等 release postcondition 全部通过。public GitHub repository 已于 2026-09-07 建立；确定性构建修复 commit `be93dde964f6a236102cb73003e8799fa8ab9181` 已通过 fresh-clone rebuild/test/scan，`web/judge.html` 与 `MANIFEST.sha256` 均逐字节复现一致（manifest SHA-256 `cb678f81fff7f083eaa46c5fe08628061482048df91dd4da9f68a544f3ba2ab3`）。
 
-当前本地候选已使用 Node v24.16.0 / Windows x64 实际执行以下入口；未来公开前须在 fresh clone 再跑一次：
+以下入口已在本地候选和 public repository fresh clone 上使用 Node v24.16.0 / Windows x64 实际执行：
 
 ```sh
 node pipeline-controller.js self-check
 node tests/run-public.js
 ```
 
-以上只用于软件检查；`tests/run-public.js` 是经过公开权利/隐私边界筛选的 public subset，并不等同于私有 upstream 全量测试。当前本地验收已通过；仍应在隔离 fresh clone 再跑，测试可能生成文件。公开发布时还应补 browser smoke 与最终依赖/版本记录。
+以上只用于软件检查；`tests/run-public.js` 是经过公开权利/隐私边界筛选的 public subset，并不等同于私有 upstream 全量测试。当前本地与 fresh-clone 验收均已通过。后续版本仍应在隔离 fresh clone 重跑，测试可能生成文件；新的正式 release 应继续记录 browser smoke 与依赖/版本变化。
 
 真实裁判入口为：
 
