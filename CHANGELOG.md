@@ -4,7 +4,7 @@ All notable public-release changes will be recorded here once the repository is 
 
 ## [Unreleased]
 
-### 2026-09-07 local v0.1.0 research-preview candidate
+### 2026-09-07 v0.1.0 Research Preview
 
 - Regenerated candidate browser artifact from the hardened public source: `web/judge.html` SHA-256 `d4f1931afab72863f791812150f1d852c80fcfaa0bbb929f7a980d78d8d54925`.
 - Current canonical Markdown mirror set: SHA-256 `e814e71073bd097669933a8de3742b05882f5e602f9ee7ab4d210a49dc17fd4b`.

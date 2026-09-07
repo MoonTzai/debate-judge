@@ -1,6 +1,6 @@
-# Release Blockers — local v0.1.0 candidate
+# Release Closure — v0.1.0 Research Preview
 
-Snapshot date: 2026-09-07. These are blockers to a public/OSI release, not a statement that the research prototype is unusable.
+Snapshot date: 2026-09-07. B1-B8 below record the release gates that were closed for the first public research preview. B9 is a later JOSS maturity requirement, not a blocker to using or publishing v0.1.0.
 
 ## B1 — Rights/license closure — RESOLVED FOR CURRENT PUBLIC SOURCE
 

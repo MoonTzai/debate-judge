@@ -1,6 +1,6 @@
 # JOSS Readiness Tracker
 
-Status: local candidate planning record. No JOSS submission, public-repository age, acceptance, DOI, or publication is claimed.
+Status: public-repository JOSS readiness tracker. No JOSS submission, acceptance, archival DOI, or JOSS publication is claimed.
 
 ## Hard prerequisites before submission
 

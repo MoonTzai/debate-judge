@@ -4,7 +4,7 @@
 
 [English](README.md)
 
-> 2026-09-07 本地 public-candidate 快照。项目有权再许可的代码、规则文本、文档、测试与生成产物已按 MIT 路线收口；定向权利扫描未发现被打包进来的第三方出版物/赛事手册/课程材料长段原文，两张权利尚未单独确认的 Sanctum 背景图也已从 public 闭包移除。当前 MIT/CSS hardening 后的 source 已完成 build、public tests、可执行密钥扫描、路径/隐私 postcondition、Git/publication 与 fresh-clone byte-equality 验收；后续主要是 JOSS 公开历史与研究影响的真实积累。
+> 2026-09-07 public v0.1.0 Research Preview 基线。项目有权再许可的代码、规则文本、文档、测试与生成产物已按 MIT 路线收口；定向权利扫描未发现被打包进来的第三方出版物/赛事手册/课程材料长段原文，两张权利尚未单独确认的 Sanctum 背景图也已从 public 闭包移除。当前 MIT/CSS hardening 后的 source 已完成 build、public tests、可执行密钥扫描、路径/隐私 postcondition、Git/publication 与 fresh-clone byte-equality 验收；后续主要是 JOSS 公开历史与研究影响的真实积累。
 
 Judge 研究如何将一方的持方架构、跨发言展开的交锋过程和有语境的裁决连接起来。系统结合领域表示、分阶段 LLM 分析、机器可读中间产物和契约检查，输出可回查的裁判报告。学术重点是**论证结构—交锋过程—裁决之间的连接**，不是调用次数或报告美观程度。
 
