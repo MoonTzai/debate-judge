@@ -1,4 +1,4 @@
-// L5+C10b 单文件交付：将 assets/、schemas/ 与渲染器 JS 内嵌为 Skill-Judge.md 尾部块（幂等），并同步三镜像。
+// L5+C10b 单文件交付：将 assets/、schemas/ 与渲染器 JS 内嵌为 Skill-Judge.md 尾部块（幂等），只更新 canonical Skill。
 // 运行：node scripts/embed-assets.js
 'use strict';
 const fs = require('fs');
@@ -53,8 +53,4 @@ function upsertAssetList(skill) {
 const skillPath = path.join(root, 'Skill-Judge.md');
 const skill = upsertAssetList(embed(fs.readFileSync(skillPath, 'utf-8')));
 fs.writeFileSync(skillPath, skill, 'utf-8');
-for (const m of ['Debate-Judge.md', '.claude/skills/debate-judge/SKILL.md']) {
-  fs.writeFileSync(path.join(root, m), skill, 'utf-8');
-}
-console.log('embedded blocks written:', blocks.map(b => b.name).join(', '));
-console.log('mirrors synced: Debate-Judge.md, .claude/skills/debate-judge/SKILL.md');
+console.log('canonical Skill updated: Skill-Judge.md');

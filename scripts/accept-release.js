@@ -31,16 +31,10 @@ function read(rel) {
 }
 
 function postconditions() {
-  const mirrors = [
-    'Skill-Judge.md',
-    'Debate-Judge.md',
-    '.claude/skills/debate-judge/SKILL.md',
-  ].map(read);
+  const canonicalSkill = read('Skill-Judge.md');
   const html = read('web/judge.html');
   const runtimeFiles = [
     'Skill-Judge.md',
-    'Debate-Judge.md',
-    '.claude/skills/debate-judge/SKILL.md',
     'install-skill.js',
     'pipeline-controller.js',
     'render-report.js',
@@ -57,8 +51,10 @@ function postconditions() {
   }
   const runtimeText = runtimeFiles.map(rel => read(rel)).join('\n');
   const checks = {
-    mirrors_equal: mirrors.every(v => v === mirrors[0]),
-    canonical_mit: mirrors[0].includes('license: MIT') && !mirrors[0].includes('license: CC BY-NC-SA 4.0'),
+    single_canonical_skill:
+      !fs.existsSync(path.join(repo, 'Debate-Judge.md')) &&
+      !fs.existsSync(path.join(repo, '.claude', 'skills', 'debate-judge', 'SKILL.md')),
+    canonical_mit: canonicalSkill.includes('license: MIT') && !canonicalSkill.includes('license: CC BY-NC-SA 4.0'),
     generated_mit: html.includes('license: MIT') && !html.includes('license: CC BY-NC-SA 4.0'),
     license_present: fs.existsSync(path.join(repo, 'LICENSE')),
     notices_present: fs.existsSync(path.join(repo, 'THIRD_PARTY_NOTICES.md')),
@@ -78,7 +74,7 @@ function postconditions() {
 
 if (mode === '--build') {
   run('embed assets', ['scripts/embed-assets.js']);
-  run('sync canonical mirrors', ['pipeline-controller.js', 'sync-embed']);
+  run('sync canonical Skill', ['pipeline-controller.js', 'sync-embed']);
   run('build browser artifact', ['web/build-judge-web.js', '--emit-bundle']);
   postconditions();
   run('generate manifest', ['scripts/generate-manifest.js']);

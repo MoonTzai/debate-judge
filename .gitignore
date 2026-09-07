@@ -4,7 +4,6 @@
 Output/
 archive/
 backup/
-audit-baseline-*
 work-omega1-extracted/
 web/dist/
 node_modules/

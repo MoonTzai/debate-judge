@@ -32,11 +32,6 @@ files.sort((a,b)=>a.localeCompare(b, 'en'));
 const lines = files.map(rel => sha256File(path.join(repo, ...rel.split('/'))) + '  ' + rel);
 fs.writeFileSync(manifestPath, lines.join('\n') + '\n', 'utf8');
 
-const mirrors = [
-  'Skill-Judge.md',
-  'Debate-Judge.md',
-  '.claude/skills/debate-judge/SKILL.md'
-];
 const result = {
   node: process.version,
   platform: process.platform,
@@ -47,7 +42,7 @@ const result = {
   manifest_bytes: fs.statSync(manifestPath).size,
   html_sha256: sha256File(path.join(repo, 'web', 'judge.html')),
   html_bytes: fs.statSync(path.join(repo, 'web', 'judge.html')).size,
-  mirrors: Object.fromEntries(mirrors.map(rel => [rel, sha256File(path.join(repo, ...rel.split('/')))])),
+  canonical_skill_sha256: sha256File(path.join(repo, 'Skill-Judge.md')),
   dist: files.filter(rel => rel.startsWith('web/dist/'))
 };
 console.log(JSON.stringify(result, null, 2));

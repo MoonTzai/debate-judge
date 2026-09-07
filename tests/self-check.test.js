@@ -133,16 +133,11 @@ test('表格配对：栈式校验正反例', () => {
   assert.ok(!validateTablePairing('<!--TABLE:名称=a-->\n行\n<!--TABLE:名称=b-->\n行\n<!--/TABLE-->').passed);
 });
 
-// ---- 同步 ----
-test('同步：三镜像一致 + 内嵌 JS 一致', () => {
-  const md = fs.readFileSync(path.join(root, 'Debate-Judge.md'), 'utf-8');
-  const copy = fs.readFileSync(path.join(root, '.claude/skills/debate-judge/SKILL.md'), 'utf-8');
-  assert.strictEqual(skill.replace(/\r\n/g, '\n'), md.replace(/\r\n/g, '\n'));
-  assert.strictEqual(skill, copy);
+// ---- canonical source synchronization ----
+test('同步：canonical Skill 与内嵌 JS 一致', () => {
   const eb = extractEmbeddedBlock(skill);
   assert.ok(eb.ok, '内嵌 JS 块提取失败');
   assert.strictEqual(eb.code, jsSrc);
-  // A8-P4：块后允许且仅允许 EMBED_ASSET_LIST 区块（构建期硬编码）
   const after = eb.after.trim();
   assert.ok(after === '' || /^<!-- EMBED_ASSET_LIST -->[\s\S]*$/.test(after), '块后存在非 EMBED_ASSET_LIST 残留（同步截断污染）');
 });
@@ -197,15 +192,15 @@ test('L5 内嵌资产块提取：通用提取器', () => {
   assert.ok(r.after.includes('尾文'));
 });
 
-// ---- A8-ERR-1 场次隔离与启动协议规则断言（三镜像 = 权威文件全文；轻量壳由 install-skill 自检） ----
-test('场次隔离：权威三镜像含机械关键词 + 龙猫启动协议', () => {
+// ---- A8-ERR-1 场次隔离与启动协议规则断言（canonical Skill + 安装壳自检） ----
+test('场次隔离：canonical Skill 含机械关键词 + 龙猫启动协议', () => {
   const md = fs.readFileSync(path.join(root, 'Skill-Judge.md'), 'utf-8');
-  const mirror = fs.readFileSync(path.join(root, '.claude/skills/debate-judge/SKILL.md'), 'utf-8');
+  const installer = require('../install-skill.js');
+  const shell = installer.shellTemplate('PROBE', 'PROBE');
   const pc = fs.readFileSync(path.join(root, 'pipeline-controller.js'), 'utf-8');
   assert.ok(md.includes('非法目录格式，请使用时间戳目录'), '权威文件缺“非法目录格式”');
   assert.ok(md.includes('禁止跨场次复用'), '权威文件缺“禁止跨场次复用”');
-  assert.ok(mirror.includes('非法目录格式，请使用时间戳目录') && mirror.includes('禁止跨场次复用'), '三镜像缺场次隔离关键词');
-  assert.ok(mirror.includes('▄▄▄▄▄') && mirror.includes('⚖️ 辩论裁判 V1.0 已就绪'), '三镜像缺龙猫启动协议');
+  assert.ok(shell.includes('▄▄▄▄▄') && shell.includes('⚖️ 辩论裁判 V1.0 已就绪'), '安装壳缺龙猫启动协议');
   assert.ok(pc.includes('VALID_OUTPUT_DIR_RE') && pc.includes('ensureFreshOutputDir'), 'pipeline-controller 缺场次隔离门禁');
 });
 
@@ -223,21 +218,18 @@ test('完整管道唯一制：轻量壳模板禁止单会话直接裁判', () =>
   assert.ok(shellSrc.includes('--provider auto'), '轻量壳模板缺“auto 自适应 provider”');
 });
 
-// ---- 根目录主版本：Skill-Judge.md 为唯一真源，两处加载镜像逐字一致 ----
-test('根主版本：Claude Skill 与 Debate-Judge.md 均逐字镜像 Skill-Judge.md', () => {
-  const main = fs.readFileSync(path.join(root, 'Skill-Judge.md'), 'utf-8');
-  for (const rel of ['.claude/skills/debate-judge/SKILL.md', 'Debate-Judge.md']) {
-    const p = path.join(root, rel);
-    assert.ok(fs.existsSync(p), '根主版本镜像缺失: ' + rel);
-    assert.strictEqual(fs.readFileSync(p, 'utf-8'), main, rel + ' 与 Skill-Judge.md 不一致');
-  }
+// ---- 根目录主版本：Skill-Judge.md 为唯一仓库规则真源 ----
+test('根主版本：仓库不保存重复 Skill 镜像', () => {
+  assert.ok(fs.existsSync(path.join(root, 'Skill-Judge.md')), 'canonical Skill 缺失');
+  assert.ok(!fs.existsSync(path.join(root, 'Debate-Judge.md')), '不应保留 Debate-Judge.md 重复镜像');
+  assert.ok(!fs.existsSync(path.join(root, '.claude/skills/debate-judge/SKILL.md')), '不应保留仓库内 Claude Skill 重复镜像');
 });
-test('根主版本：install-skill syncRootShells 只允许同步当前项目根镜像', () => {
+test('安装器：不再维护仓库内镜像副本', () => {
   const installer = require('../install-skill.js');
   const source = fs.readFileSync(path.join(root, 'install-skill.js'), 'utf-8');
-  assert.ok(typeof installer.syncRootShells === 'function', 'install-skill 应导出 syncRootShells');
-  assert.ok(source.includes('const projectRoot = SCRIPT_DIR;'), 'syncRootShells 必须以当前脚本目录作为项目根');
-  assert.ok(!source.includes("const projectRoot = path.resolve(SCRIPT_DIR, '..')"), '禁止恢复旧 work-omega1 上一级推导');
+  assert.ok(!('syncRootShells' in installer), 'install-skill 不应导出 syncRootShells');
+  assert.ok(!source.includes('Debate-Judge.md'), 'install-skill 不应写 Debate-Judge.md');
+  assert.ok(!source.includes('.claude/skills/debate-judge/SKILL.md'), 'install-skill 不应写仓库内 Claude Skill 镜像');
 });
 test('单文件协议：安装说明由 EMBED_ASSET_LIST 驱动，不硬编码内嵌块数量', () => {
   const main = fs.readFileSync(path.join(root, 'Skill-Judge.md'), 'utf-8');

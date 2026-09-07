@@ -1,28 +1,31 @@
 # Architecture
 
-Status: local public-candidate documentation, 2026-09-07. It describes the inspected implementation; it is not a claim of empirical validity.
+## Source of truth
 
-## Source-of-truth layers
+Debate-Judge uses a single-source layout:
 
-1. `Skill-Judge.md` is the canonical single-file rule/runtime distribution source.
-2. `Debate-Judge.md` and `.claude/skills/debate-judge/SKILL.md` are distribution mirrors and must remain byte-identical to the canonical Skill.
-3. `install-skill.js::BLOCKS` enumerates the extractable Node/runtime closure.
-4. Root execution code, `executor/`, `schemas/`, `assets/`, and selected `scripts/` are the file-level implementation.
-5. `web/src/` plus `web/build-judge-web.js` form the browser source layer.
-6. `web/judge.html` is a generated single-file distributable, not the sole canonical source.
+1. `Skill-Judge.md` is the only canonical rule/runtime Skill source.
+2. `install-skill.js::BLOCKS` declares the extractable self-contained runtime closure embedded in that Skill.
+3. Root execution code, `executor/`, `schemas/`, `assets/`, and selected `scripts/` are the maintainable file-level implementation.
+4. `web/src/` plus `web/build-judge-web.js` are the browser source layer.
+5. `web/judge.html` is a generated distribution artifact.
+
+Repository-local copies of the Skill are intentionally not maintained. Agent-specific install targets are generated when needed.
 
 ## Execution model
 
-The current core declares ten execution units in `executor/core.js::ROUNDS`: R1, R2, R2.5, R3, R4, R4.5, R5A, R5B, R6a, and R6b. R7 plain-language output and R8 reader guide are optional post-processing layers. The source contains compatibility and recovery mechanisms that should not be interpreted as scientific evidence.
+The current core declares ten execution units in `executor/core.js::ROUNDS`: R1, R2, R2.5, R3, R4, R4.5, R5A, R5B, R6a, and R6b. R7 plain-language output and R8 reader guide are optional post-processing layers.
 
-## Web modularity
+## Single-file closure
 
-The browser build derives runtime modules from `install-skill.js::BLOCKS` and adds explicit Web modules from `web/src/`. It embeds the two Markdown seeds and non-JavaScript runtime assets into a virtual file system. This modular source layer is the intended testing and maintenance surface; the generated HTML is a convenience artifact.
+`scripts/embed-assets.js` rebuilds the embedded asset blocks in `Skill-Judge.md` from `install-skill.js::BLOCKS`. `pipeline-controller.js sync-embed` then refreshes the embedded pipeline controller in the same canonical file.
+
+The browser builder uses the same runtime closure and embeds only `Skill-Judge.md` as the rule seed. It does not carry a second Markdown mirror.
 
 ## Private/public boundary
 
-The public source closure must not depend on the private evidence workspace, `Upload/`, `Source/`, real `Output/` records, historical audit packages, credentials, or local absolute paths. Historical comments or provenance references that mention such paths are release-hygiene items and do not authorize copying the referenced private files.
+The public source must not depend on private `Upload/`, real `Output/` records, credentials, local absolute paths, or private audit artifacts. Public tests are intentionally limited to rights/privacy-cleared deterministic checks.
 
 ## Semantic authority
 
-Mechanical validation, schema checks, and runtime gates protect software integrity. They do not override the project's semantic-first adjudication principle or establish that a debate judgment is substantively correct. Scientific validity requires separate empirical evaluation.
+Mechanical validation protects software integrity and artifact contracts. It does not override semantic adjudication or prove substantive correctness. Scientific validity requires separate empirical evaluation.

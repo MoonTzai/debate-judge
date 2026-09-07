@@ -6,7 +6,7 @@ This file records third-party boundaries for the Debate-Judge public distributio
 
 The repository's original code, rule text, schemas, tests, documentation, and generated artifacts are released under the MIT License, subject to the ordinary rule that a project cannot grant rights it does not own.
 
-The current public candidate does **not** vendor a third-party debate corpus, course media, model weights, proprietary SDK, or third-party UI artwork.
+The public repository does **not** vendor a third-party debate corpus, course media, model weights, proprietary SDK, or third-party UI artwork.
 
 ## Scholarly concepts referenced by name
 

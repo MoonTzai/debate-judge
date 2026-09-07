@@ -23,7 +23,7 @@ assert.ok(!protocol.includes('八轮管道') && !protocol.includes('7 个 prompt
 assert.ok(!protocol.includes('Debate-Coach-Backup/SKILL.md'), 'external Coach file must not be runtime dependency');
 
 const shellAt = installer.indexOf('function shellTemplate(');
-const shellEnd = installer.indexOf('// 根目录主版本镜像同步', shellAt);
+const shellEnd = installer.indexOf('function main()', shellAt);
 assert.ok(shellAt >= 0 && shellEnd > shellAt, 'shellTemplate seam missing');
 const shell = installer.slice(shellAt, shellEnd);
 assert.ok(shell.includes('AGENT_RUNTIME_PROTOCOL_START') && shell.includes('Skill-Judge.md'), 'installed shell must point to canonical runtime protocol');

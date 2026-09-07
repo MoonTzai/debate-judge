@@ -45,8 +45,7 @@ const BLOCKS = [
   { name: 'PLAIN_DICT', file: 'assets/plain-dict.json', lang: 'json' },
   { name: 'HTML_CONTRACT', file: 'scripts/html-contract.js', lang: 'javascript' },
   // 卡 5（260815）：键形提取单一引擎（key-checker/gic 双消费）
-  { name: 'KEY_EXTRACT', file: 'scripts/key-extract.js', lang: 'javascript' },
-  { name: 'CREATE_BASELINE', file: 'scripts/create-baseline.js', lang: 'javascript' }
+  { name: 'KEY_EXTRACT', file: 'scripts/key-extract.js', lang: 'javascript' }
 ].concat(
   ['criteria', 'index', 'model-snapshot', 'presentation', 'tendency'].map(s => ({
     name: 'SCHEMA_' + s.toUpperCase().replace(/-/g, '_'),
@@ -77,7 +76,6 @@ function parseArgs(argv) {
   return {
     skill: get('--skill') || path.join(SCRIPT_DIR, 'Skill-Judge.md'),
     work: get('--work') || path.join(SCRIPT_DIR, 'work-omega1-extracted'),
-    workExplicit: argv.includes('--work'),
     codexSkills: get('--codex-skills') || (process.env.CODEX_HOME
       ? path.join(process.env.CODEX_HOME, 'skills')
       : path.join(os.homedir(), '.codex', 'skills')),
@@ -242,7 +240,7 @@ license: MIT
 
 - 本项目根目录下的 render-report.js / pipeline-controller.js / render-tables.js / install-skill.js / Skill-Judge.md（含内嵌块）/ assets / schemas / tests / rules / scripts 等程序文件**默认只读**。
 - **授权只认明确措辞**（批准实施/按方案修改/执行修改）；排查、梳理、方案、推送、审计、彻底解决等措辞不构成授权；禁止以意图推断代替授权。
-- 修改前必须输出拟改文件清单并等待用户批准；未授权修改将用 audit-baseline-*.zip 还原。
+- 修改前必须输出拟改文件清单并等待用户批准；未授权时必须停止写盘。
 - 开发仓库的审批规则只约束项目维护，不是安装后裁判运行依赖；普通裁判运行只读取 canonical Runtime Protocol。
 
 ## 项目维护入口（仅当用户要求查看状态/开发/审计时）
@@ -260,23 +258,6 @@ license: MIT
 
 \`node install-skill.js --skill <新路径>\`；卸载 \`node install-skill.js --uninstall\`。
 `;
-}
-
-// 根目录主版本镜像同步：Skill-Judge.md 是项目主真源；Debate-Judge.md 与 Claude Skill 入口保持逐字一致。
-// install-skill.js 已位于项目根，禁止再向 SCRIPT_DIR 上一级写入任何项目文件。
-// 显式 --work 的交付冒烟仍跳过根镜像同步，避免测试安装改写当前项目入口。
-function syncRootShells(skillPath, _workDir) {
-  const projectRoot = SCRIPT_DIR;
-  const source = fs.readFileSync(path.resolve(skillPath), 'utf-8');
-  const targets = [
-    path.join(projectRoot, '.claude', 'skills', 'debate-judge', 'SKILL.md'),
-    path.join(projectRoot, 'Debate-Judge.md')
-  ];
-  for (const t of targets) {
-    fs.mkdirSync(path.dirname(t), { recursive: true });
-    fs.writeFileSync(t, source, 'utf-8');
-  }
-  console.log('[install-skill] 根主版本镜像已同步: .claude/skills/debate-judge/SKILL.md, Debate-Judge.md');
 }
 
 function main() {
@@ -307,12 +288,10 @@ function main() {
   fs.mkdirSync(shellDir, { recursive: true });
   fs.writeFileSync(path.join(shellDir, 'SKILL.md'), shellTemplate(args.skill, args.work), 'utf-8');
   console.log('已安装轻量壳: ' + path.join(shellDir, 'SKILL.md'));
-  // 默认安装流程同步项目根主版本镜像；显式 --work 的交付冒烟跳过，避免改写当前项目入口。
-  if (!args.workExplicit) syncRootShells(args.skill, args.work);
   console.log('');
   console.log('下一步：打开【新】Codex 会话（技能列表在会话启动时加载），输入「加载辩论裁判技能」或提及 debate-judge 即自动触发。');
   console.log('卸载：node install-skill.js --uninstall');
 }
 
 if (require.main === module) main();
-module.exports = { BLOCKS, syncRootShells, shellTemplate, parseArgs, verify, writeWorkspace };
+module.exports = { BLOCKS, shellTemplate, parseArgs, verify, writeWorkspace };

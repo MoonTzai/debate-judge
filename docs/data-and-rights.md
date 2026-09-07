@@ -1,21 +1,30 @@
-# Data and Rights Boundary
+# Data and Rights
 
-This local candidate intentionally excludes real debate transcripts, course PPT/SRT media, private adjudication reports, personal logs, authorization originals, model weights, and credentials.
+## Repository boundary
 
-## What is present
+This public repository contains project source, the canonical `Skill-Judge.md`, schemas, tests, documentation, and generated browser output.
 
-The candidate contains program source, schemas, rule/distribution Markdown, browser source, documentation, tests, and a generated browser artifact. The earlier two Sanctum UI image assets have been removed from the public closure; the Web shell now uses programmatic CSS backgrounds.
+It does not distribute:
 
-## License status
+- real debate transcript corpora or participant data;
+- course PPT/SRT/media;
+- private adjudication reports or logs;
+- model weights or provider credentials;
+- private audit/evidence packages;
+- the earlier Sanctum background images.
 
-On 2026-09-07 the project right holder explicitly authorized MIT relicensing for Debate-Judge material they have authority to license. The public candidate now contains an MIT `LICENSE`, and both canonical/distribution Skill frontmatter and the install-shell template use MIT. A targeted scan found no bundled long-form third-party publication/handbook/course excerpt. Scholarly concept names remain attributed in `THIRD_PARTY_NOTICES.md`; MIT applies to Debate-Judge's own expression and implementation, not independently owned works.
+The browser background is generated with project-authored CSS rather than the quarantined artwork.
 
-The modified source has completed a fresh post-hardening rebuild/test/scan/manifest acceptance. Future third-party additions require their own provenance and license decision.
+## License
 
-## UI background provenance status
+Project-owned code, rule text, tests, documentation, and generated artifacts are released under the repository MIT License.
 
-The earlier dark/light Sanctum background derivatives remain preserved in private rights quarantine for provenance, but they are **not part of the public candidate** and are no longer inputs to `web/build-judge-web.js`. The public stylesheet now reproduces the ambient tribunal/sanctum mood using project-authored CSS radial gradients and existing procedural scene effects. No public-release claim depends on rights to the quarantined images.
+`THIRD_PARTY_NOTICES.md` records scholarly attribution and makes clear that the license covers Debate-Judge's own implementation and expression, not independently owned theories or publications.
+
+A release-rights scan found no bundled long-form third-party book/article/competition-handbook/course excerpt in the public Skill. Future copied/adapted text, datasets, fixtures, media, fonts, vendor code, or artwork require their own provenance and license review.
 
 ## Data policy
 
-Future examples should be synthetic or separately rights-cleared and must be labeled as examples rather than evaluation evidence. Publicly viewable third-party material is not automatically redistributable. Test fixtures, model outputs, screenshots, and golden artifacts require the same provenance/privacy review as other data.
+Only use transcripts and examples you are authorized to process. Publicly viewable material is not automatically redistributable.
+
+Future public fixtures should be synthetic or separately rights-cleared and should be labeled as examples rather than evaluation evidence.

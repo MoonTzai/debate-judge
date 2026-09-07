@@ -1,21 +1,20 @@
 # Public Tests
 
-This directory is the **public release test subset** for Debate-Judge. It is intentionally smaller than the private development/audit suite because some private tests depend on real debate outputs, transcript-derived fixtures, or historical Wayfinder evidence that has not been cleared for redistribution.
-
-## Run
+Run the public deterministic suite from the repository root:
 
 ```sh
 node tests/run-public.js
 ```
 
-The public runner performs, in order:
+The runner performs:
 
 1. embedded-closure verification through `install-skill.js --verify-only`;
-2. the formal project `pipeline-controller.js self-check`;
-3. syntax checks for the Web builder and modular Web sources;
-4. selected source-integrity and pure-runtime tests.
+2. `pipeline-controller.js self-check`;
+3. Web-source syntax checks;
+4. single-file parity checks;
+5. selected deterministic runtime and source-integrity tests.
 
-Current selected tests are:
+Current suites include:
 
 - `self-check.test.js`
 - `single-file-parity.test.js`
@@ -26,14 +25,6 @@ Current selected tests are:
 - `key-engine.test.js`
 - `dead-assets.test.js`
 
-## What this suite proves
+A PASS supports source-closure, syntax, runtime-contract, deterministic ABI, and release-hygiene claims. It does **not** establish adjudication accuracy, human agreement, benchmark superiority, research impact, or independent scientific validation.
 
-A PASS supports claims about source closure, syntax, mirror consistency, runtime contracts, selected deterministic ABI behavior, and release-source hygiene.
-
-A PASS does **not** establish adjudication accuracy, human agreement, benchmark superiority, research impact, or independent scientific reproduction.
-
-## Why some private tests are excluded
-
-The private project contains broader tests that may inspect historical `Output/` artifacts, transcript-derived HTML/JSON fixtures, or private design/audit evidence. Those tests are not copied merely to increase the public suite count. See `../PUBLIC-TEST-STATUS.md` for the current exclusion policy and categories.
-
-Any future fixture added here must be provenance-checked for copyright, privacy, personal data, and hidden local paths before inclusion.
+The private development project has broader evidence-dependent tests that are not redistributed merely to increase the public suite count. Any new public fixture must first be cleared for copyright, privacy, personal data, and local-path leakage.

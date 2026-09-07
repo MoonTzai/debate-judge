@@ -387,32 +387,8 @@ function selfCheck() {
   const afterOk = after === '' || /^<!-- EMBED_ASSET_LIST -->[\s\S]*$/.test(after);
   results.push({ name: 'JS内嵌一致', ok: eb.ok && norm(eb.code) === src && afterOk });
 
-  // 2) 三镜像一致
-  const peers = ['Debate-Judge.md', '.claude/skills/debate-judge/SKILL.md']
-    .map(p => { try { return norm(fs.readFileSync(__dirname + '/' + p, 'utf-8')); } catch (e) { return ''; } });
-  // 单文件交付模式：镜像副本不存在（接收者只拿到 Skill-Judge.md）→ 跳过比对视为通过；
-  // 开发工作区（镜像齐全）→ 仍严格逐字一致
-  const missingMirror = !fs.existsSync(__dirname + '/Debate-Judge.md') || !fs.existsSync(__dirname + '/.claude/skills/debate-judge/SKILL.md');
-  results.push({ name: '三镜像一致', ok: missingMirror || (peers[0] === norm(skill) && peers[1] === peers[0]) });
-
-  // 2b) 项目根 Claude 入口壳形态检查（批 5 / 260812 P0-1）：存在但过期视同 FAIL——
-  // 根 .claude/skills/debate-judge/SKILL.md 与根 Debate-Judge.md 必须为轻量壳（shellTemplate 生成物，
-  // 含壳特征标记且 <50KB）；若为全量副本（>100KB）则必须逐字等于权威（历史形态兼容）。
-  // 当前仓库根布局守卫（AGENTS.md 存在性）：不得跨到父级 workspace；单文件交付/异地解包等无根布局场景跳过。
-  const rootLayoutOk = fs.existsSync(path.join(__dirname, 'AGENTS.md'));
-  const shellMark = '按需从权威文件切片加载规则';
-  if (rootLayoutOk) {
-    for (const rel of ['.claude/skills/debate-judge/SKILL.md', 'Debate-Judge.md']) {
-      const p = path.join(__dirname, rel);
-      const name = '根壳同步: ' + rel;
-      if (!fs.existsSync(p)) { results.push({ name, ok: false }); continue; }
-      const c = fs.readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
-      const ok = c.length > 100 * 1024
-        ? (norm(c) === norm(skill))
-        : (c.includes(shellMark) && c.length < 50 * 1024);
-      results.push({ name, ok });
-    }
-  }
+  // 2) 单一权威 Skill：读取成功即为唯一规则源；不维护仓库内镜像副本。
+  results.push({ name: '单一权威 Skill', ok: norm(skill).length > 0 });
 
   // 3) JS 语法（编译，不执行）
   let syntaxOk = true;
@@ -1520,9 +1496,7 @@ else if (cmd === 'sync-embed') {
     const block = startMarker + '\n```javascript\n' + srcSync.trim() + '\n```\n' + endMarker;
     const result = contentSync.slice(0, startIdx) + block + contentSync.slice(endIdx + endMarker.length);
     fs.writeFileSync(__dirname + '/Skill-Judge.md', result, 'utf-8');
-    fs.copyFileSync(__dirname + '/Skill-Judge.md', __dirname + '/Debate-Judge.md');
-    fs.copyFileSync(__dirname + '/Skill-Judge.md', __dirname + '/.claude/skills/debate-judge/SKILL.md');
-    console.log('[sync-embed] 完成：Skill-Judge.md 内嵌块已更新 + 三镜像已同步');
+    console.log('[sync-embed] 完成：Skill-Judge.md canonical 内嵌块已更新');
   }
 else if (cmd === 'build-index') {
     const speechFile = args[1];

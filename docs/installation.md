@@ -1,56 +1,49 @@
 # Installation
 
-Status: local public-candidate instructions validated in `Debate-Judge-Public/`; repeat from a fresh external clone before release.
-
 ## Requirements
 
-- Node.js with the standard APIs used by this source tree, including built-in `fetch`, `AbortController`, streams, `TextEncoder`, and the Node test runner.
+- Node.js with built-in `fetch`, `AbortController`, streams, `TextEncoder`, and the Node test runner.
 - A modern browser for `web/judge.html`.
-- An external model service only when running real adjudication. Software verification and the public source-integrity suite do not require a paid model call.
+- An external model service only for real adjudication.
 
-No `package.json`, npm install step, Docker image, or third-party Node dependency is currently required by the candidate source. Do not add one merely for appearance; if future dependencies are introduced, they must be declared and pinned normally.
+The current repository has no npm dependency installation step.
 
-Current local acceptance used Node v24.16.0 on Windows x64 (`win32`, OS release `10.0.26200`). A modern-browser smoke should be recorded again from the eventual fresh public clone before release.
-
-## Verify the source distribution
+## Verify a clone
 
 From the repository root:
 
 ```sh
 node install-skill.js --verify-only
+node pipeline-controller.js self-check
 node tests/run-public.js
 ```
 
-The public runner invokes the project self-check, Web-source syntax checks, and selected deterministic source/runtime tests. A PASS is software-integrity evidence, not adjudication-quality evidence.
+These are software-integrity checks, not adjudication-quality measurements.
 
 ## Browser artifact
 
-The single-file browser artifact is:
-
-```text
-web/judge.html
-```
-
-For a release, it must be generated from the same public source tree with:
+`web/judge.html` is generated from source:
 
 ```sh
 node web/build-judge-web.js
 ```
 
-Do not hand-edit the generated HTML to repair source/artifact drift.
+Do not repair generated HTML by hand.
 
-## Agent/Skill distribution
+## Skill / Agent installation
 
-`Skill-Judge.md` is the canonical rule/runtime distribution source. `Debate-Judge.md` and `.claude/skills/debate-judge/SKILL.md` are byte-identical distribution mirrors.
+`Skill-Judge.md` is the only canonical Skill source in the repository.
 
-To validate the embedded extraction closure without installing a user-level shell:
+`install-skill.js` can verify the embedded closure, extract a runnable workspace, and generate a lightweight user-level Skill shell. The repository itself does not keep duplicated Claude/Codex Skill copies.
+
+Verification only:
 
 ```sh
 node install-skill.js --verify-only
 ```
 
-A normal installer run can write an extracted workspace and a local Codex skill shell. Review the destination and local environment before doing that; verification alone is the safer release-check command.
+Normal installation writes to the configured user Skill destination and extraction workspace. Review those destinations before running it.
 
 ## Credentials
 
-Do not put credentials in the repository. The runtime can consume environment variables or an explicitly supplied local `.api-config.json`; that configuration file is ignored by the candidate `.gitignore` and must remain local.
+Never put credentials in the repository. The runtime accepts environment configuration or a local `.api-config.json`; that file is Git-ignored and must remain local.

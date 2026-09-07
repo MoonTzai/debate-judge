@@ -1,7 +1,7 @@
 // ============================================================
 // build-judge-web.js — Judge 网页版单文件构建器（W1）
 // 输入（只读）：根目录 install-skill.js 的 BLOCKS 单一事实源派生浏览器 runtime 闭包；
-//   Skill-Judge.md / Debate-Judge.md 作为镜像种子固定内嵌。
+//   Skill-Judge.md 作为唯一规则种子固定内嵌。
 // 输入（只读）：web/src/{engine,tendency,history-governance,flight-recorder,flight-export,ui}.js、web/src/app.css
 // 输出：web/judge.html（单文件交付）+ 可选 web/dist/judge-bundle.js（Node 测试用）
 // Judge 根内核只读：本脚本不修改主版本。
@@ -20,7 +20,7 @@ const { BLOCKS } = require(path.join(CORE, 'install-skill.js'));
 // ------------------------------------------------------------
 // 排除项只包含浏览器运行时不应承担的离线/安装职责；新增 BLOCK 默认进入 web，
 // 由 web-contract 的 in-memory load smoke 判断是否真的属于 runtime，而不是手工维护第五份清单。
-const WEB_RUNTIME_EXCLUDE = new Set(['EXECUTOR_BROWSER', 'INSTALLER', 'KEY_EXTRACT', 'CREATE_BASELINE']);
+const WEB_RUNTIME_EXCLUDE = new Set(['EXECUTOR_BROWSER', 'INSTALLER', 'KEY_EXTRACT']);
 const RUNTIME_BLOCKS = BLOCKS.filter(b => !WEB_RUNTIME_EXCLUDE.has(b.name));
 const blockEntry = b => [
   '/' + b.file,
@@ -43,11 +43,10 @@ const MODULES = RUNTIME_BLOCKS
   ]);
 
 // ------------------------------------------------------------
-// 2) 静态种子文件（BLOCKS 非 JS + 两个交付镜像；内嵌到虚拟 FS）
+// 2) 静态种子文件（BLOCKS 非 JS + canonical Skill；内嵌到虚拟 FS）
 // ------------------------------------------------------------
 const STATIC_FILES = [
-  ['/Skill-Judge.md', path.join(CORE, 'Skill-Judge.md')],
-  ['/Debate-Judge.md', path.join(CORE, 'Debate-Judge.md')]
+  ['/Skill-Judge.md', path.join(CORE, 'Skill-Judge.md')]
 ].concat(RUNTIME_BLOCKS.filter(b => b.lang !== 'javascript').map(blockEntry));
 
 // ------------------------------------------------------------

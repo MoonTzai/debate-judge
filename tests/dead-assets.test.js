@@ -41,8 +41,7 @@ const DA1_FILES = [
   'pipeline-controller.js', 'render-report.js', 'render-tables.js', 'install-skill.js',
   'executor/core.js', 'executor/host-node.js', 'executor/browser.js', 'executor/api-provider.js',
   'scripts/plain-language.js', 'scripts/html-contract.js', 'scripts/key-checker.js',
-  'scripts/create-baseline.js', 'scripts/plain-audit.js', 'scripts/generate-input-contract.js',
-  'Skill-Judge.md', 'Debate-Judge.md', '.claude/skills/debate-judge/SKILL.md'
+  'scripts/generate-input-contract.js', 'Skill-Judge.md'
 ];
 const da1Hits = DA1_FILES.filter(f => fs.existsSync(path.join(root, f)) && read(f).includes('registry.json'));
 check('DA-1：当前根项目程序文件白名单 grep registry.json 零命中', da1Hits.length === 0, da1Hits.join(','));
@@ -84,7 +83,7 @@ check('DA-9d：步骤 4 区段不含「MECHANISM注释」', !step4Zone.includes(
 check('DA-9e：附录 A 区段含「结构归约」', appAZone.includes('结构归约'));
 check('DA-9f：附录 A 区段不含「机制聚合」', !appAZone.includes('机制聚合'));
 
-// ---- DA-9 扩展（260817 会话7 方案①）：全文件机制聚合零命中（现役三镜像作用域；豁免=空——
+// ---- DA-9 扩展（260817 会话7 方案①）：全文件机制聚合零命中（canonical Skill 作用域；豁免=空——
 //      机制注释 L98 历史注记/机制卡片 L5100/机制驱动 L5022 均不含「机制聚合」字样——R6a 现役概念保留）----
 check('DA-9g：全文件不含「机制聚合」（术语统一后零残留）', !sj.includes('机制聚合'), (sj.split('机制聚合').length - 1) + ' 处残留');
 check('DA-9h：全文件不含「机制聚合轮」', !sj.includes('机制聚合轮'), (sj.split('机制聚合轮').length - 1) + ' 处残留');
@@ -103,13 +102,17 @@ if (m) {
   fs.unlinkSync(tmp);
 }
 
-// ---- DA-11：根目录唯一主版本（三镜像逐字一致 + 单文件闭包标记存在） ----
+// ---- DA-11：仓库唯一 canonical Skill + 单文件闭包 ----
 const sha16 = c => require('crypto').createHash('sha256').update(c).digest('hex').slice(0, 16);
-const m2f = read('Debate-Judge.md');
-const m3f = read('.claude/skills/debate-judge/SKILL.md');
-check('DA-11a：根三镜像逐字一致', sha16(sj) === sha16(m2f) && sha16(m2f) === sha16(m3f), sha16(sj));
+check('DA-11a：仅保留 Skill-Judge.md canonical', 
+  !fs.existsSync(path.join(root, 'Debate-Judge.md')) &&
+  !fs.existsSync(path.join(root, '.claude/skills/debate-judge/SKILL.md')),
+  sha16(sj));
 check('DA-11b：根主版本含单文件内嵌闭包清单', sj.includes('<!-- EMBED_ASSET_LIST -->') && sj.includes('<!-- PIPELINE_CONTROLLER_START -->'));
 check('DA-11c：根主版本不含死资产词', !/\.tmp-mechanisms|check-mechanisms|机制聚合轮/.test(sj));
+check('DA-11d：私有基准包脚本不进入 public repo/Skill 闭包',
+  !fs.existsSync(path.join(root, 'scripts/create-baseline.js')) && !sj.includes('EMBED_ASSET:CREATE_BASELINE_START'));
+
 
 console.log(failed === 0 ? '=== ALL PASS ===' : '=== FAILED: ' + failed + ' ===');
 process.exit(failed === 0 ? 0 : 1);

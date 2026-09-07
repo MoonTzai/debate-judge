@@ -1,6 +1,6 @@
 # Contributing
 
-This repository candidate is being prepared for an open research-software release. Contributions should improve maintainability, documentation, tests, reproducibility, or research usability without weakening semantic correctness.
+Debate-Judge is an open research-software project. Contributions should improve maintainability, documentation, tests, reproducibility, or research usability without weakening semantic correctness.
 
 ## Before contributing
 
@@ -16,7 +16,7 @@ A release-quality contribution should preserve the three Markdown distribution m
 
 ## Rights and licensing
 
-The final public license has not yet been applied to this local candidate because the mixed code/rule/asset rights map is still being closed. Do not assume that material merely visible in the private development workspace is redistributable.
+Repository content is governed by the MIT License and `THIRD_PARTY_NOTICES.md`. Material visible only in private development workspaces is outside this public license boundary and must not be copied into the repository without separate provenance and rights review.
 
 ## Conduct and support
 
