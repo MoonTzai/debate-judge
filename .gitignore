@@ -10,3 +10,16 @@ node_modules/
 *.log
 *.tmp
 *.zip
+
+# Local-only evaluation data must never enter the public repository.
+local-data/
+local-test-data/
+test-corpora/
+corpora/
+dataset/
+datasets/
+*.parquet
+*.doc
+*.docx
+*.7z
+*.rar

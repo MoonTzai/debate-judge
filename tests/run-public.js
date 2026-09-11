@@ -51,6 +51,7 @@ const suites = [
   'rounds-source.test.js',
   'dictionary-consistency.test.js',
   'key-engine.test.js',
+  'validator-coverage.test.js',
   'dead-assets.test.js'
 ];
 for (const file of suites) runNode(file.replace(/\.test\.js$/, ''), [path.join(__dirname, file)]);

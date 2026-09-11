@@ -30,7 +30,52 @@ function read(rel) {
   return fs.readFileSync(path.join(repo, ...rel.split('/')), 'utf8');
 }
 
+function walkFiles(dir, out = []) {
+  for (const ent of fs.readdirSync(dir, {withFileTypes:true})) {
+    if (ent.name === '.git') continue;
+    const abs = path.join(dir, ent.name);
+    if (ent.isDirectory()) walkFiles(abs, out);
+    else if (ent.isFile()) out.push(abs);
+  }
+  return out;
+}
+
+function localDataLeakCheck() {
+  const files = walkFiles(repo);
+  const forbiddenExt = /\.(?:parquet|docx?|7z|rar)$/i;
+  const forbiddenPath = /(?:^|\/)(?:local-data|local-test-data|test-corpora|corpora|datasets?)(?:\/|$)/i;
+  const suspicious = [];
+
+  for (const abs of files) {
+    const rel = path.relative(repo, abs).replace(/\\/g, '/');
+    const stat = fs.statSync(abs);
+    if (forbiddenExt.test(rel) || forbiddenPath.test(rel)) {
+      suspicious.push(rel + ' [forbidden local-data shape]');
+      continue;
+    }
+    if (/\.json$/i.test(rel) && stat.size > 2 * 1024 * 1024) {
+      suspicious.push(rel + ' [large JSON data file]');
+      continue;
+    }
+    if (/\.(?:txt|jsonl|csv|tsv)$/i.test(rel) && stat.size > 4 * 1024 * 1024) {
+      suspicious.push(rel + ' [large text/data file]');
+      continue;
+    }
+    if (stat.size > 20 * 1024 * 1024 && rel !== 'web/judge.html') {
+      suspicious.push(rel + ' [unexpected large file]');
+    }
+  }
+
+  if (suspicious.length) {
+    console.error('[release-acceptance] FAIL local_test_data_absent');
+    for (const item of suspicious) console.error('  ' + item);
+    process.exit(1);
+  }
+  console.log('[release-acceptance] PASS local_test_data_absent');
+}
+
 function postconditions() {
+  localDataLeakCheck();
   const canonicalSkill = read('Skill-Judge.md');
   const html = read('web/judge.html');
   const runtimeFiles = [

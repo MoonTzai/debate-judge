@@ -7126,10 +7126,10 @@ function extractData(markdown):
 **P2** | P | **阻断** | PhaseIII=已结晶 | S8.PhaseIII.状态, S8.PhaseIII.完成方, S8.PhaseII.*.有效数 | 完成方 Phase II 有效数 >= 1 | 终止管道
 **P3** | P | **阻断** | 始终 | S8.SC完成度, S8.PhaseI/II/III 全部 | 完成度一致性（260810 两层）：L1 定义自洽（S8C-L1·BLOCKING）+ L2 结构期望偏离（S8C-L2·WARNING）+ 判据检查（S8C-R·新合同 BLOCKING/旧合同 WARNING） | 终止管道（仅 L1 级触发）
 **H5** | P | **阻断** | PhaseIII=已结晶 | S8.PhaseIII.④容纳自洽, S8.PhaseIII.⑤价值深度, S8.PhaseIII.⑥双方SC关系 | ④或⑤任一不通过+已结晶（假结晶）；或 ⑥=独立平行+已结晶（⑥-b 字段层）→阻断 | 终止管道·请求R2重跑
-**S8C-L1** | P | **阻断** | S8.COMPLETE=是 | S8.SC完成度, S8.PhaseI/II/III, S8.PhaseIII.④⑤⑥, S3.交锋点总数 | L1 矩阵 16 格（封闭集合·新增组合须走方案审核）：完成度值与定义字段直接冲突（如 完成 但未结晶/④⑤不通过/PhaseII=0/⑥独立平行）→阻断 | 终止管道·请求R2重跑
-**S8C-L2** | P | **警告** | S8.COMPLETE=是 | S8.SC完成度, S8.PhaseI/II/III, S8.PhaseIII.④⑤⑥, S3.交锋点总数 | 结构期望 9 分支推导 ≠ LLM 判定 → 分歧标注（LLM 语义判定·不进重试反馈·报告标注） | 标注
-**S8C-R** | P | **阻断/警告** | S8.COMPLETE=是 | S8.SC完成度.判据 | 判据缺失或<10字：新合同（S7 靶心格式）→阻断·重试提示必出判据；旧合同 → 警告 | 终止管道（新合同）/标注（旧合同）
-**S8C-D** | P | **警告** | S8.COMPLETE=是 | S8.SC完成度, S8.S11类型方向 | 方向字段已存在但 ≠ 程序派生值（旧字段·将随重跑派生）→ 警告 | 标注
+**S8C-L1** | P | **阻断** | R2/final（不依赖 S8.COMPLETE；按实质字段守卫） | S8.SC完成度, S8.PhaseI/II/III, S8.PhaseIII.④⑤⑥, S3.交锋点总数 | L1 矩阵 16 格（封闭集合·新增组合须走方案审核）：完成度值与定义字段直接冲突（如 完成 但未结晶/④⑤不通过/PhaseII=0/⑥独立平行）→阻断 | 终止管道·请求R2重跑
+**S8C-L2** | P | **警告** | R2/final + S8.SC完成度存在 | S8.SC完成度, S8.PhaseI/II/III, S8.PhaseIII.④⑤⑥, S3.交锋点总数 | 结构期望 9 分支推导 ≠ LLM 判定 → 分歧标注（LLM 语义判定·不进重试反馈·报告标注） | 标注
+**S8C-R** | P | **阻断/警告** | R2/final；判据长度门按新/旧合同分级 | S8.SC完成度.判据 | 判据缺失或<10字：新合同（S7 靶心格式）→阻断·重试提示必出判据；旧合同 → 警告 | 终止管道（新合同）/标注（旧合同）
+**S8C-D** | P | **警告** | S8.SC完成度存在 + S8.S11类型方向与派生值不一致 | S8.SC完成度, S8.S11类型方向 | 方向字段已存在但 ≠ 程序派生值（旧字段·将随重跑派生）→ 警告 | 标注
 
 ### 类别 R：R4.5 裁决（4 条）
 
@@ -15953,6 +15953,30 @@ const contract = require('./contract.js');
 const { extractDataMarkers, parseStructureJson, parseInsertRegistry, normalizeMId, normalizeMIdText, normalizeStructureIds, isMid, isCpId, isRef, sideOfMid, DIMENSION_S7_SC, DIMENSIONS, DERIVED_KEYS, ADJUDICABLE_PREFIXES, ADJUDICATION_WHITELIST, aggregateData, validateAdjudication, mergeAdjudicationData, adjudicableKeys, adjudicationWhitelist, loadInputContract, validateContract, parseInputs } = contract;
 let ENUMS_CACHE = null;
 const SKILL_PATH = path.join(__dirname, '..', 'Skill-Judge.md');
+
+// S4A-I1：机械校验器只拥有“表示/消费/发布”阻断权，不拥有语义否决权。
+// typed issue 是旁路结构化解释；legacy passed/blocking/warnings/infos 返回保持兼容。
+function toTypedIssue(record) {
+  const r = record && typeof record === 'object'
+    ? record
+    : { rule: '', severity: 'BLOCKING', message: String(record) };
+  const severity = String(r.severity || 'BLOCKING');
+  const blocking = severity === 'BLOCKING';
+  return {
+    rule: r.rule || '',
+    severity,
+    message: r.message || r.reason || String(record || ''),
+    issueType: blocking ? 'representation_blocker' : (severity === 'WARNING' ? 'representation_warning' : 'observation'),
+    blockingScope: blocking ? 'representation' : 'none',
+    repairTarget: blocking ? 'representation' : null,
+    semanticInvalid: false,
+    semanticReviewAuthority: false
+  };
+}
+function toTypedIssues(records) {
+  return (records || []).map(toTypedIssue);
+}
+
 function validate(md, round, options = {}) {
   const data = extractDataMarkers(md);
   const errors = [];
@@ -16017,8 +16041,10 @@ function validate(md, round, options = {}) {
   // === 类别C：跨步骤一致性（仅最终验证或全部数据可用时） ===
   if (isFinal || hasP1P2P3) checkC1_C7(allData, errors, { adjudicatedDims: options.adjudicatedDims, adjudicatedDimsInfo: options.adjudicatedDimsInfo });
 
-  // === 类别P：Phase逻辑（S8数据存在时；260811 批甲：仅 R2/final——v6 终裁防 R2.5/R3 照抄 S8.COMPLETE 误触发 S8C-R） ===
-  if ((round === 'R2' || isFinal) && allData['S8.COMPLETE'] === '是') {
+  // === 类别P：Phase逻辑（Post-S5D：R2/final 上下文本身授权实质一致性校验） ===
+  // S8.COMPLETE 仅为历史兼容/产物形态标记；模型自报缺失或非“是”不得关闭 P1/P2/P3。
+  // 各门禁仍按其所需的实质字段自行守卫，避免把不完整 legacy 产物机械升级成新的语义否决。
+  if (round === 'R2' || isFinal) {
     // 260810 P1-B 修订：newContract 三来源（显式参数 > md 文本 > tfPath）
     // ——R2/final 门禁的 md 文本无 S7 段（S7 在 P1.md），由 host-node 探测 P1 后显式透传
     const newContract = !!(options.newContract || detectNewContractFromText(md) || detectNewContract(options.tfPath));
@@ -16042,7 +16068,13 @@ function validate(md, round, options = {}) {
   const warnings = errors.filter(e => e.severity === 'WARNING');
   const infos = errors.filter(e => e.severity === 'INFO');
 
-  return { passed: blocking.length === 0, blocking, warnings, infos };
+  return {
+    passed: blocking.length === 0,
+    blocking,
+    warnings,
+    infos,
+    issues: toTypedIssues(errors)
+  };
 }
 
 // ==================== F类规则 ====================
@@ -18345,7 +18377,7 @@ function isNewContractHeader(hdrLine) {
   return !!(hdrLine && hdrLine.includes('CP-ID') && hdrLine.includes('靶心') && hdrLine.includes('削弱指向'));
 }
 
-module.exports = { validate, checkNarrative, checkHtml, checkStructure, getEnums, checkTerminology, checkTerminologyContent, checkEffectiveType, parseSMarkers, parseSMarkerDetail, sectionOfStep, checkR5Contract, checkVerdictConsistency, checkCompletionMatrix, checkS7Contract, normalizeEnumValue, TYPE1, TYPE2, checkV1_V6, checkC1_C7, checkS8Coherence, parseS82Table, checkS82Anchors, matchTurnToRoster, checkSideTriplet, normalizeRoleTag, W2_MIN_UNRESOLVABLE, W2_RATIO, checkS8, checkS17Table, checkOutputShape, checkCompletionConsistency, detectNewContract, detectNewContractFromText, deriveDirection, applyDerivations, check55Guard, checkS102Overstrict, normalizeForCompare, CROSS_FORMAT_COMPARE_POINTS, R2_5_DOMAIN_RE, R3_DOMAIN_RE, LENGTH_GATE_RULES, checkC7DataContract, isNewContractHeader };
+module.exports = { validate, toTypedIssue, toTypedIssues, checkNarrative, checkHtml, checkStructure, getEnums, checkTerminology, checkTerminologyContent, checkEffectiveType, parseSMarkers, parseSMarkerDetail, sectionOfStep, checkR5Contract, checkVerdictConsistency, checkCompletionMatrix, checkS7Contract, normalizeEnumValue, TYPE1, TYPE2, checkV1_V6, checkC1_C7, checkS8Coherence, parseS82Table, checkS82Anchors, matchTurnToRoster, checkSideTriplet, normalizeRoleTag, W2_MIN_UNRESOLVABLE, W2_RATIO, checkS8, checkS17Table, checkOutputShape, checkCompletionConsistency, detectNewContract, detectNewContractFromText, deriveDirection, applyDerivations, check55Guard, checkS102Overstrict, normalizeForCompare, CROSS_FORMAT_COMPARE_POINTS, R2_5_DOMAIN_RE, R3_DOMAIN_RE, LENGTH_GATE_RULES, checkC7DataContract, isNewContractHeader };
 ```
 <!-- EMBED_ASSET:EXECUTOR_VALIDATOR_END -->
 <!-- EMBED_ASSET:API_PROVIDER_START -->
@@ -21411,7 +21443,7 @@ module.exports = {
 <!-- EMBED_ASSET:HTML_CONTRACT_END -->
 <!-- EMBED_ASSET:KEY_EXTRACT_START -->
 ```javascript
-// key-extract.js — 键形提取单一引擎（卡 5，260815；公开运行不依赖私有设计文件）
+// key-extract.js — 键形提取单一引擎（卡 5，260815——方案见 Upload/方案-260815-卡5-键形引擎合并-细化方案.md）
 // 权威 = key-checker consumeKeys 文档化 7 形态（消费侧）+ gic extractDataKeys 字典侧形态；
 // key-checker / generate-input-contract 均 require 本模块——防双引擎漂移（KE-1）。
 // 设计：执行函数式接口（每调用内部新建正则——无共享 lastIndex 污染）；
@@ -21493,10 +21525,12 @@ function scanVarTemplate(src) {
 // ---------- 字典侧形态扫描（gic extractDataKeys 原语；返回 [{key, index}]） ----------
 
 function scanDictQuote(src) {
-  const re = /data\['([^']+)'\]|data\["([^"]+)"\]/g;
+  // Approved data-container aliases only. Keep this literal-only: dynamic forms such as
+  // allData['S1.' + side + '人数'] must not be materialized as bogus dictionary keys.
+  const re = /\b(?:data|allData)\s*\[\s*(['"])([^'"\n]{1,60})\1\s*\]/g;
   const out = [];
   let m;
-  while ((m = re.exec(src)) !== null) out.push({ key: m[1] || m[2], index: m.index });
+  while ((m = re.exec(src)) !== null) out.push({ key: m[2], index: m.index });
   return out;
 }
 function scanDictOrEmpty(src) {

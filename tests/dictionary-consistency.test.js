@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const PC = require('../pipeline-controller.js');
+const KE = require('../scripts/key-extract.js');
 const { ROUNDS } = require('../executor/core.js');
 
 const root = path.join(__dirname, '..');
@@ -28,11 +29,8 @@ const contractInsertIds = new Set(contract.inserts.map(i => i.id));
 
 // ---- ① 渲染器/门禁消费键 ⊆ 字典 ----
 function extractDataKeys(src) {
-  const set = new Set();
-  const re = /data\['([^']+)'\]|data\["([^"]+)"\]/g;
-  let m;
-  while ((m = re.exec(src)) !== null) set.add(m[1] || m[2]);
-  return [...set].filter(k => /^(S|R2\.5|C7|C8)/.test(k));
+  return [...new Set(KE.scanDictQuote(src).map(x => x.key))]
+    .filter(k => /^(S|R2\.5|C7|C8)/.test(k));
 }
 const rrKeys = extractDataKeys(fs.readFileSync(path.join(root, 'render-report.js'), 'utf-8'));
 const pcKeys = extractDataKeys(fs.readFileSync(path.join(root, 'pipeline-controller.js'), 'utf-8') + '\n' + fs.readFileSync(path.join(root, 'executor', 'validator.js'), 'utf-8'));  // 卡1：校验器簇迁入
@@ -40,6 +38,13 @@ const hnKeys = extractDataKeys(fs.readFileSync(path.join(root, 'executor', 'host
 const allKeys = [...new Set([...rrKeys, ...pcKeys, ...hnKeys])];
 const missing = allKeys.filter(k => !contractDataIds.has(k));
 check('① 渲染器+门禁字面消费键 ⊆ 字典（' + allKeys.length + ' 个）', missing.length === 0, missing.join(','));
+const aliasProbe = extractDataKeys("const x = allData['S8.COMPLETE']; const y = allData['S1.' + side + '人数'];");
+check('①a shared extractor 可识别 allData 字面量且不物化动态表达式',
+  aliasProbe.includes('S8.COMPLETE') && !aliasProbe.some(k => k === 'S1.' || k.includes('+ side')),
+  JSON.stringify(aliasProbe));
+check('①b S8.COMPLETE 为 compatibility-only：不再是 live consumer / input-contract authority',
+  !allKeys.includes('S8.COMPLETE') && !contractDataIds.has('S8.COMPLETE'),
+  'live=' + allKeys.includes('S8.COMPLETE') + ' contract=' + contractDataIds.has('S8.COMPLETE'));
 const c7InContract = ['C7.微消化.正方.实例表行数', 'C7.微消化.反方.实例表行数', 'C7.微消化.总有效数', 'C7.SC总览.正方.有效微消化', 'C7.SC总览.反方.有效微消化'];
 check('①b R5 校验 DATA 5 键在字典', c7InContract.every(k => contractDataIds.has(k)));
 check('①c S4 动态键（data-condition）在字典', contractDataIds.has('S4.定义争议触发'));

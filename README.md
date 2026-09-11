@@ -6,7 +6,7 @@
 
 Debate-Judge is a research-software prototype for tracing how case structure, clash development, and adjudication interact across a debate. It combines staged LLM analysis, explicit intermediate representations, contract checks, recovery support, and a generated browser report.
 
-**Current public status:** v0.1.1 Research Preview. The repository is MIT licensed and publicly reproducible at the software level. No claim is made that the system is state of the art, human-equivalent, universally valid, or independently validated for adjudication quality.
+**Current public status:** v0.1.2 Research Preview. The repository is MIT licensed and publicly reproducible at the software level. No claim is made that the system is state of the art, human-equivalent, universally valid, or independently validated for adjudication quality.
 
 ## What is in this repository
 

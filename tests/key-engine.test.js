@@ -60,6 +60,12 @@ check('KE-4 CONSUME_FILES 含 host-node', /executor\/host-node\.js/.test(kcSrc))
 }
 
 // ---- KE-5: 破坏性自检——引擎提取假键（非豁免必红路径）+ key-checker --verify 自检全过
+// Post-S5D S8 authority repair T0: dictionary-side extraction must see approved allData literal aliases,
+// while dynamic allData expressions must not be mis-materialized as bogus literal keys.
+const aliasSrc = "const a = allData['S8.COMPLETE']; const b = allData['S1.' + side + '人数'];";
+const aliasKeys = KE.scanDictQuote ? KE.scanDictQuote(aliasSrc).map(x => x.key) : [];
+check('KE-5a 字典侧识别 allData 字面量', aliasKeys.includes('S8.COMPLETE'), 'got=' + JSON.stringify(aliasKeys));
+check('KE-5b allData 动态表达式不伪造字面键', !aliasKeys.some(k => k === 'S1.' || k.includes('+ side')), 'got=' + JSON.stringify(aliasKeys));
 const fakeSrc = "const x = data['S99.探针.FAKE']; const y = data['S99.探针.FAKE2'];";
 const fakeKeys = KE.extractLiteralKeys ? KE.extractLiteralKeys(fakeSrc) : [];
 check('KE-5 引擎提取假键', Array.isArray(fakeKeys) && fakeKeys.includes('S99.探针.FAKE') && fakeKeys.includes('S99.探针.FAKE2'), 'got=' + JSON.stringify(fakeKeys));

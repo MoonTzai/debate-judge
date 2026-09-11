@@ -8,6 +8,30 @@ const contract = require('./contract.js');
 const { extractDataMarkers, parseStructureJson, parseInsertRegistry, normalizeMId, normalizeMIdText, normalizeStructureIds, isMid, isCpId, isRef, sideOfMid, DIMENSION_S7_SC, DIMENSIONS, DERIVED_KEYS, ADJUDICABLE_PREFIXES, ADJUDICATION_WHITELIST, aggregateData, validateAdjudication, mergeAdjudicationData, adjudicableKeys, adjudicationWhitelist, loadInputContract, validateContract, parseInputs } = contract;
 let ENUMS_CACHE = null;
 const SKILL_PATH = path.join(__dirname, '..', 'Skill-Judge.md');
+
+// S4A-I1：机械校验器只拥有“表示/消费/发布”阻断权，不拥有语义否决权。
+// typed issue 是旁路结构化解释；legacy passed/blocking/warnings/infos 返回保持兼容。
+function toTypedIssue(record) {
+  const r = record && typeof record === 'object'
+    ? record
+    : { rule: '', severity: 'BLOCKING', message: String(record) };
+  const severity = String(r.severity || 'BLOCKING');
+  const blocking = severity === 'BLOCKING';
+  return {
+    rule: r.rule || '',
+    severity,
+    message: r.message || r.reason || String(record || ''),
+    issueType: blocking ? 'representation_blocker' : (severity === 'WARNING' ? 'representation_warning' : 'observation'),
+    blockingScope: blocking ? 'representation' : 'none',
+    repairTarget: blocking ? 'representation' : null,
+    semanticInvalid: false,
+    semanticReviewAuthority: false
+  };
+}
+function toTypedIssues(records) {
+  return (records || []).map(toTypedIssue);
+}
+
 function validate(md, round, options = {}) {
   const data = extractDataMarkers(md);
   const errors = [];
@@ -72,8 +96,10 @@ function validate(md, round, options = {}) {
   // === 类别C：跨步骤一致性（仅最终验证或全部数据可用时） ===
   if (isFinal || hasP1P2P3) checkC1_C7(allData, errors, { adjudicatedDims: options.adjudicatedDims, adjudicatedDimsInfo: options.adjudicatedDimsInfo });
 
-  // === 类别P：Phase逻辑（S8数据存在时；260811 批甲：仅 R2/final——v6 终裁防 R2.5/R3 照抄 S8.COMPLETE 误触发 S8C-R） ===
-  if ((round === 'R2' || isFinal) && allData['S8.COMPLETE'] === '是') {
+  // === 类别P：Phase逻辑（Post-S5D：R2/final 上下文本身授权实质一致性校验） ===
+  // S8.COMPLETE 仅为历史兼容/产物形态标记；模型自报缺失或非“是”不得关闭 P1/P2/P3。
+  // 各门禁仍按其所需的实质字段自行守卫，避免把不完整 legacy 产物机械升级成新的语义否决。
+  if (round === 'R2' || isFinal) {
     // 260810 P1-B 修订：newContract 三来源（显式参数 > md 文本 > tfPath）
     // ——R2/final 门禁的 md 文本无 S7 段（S7 在 P1.md），由 host-node 探测 P1 后显式透传
     const newContract = !!(options.newContract || detectNewContractFromText(md) || detectNewContract(options.tfPath));
@@ -97,7 +123,13 @@ function validate(md, round, options = {}) {
   const warnings = errors.filter(e => e.severity === 'WARNING');
   const infos = errors.filter(e => e.severity === 'INFO');
 
-  return { passed: blocking.length === 0, blocking, warnings, infos };
+  return {
+    passed: blocking.length === 0,
+    blocking,
+    warnings,
+    infos,
+    issues: toTypedIssues(errors)
+  };
 }
 
 // ==================== F类规则 ====================
@@ -2400,4 +2432,4 @@ function isNewContractHeader(hdrLine) {
   return !!(hdrLine && hdrLine.includes('CP-ID') && hdrLine.includes('靶心') && hdrLine.includes('削弱指向'));
 }
 
-module.exports = { validate, checkNarrative, checkHtml, checkStructure, getEnums, checkTerminology, checkTerminologyContent, checkEffectiveType, parseSMarkers, parseSMarkerDetail, sectionOfStep, checkR5Contract, checkVerdictConsistency, checkCompletionMatrix, checkS7Contract, normalizeEnumValue, TYPE1, TYPE2, checkV1_V6, checkC1_C7, checkS8Coherence, parseS82Table, checkS82Anchors, matchTurnToRoster, checkSideTriplet, normalizeRoleTag, W2_MIN_UNRESOLVABLE, W2_RATIO, checkS8, checkS17Table, checkOutputShape, checkCompletionConsistency, detectNewContract, detectNewContractFromText, deriveDirection, applyDerivations, check55Guard, checkS102Overstrict, normalizeForCompare, CROSS_FORMAT_COMPARE_POINTS, R2_5_DOMAIN_RE, R3_DOMAIN_RE, LENGTH_GATE_RULES, checkC7DataContract, isNewContractHeader };
+module.exports = { validate, toTypedIssue, toTypedIssues, checkNarrative, checkHtml, checkStructure, getEnums, checkTerminology, checkTerminologyContent, checkEffectiveType, parseSMarkers, parseSMarkerDetail, sectionOfStep, checkR5Contract, checkVerdictConsistency, checkCompletionMatrix, checkS7Contract, normalizeEnumValue, TYPE1, TYPE2, checkV1_V6, checkC1_C7, checkS8Coherence, parseS82Table, checkS82Anchors, matchTurnToRoster, checkSideTriplet, normalizeRoleTag, W2_MIN_UNRESOLVABLE, W2_RATIO, checkS8, checkS17Table, checkOutputShape, checkCompletionConsistency, detectNewContract, detectNewContractFromText, deriveDirection, applyDerivations, check55Guard, checkS102Overstrict, normalizeForCompare, CROSS_FORMAT_COMPARE_POINTS, R2_5_DOMAIN_RE, R3_DOMAIN_RE, LENGTH_GATE_RULES, checkC7DataContract, isNewContractHeader };

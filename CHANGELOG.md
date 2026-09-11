@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-11
+
+- Fixed substantive S8 P1/P2/P3 and S8 completion-consistency validation so it no longer depends on the historical compatibility marker `S8.COMPLETE`.
+- Unified dictionary-side literal extraction across approved `data` / `allData` aliases and added public regression coverage for the no-bypass authority contract.
+- Aligned the canonical Skill rule table with current runtime authority and rebuilt the single-file browser distribution from the synchronized source.
+- Hardened public release acceptance and ignore rules against accidental inclusion of local evaluation datasets and corpus files.
+
 ## [0.1.1] - 2026-09-07
 
 - Reduced the repository to one canonical Skill source: `Skill-Judge.md`.

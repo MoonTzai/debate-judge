@@ -1,4 +1,4 @@
-// key-extract.js — 键形提取单一引擎（卡 5，260815；公开运行不依赖私有设计文件）
+// key-extract.js — 键形提取单一引擎（卡 5，260815——方案见 Upload/方案-260815-卡5-键形引擎合并-细化方案.md）
 // 权威 = key-checker consumeKeys 文档化 7 形态（消费侧）+ gic extractDataKeys 字典侧形态；
 // key-checker / generate-input-contract 均 require 本模块——防双引擎漂移（KE-1）。
 // 设计：执行函数式接口（每调用内部新建正则——无共享 lastIndex 污染）；
@@ -80,10 +80,12 @@ function scanVarTemplate(src) {
 // ---------- 字典侧形态扫描（gic extractDataKeys 原语；返回 [{key, index}]） ----------
 
 function scanDictQuote(src) {
-  const re = /data\['([^']+)'\]|data\["([^"]+)"\]/g;
+  // Approved data-container aliases only. Keep this literal-only: dynamic forms such as
+  // allData['S1.' + side + '人数'] must not be materialized as bogus dictionary keys.
+  const re = /\b(?:data|allData)\s*\[\s*(['"])([^'"\n]{1,60})\1\s*\]/g;
   const out = [];
   let m;
-  while ((m = re.exec(src)) !== null) out.push({ key: m[1] || m[2], index: m.index });
+  while ((m = re.exec(src)) !== null) out.push({ key: m[2], index: m.index });
   return out;
 }
 function scanDictOrEmpty(src) {
