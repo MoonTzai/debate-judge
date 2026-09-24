@@ -155,9 +155,9 @@
       thinkingJsonHint: '示例：DeepSeek 系 {"thinking":{"type":"enabled"},"thinking_budget":4096}；OpenAI 系 {"reasoning_effort":"medium"}。端点不支持时会自动降级为不附加（自适应保险）。',
       costHint: '费用提示：完整全链路实际消耗可能达到百万级 Token，请以风险提示页的实测区间为参考并留意账户余额。默认单请求输出上限 384K；Judge 核心上下文硬门为 1M tokens（超限即停止，不裁剪降级）。「本地冒烟」= 不联网、用假数据跑通全流程。',
       testApi: '🔌 连通性测试',
-      tendTitle: '⚖️ 裁判倾向（三维度六向度权重调节）',
-      tendH4a: '① 三维整体权重（评委大倾向）+ 随机性（第四轴）',
-      tendNoteA: '说服 / 证明 / 第三方 三个维度的整体权重，0–100。全部为 0 = <b>中立（自动）</b>——由比赛内容驱动，LLM 自行选择匹配的判准框架。<b>随机性</b>与三轴并列（第四轴）：模型采样随机性 0.00–1.00（轴值 ÷100），默认推荐 30（=0.30）。',
+      tendTitle: '⚖️ 裁判倾向（三维优先级与六向度看重程度)',
+      tendH4a: '① 三维相对优先级（评委大倾向）+ 随机性',
+      tendNoteA: '说服 / 证明 / 第三方：<b>0=自动（未指定）</b>；正值用于排列手动侧重，越大越优先，同值并列。只指定一维时，即使小于50也优先该维，<b>不是降低该维权重</b>；未指定维度仍参与评判。此处不是百分比或加减分公式。全部为0时自动选择判准。<b>随机性</b>单独控制模型采样（轴值÷100，默认30=0.30）。',
       tendH4b: '② 六向度看重程度（单向 · 100=极高，0=不在意，50=常规）',
       tendH4c: '③ 维内倾向（派生 · 由同轴一对向度对比决定）',
       tendNoteB: '六向度都是<b>单向的看重程度</b>（不是双向人格滑杆）：每个维度内部倾向（如批判者 vs 审判者）不是单独调的，而是由该轴对应一对向度的权重对比<b>自动派生</b>。全部三维 0 + 六向度 50 = 内容驱动（auto）。',
@@ -169,10 +169,10 @@
       tendProfileNone: '本机没有已明确保存的评委人格测试配置。请先在“评委人格测试”结果页手工保存，或使用 JSON 导入。',
       tendProfileInvalid: '评委人格配置无效：',
       tendProfileConfirmPre: '检测到评委人格测试配置',
-      tendProfileConfirmV1Tail: '。\n这是旧版 v1：仅覆盖六向度；三维整体权重与随机性保持当前值不变。\n确认应用？',
-      tendProfileConfirmV2Tail: '。\n这是新版 v2：将覆盖三维整体权重与六向度；随机性保持当前值不变。\n确认应用？',
-      tendProfileAppliedV1: '已应用旧版评委人格测试的六向度配置。三维整体权重与随机性未修改。',
-      tendProfileAppliedV2: '已应用新版评委人格测试的三维整体权重与六向度配置。随机性未修改。',
+      tendProfileConfirmV1Tail: '。\n这是旧版 v1：仅覆盖六向度；三维相对优先级与随机性保持当前值不变。\n确认应用？',
+      tendProfileConfirmV2Tail: '。\n这是新版 v2：将覆盖三维相对优先级与六向度；随机性保持当前值不变。\n确认应用？',
+      tendProfileAppliedV1: '已应用旧版评委人格测试的六向度配置。三维相对优先级与随机性未修改。',
+      tendProfileAppliedV2: '已应用新版评委人格测试的三维相对优先级与六向度配置。随机性未修改。',
       depthTitle: '🎚 报告深度与选项',
       depthHint: '默认三项均为<b>管道默认档</b>（质量最优配置，与 CLI 管道完全一致）；调高/调低会相应增删报告内容。',
       depthVerdict: '胜负判决详细度',
@@ -189,7 +189,7 @@
       depthClashDetail: '逐回合全部',
       optPlain: ' 生成白话版报告（--plain，默认开启·追加 LLM 翻译批）',
       optReaderGuide: ' 生成章节导览（R8，默认开启·主裁决完成后追加导览与独立复核）',
-      optSkipRoster: ' 跳过名册人工确认（--skip-roster-confirm）',
+      optSkipRoster: ' 自动识别名册并继续（不确定项另行提示）',
       plainDictLabel: '外部白话字典（--plain-dict，可选）',
       plainDictHint: '上传 {词:释义} JSON 覆盖核心词条；不传则用核心字典。',
       plainDictLoadedPre: '已加载 ',
@@ -445,17 +445,17 @@
     },
     tend: {
       randomAxis: '随机性',
-      dimAuto: '中立（自动）',
+      dimAuto: '自动（未指定）',
       tempDefault: '默认推荐30',
       derivedPrefix: '偏',
       neutral: '中立',
       autoPreview: '当前 = 内容驱动（auto）',
       relativePreview: '六向度相对占比预览',
-      helpTitle: '📖 裁判倾向说明（三维度六向度权重调节）',
-      helpP1: '<p><b>① 三维整体权重（评委大倾向）+ 随机性（第四轴）</b>：说服 / 证明 / 第三方，各 0–100。决定你作为裁判的整体侧重（比如「我主要看论证严谨性，说服力次之」）。<b>全部为 0 = 中立（自动）</b>——由比赛内容驱动，LLM 根据辩词自行选择匹配的判准框架；同一场多次运行结果基本一致。第四轴<b>随机性</b>与三维并列：模型采样随机性 0.00–1.00（轴值 ÷100），默认推荐 30（=0.30）。</p>',
+      helpTitle: '📖 裁判倾向说明（三维优先级与六向度看重程度）',
+      helpP1: '<p><b>① 三维相对优先级</b>：说服 / 证明 / 第三方，各0–100。0表示自动、未指定，仍参与评判；正值只用于排列手动侧重，越大越优先，同值并列。只指定一维时该维优先，即使数值小于50也不是降权。全部为0时由题制、题义和论证义务自动选择判准。<b>随机性</b>单独控制采样，轴值÷100，默认30=0.30；多次运行不保证相同结果。</p>',
       helpP2: '<p><b>② 六向度看重程度</b>：证伪 / 证成 / 理性 / 感性 / 场面感 / 意义感，各 0–100。<b>单向语义</b>：100 = 极高，0 = 不在意，50 = 常规。六个向度始终全部参与评判，只是看重程度不同。</p>',
       helpP3: '<p><b>③ 维内倾向（派生，不单独调节）</b>：每个轴的人格倾向不是独立滑杆，而是由同轴一对向度的对比<b>自动派生</b>——证明轴：证伪 vs 证成（证伪高 → 偏批判者·证伪导向；证成高 → 偏审判者·自证导向）；说服轴：理性 vs 感性（理性高 → 偏卫道者·常识侧；感性高 → 偏问道者·新视角侧）；第三方轴：场面感 vs 意义感（场面感高 → 偏技术者·操作流畅；意义感高 → 偏艺术者·深度审美）；相等 = 该轴中立。</p>',
-      helpP4: '<p><b>生效方式</b>：全部滑块 → 自然语言注意力引导文本 → 注入每一轮提示词头（与 CLI <code>--tendency</code> 同通道）。是注意力倾向性引导，不是数学公式。</p>',
+      helpP4: '<p><b>生效方式</b>：全部滑块 → 自然语言注意力引导文本 → 送入 R1–R5 核心分析与报告轮次；R3 说明采用方式，R4.5 对照原始设置复核。名册保持事实独立，白话与导览继承已有裁决。CLI 可用 <code>--run-settings</code> 或 <code>--tendency</code>。是注意力倾向性引导，不是数学公式。</p>',
       helpP5: '<p><b>示例</b>：三维证明 80 / 六向度证伪 90、证成 50 → 裁判整体侧重证明侧，证明轴内偏批判者（证伪导向），证成向度仍按常规权重参与。</p>',
       helpClose: '知道了'
     },
@@ -503,6 +503,7 @@
   var running = false;
   var abortController = null;
   var currentSession = null;   // {dir, title}
+  var runEvidenceLines = [];   // 本次运行完整文本；DOM 的 800 行显示上限不裁剪导出。
   var pendingResume = null;    // {dir}：历史断点已恢复到 VFS，但尚未开始任何 API
   var fetchManager = null;
   var modelListItems = [];
@@ -608,7 +609,7 @@
       thinkingJson: '{"thinking":{"type":"enabled"},"thinking_budget":4096}',
       plain: true,
       readerGuide: true,
-      skipRosterConfirm: false,
+      skipRosterConfirm: true,
       plainDictExt: null,
       depth: { verdict: '标准', mainline: '标准全景图', clash: '标准5-8个' },
       dimWeights: { 说服: 0, 证明: 0, 第三方: 0 },
@@ -1318,7 +1319,7 @@
       '          <button class="btn" id="btn-back-run">' + TXT.run.backRun + '</button>' +
       '        </div>' +
       '        <div class="tribunal-evidence">' +
-      '          <div class="surface-subtitle">Log / Evidence</div>' +
+      '          <div class="evidence-heading"><div class="surface-subtitle">Log / Evidence</div><button class="btn small" id="btn-export-log" type="button" disabled>导出日志</button></div>' +
       '          <div class="logbox" id="logbox"></div>' +
       '        </div>' +
       '      </section>' +
@@ -1462,7 +1463,7 @@
     for (var i = 0; i < TEND_DIM_KEYS.length; i++) {
       var k = TEND_DIM_KEYS[i];
       var dv = settings.dimWeights[k] || 0;
-      if (dRows[i]) dRows[i].querySelector('.tdev').textContent = dv === 0 ? TXT.tend.dimAuto : tendencyMod.valueLabel(dv);
+      if (dRows[i]) dRows[i].querySelector('.tdev').textContent = tendencyMod.dimValueLabel(dv);
     }
     // 随机性轴标签（第四轴）
     var tempRow = document.querySelector('#dim-grid .tend-row-temp');
@@ -1766,7 +1767,23 @@
     if (/错误|失败/.test(s)) return 'error';
     return 'neutral';
   }
+  function clearRunEvidence() {
+    runEvidenceLines = [];
+    $('logbox').innerHTML = '';
+    var button = $('btn-export-log');
+    if (button) button.disabled = true;
+  }
+  function exportRunEvidence() {
+    if (!runEvidenceLines.length) return;
+    // Snapshot now; an active model request can continue appending while saving.
+    var text = 'Log / Evidence\n\n' + runEvidenceLines.join('\n') + '\n';
+    return exportFile('judge-web-log-' + tsName() + '.txt', text, 'text/plain;charset=utf-8', { kind: 'run-log' });
+  }
   function logLine(text) {
+    text = String(text == null ? '' : text);
+    runEvidenceLines.push(text);
+    var button = $('btn-export-log');
+    if (button) button.disabled = false;
     var box = $('logbox');
     if (!box) return;
     var line = document.createElement('div');
@@ -1963,6 +1980,24 @@
       }
       rec.reportReady = !!(r8Snapshot[workDir + '/report.html']);
       fileRecord = makeSessionFileRecord(workDir + '#RZZR8', r8Files);
+    } else if (patch.filesOp === 'semantic-checkpoint') {
+      // S4A-I3：semantic-first shadow 的 request/raw/source/context/issue/current 全部来自同一 VFS subtree。
+      // 用固定覆盖记录保存完整 subtree；这样刷新/重开恢复时不会依赖“内存里曾经写过”。
+      var semanticSnapshot = engine.snapshotSession(workDir);
+      var semanticPrefix = workDir + '/.semantic-first-v1/';
+      var semanticFiles = {};
+      var semanticCount = 0;
+      for (var semanticKey in semanticSnapshot) {
+        if (semanticKey.slice(0, semanticPrefix.length) !== semanticPrefix) continue;
+        semanticFiles[semanticKey] = semanticSnapshot[semanticKey];
+        semanticCount++;
+      }
+      if (!semanticCount) {
+        console.warn('[judge-web] semantic checkpoint 缺少 .semantic-first-v1 subtree:', workDir, patch.phase || '');
+        return Promise.resolve(false);
+      }
+      rec.reportReady = !!(semanticSnapshot[workDir + '/report.html']);
+      fileRecord = makeSessionFileRecord(workDir + '#RZZSEMANTIC', semanticFiles);
     } else if (patch.filesOp === 'final') {
       nextBase = engine.snapshotSession(workDir, ['/input']);
       rec.reportReady = !!(nextBase[workDir + '/report.html']);
@@ -2351,19 +2386,22 @@
       $('history-count').textContent = TXT.sess.countPre + parts[4].length + TXT.sess.countSep + historyPolicy.maxSessions + TXT.sess.countTail + (archiveSearchQuery ? ' · 显示 ' + archiveVisibleCount : '');
     }).catch(function () {});
   }
-  function exportSessionRunMeta(s) {
+  async function exportSessionRunMeta(s) {
     try {
       if (!engine) initEngine();
       var dumpMeta = function (run) {
-        exportFile(TXT.sess.metaFile + tsName() + '.json', JSON.stringify({
+        return exportFile(TXT.sess.metaFile + tsName() + '.json', JSON.stringify({
           kind: 'judge-web-run-v1',
           session: { id: s.id, title: s.title, createdAt: s.createdAt, updatedAt: s.updatedAt, status: s.status },
           run: run
         }, null, 2), 'application/json', { kind: 'run-meta' });
       };
-      if (s.run) { dumpMeta(s.run); return; }
-      getSessionFiles(s.dir).then(function (files) { dumpMeta(engine.buildRunModelFromFiles(s.dir, files || {})); }).catch(function () {});
-    } catch (e) {}
+      var run = s.run || engine.buildRunModelFromFiles(s.dir, await getSessionFilesReadOnly(s.dir) || {});
+      return await dumpMeta(run);
+    } catch (e) {
+      alert('元数据导出失败：' + (e && e.message ? e.message : e));
+      return { ok: false, error: e };
+    }
   }
   function versionReportHtml(version) {
     var files = version && version.files && typeof version.files === 'object' ? version.files : {};
@@ -2604,7 +2642,7 @@
     }
     if (!settings.plain) roundState.R7 = 'skipped';
     if (settings.readerGuide !== true) roundState.R8 = 'skipped';
-    $('logbox').innerHTML = '';
+    clearRunEvidence();
     showScene('run');
     renderTimeline(null);
     setTribunalCurrentRound(null, TXT.run.resumeReady);
@@ -2770,6 +2808,19 @@
     var internal = !!(doc && doc.trust === 'internal');
     var trust = $('report-trust-status');
     if (trust) trust.textContent = internal ? 'Judge 正式报告 · 可信阅读' : '外部 HTML · 隔离阅读';
+    if (trust) {
+      trust.title = '';
+      if (internal && doc.workDir && engine) {
+        try {
+          var sourceRecord = engine.snapshotSession(doc.workDir)[doc.workDir + '/source-anchor.json'];
+          var rosterNotes = BUNDLE.loadModule('/executor/sc-source-roster.js').warnings(JSON.parse(sourceRecord || '{}'));
+          if (rosterNotes.length) {
+            trust.textContent += ' · 名册有 ' + rosterNotes.length + ' 项待核对（见运行记录）';
+            trust.title = rosterNotes.join('\n');
+          }
+        } catch (rosterNoteError) { /* External/imported reports may have no source index. */ }
+      }
+    }
     var plain = $('report-plain-toggle'), sections = $('report-sections-toggle'), theme = $('report-theme-toggle');
     if (plain) plain.disabled = !internal;
     if (sections) sections.disabled = !internal;
@@ -2891,7 +2942,11 @@
   }
   function exportFile(name, content, type, meta) {
     var blob = content instanceof Blob ? content : new Blob([content], { type: type || 'application/octet-stream' });
-    return judgeHostIO.saveBlob(blob, name, meta || { mimeType: type || 'application/octet-stream' }).catch(function (e) {
+    return judgeHostIO.saveBlob(blob, name, meta || { mimeType: type || 'application/octet-stream' }).then(function (result) {
+      if (result && (result.cancelled || result.canceled)) return result;
+      if (result === false || (result && result.ok === false)) throw new Error(result && result.error ? String(result.error.message || result.error) : '保存未完成');
+      return result;
+    }).catch(function (e) {
       alert('导出失败：' + (e && e.message ? e.message : e));
       return { ok: false, error: e };
     });
@@ -3054,8 +3109,12 @@
       }
       var exportedAt = new Date().toISOString();
       var archive = flightExportMod.buildFlightExportArchive({ sessions: sources, exportedAt: exportedAt });
-      await exportFile('judge-web-flight-all-' + tsName() + '.zip', archive.bytes, 'application/zip', { kind: 'flight-batch-evidence', sessionCount: sources.length });
-      if (status) status.textContent = '已导出 ' + sources.length + ' 个历史会话的已持久化 Flight 证据；缺失/截断项见 manifest.json。';
+      var saved = await exportFile('judge-web-flight-all-' + tsName() + '.zip', archive.bytes, 'application/zip', { kind: 'flight-batch-evidence', sessionCount: sources.length });
+      if (saved && (saved.cancelled || saved.canceled)) { if (status) status.textContent = '已取消导出。'; return; }
+      if (saved && saved.ok === false) { if (status) status.textContent = '导出失败：保存未完成。'; return; }
+      var summary = flightExportMod.summarizeFlightManifest(archive.manifest);
+      if (status) status.textContent = '已导出 ' + summary.sessions + ' 个历史会话、' + summary.requests + ' 条已持久化请求。' +
+        (summary.complete ? '清单未发现缺失、截断或不一致。' : '清单发现 ' + summary.missingItems + ' 项会话/运行索引问题、' + summary.affectedRequests + ' 条请求证据异常（截断 ' + summary.truncatedRequests + ' 条）；详情见 manifest.json。');
     } catch (e) {
       if (status) status.textContent = '导出失败：' + (e && e.message ? e.message : e);
     } finally {
@@ -3149,11 +3208,7 @@
   }
 
   function stripHtml(html) {
-    return String(html || '')
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
+    return BUNDLE.loadModule('/web/report-markdown.js').toMarkdown(html);
   }
 
   // ================= 主流程 =================
@@ -3470,7 +3525,7 @@
     $('btn-run').disabled = true;
     $('btn-stop').disabled = false;
     $('btn-sessions').disabled = true;
-    $('logbox').innerHTML = '';
+    clearRunEvidence();
     roundState = {};
     if (!settings.plain) roundState.R7 = 'skipped';
     if (settings.readerGuide !== true) roundState.R8 = 'skipped';
@@ -3528,6 +3583,20 @@
         },
         onStage: function (s) {
           if (!s || !s.stage) return;
+          if (s.stage === 'ANALYSIS-REVIEW') {
+            (s.invalidatedNodes || []).forEach(function (r) { markRound(r, 'pending'); });
+            setTribunalCurrentRound(s.targetRound, '回查实质异议');
+            logLine('已保存前一版分析，回到 ' + s.targetRound + ' 核对具体异议并重建下游');
+            return;
+          }
+          if (s.stage === 'ROSTER') {
+            if (s.state !== 'active') { commitLiveEstimate(); liveProgress = null; liveLastAt = Date.now(); }
+            setTribunalCurrentRound('名册', s.state === 'active' ? '根据完整辩词识别身份' : s.state === 'done' ? '识别完成' : '识别中断');
+            anchorLabel = s.state === 'done' ? '名册识别完成；不确定项见运行日志' : '名册语义识别';
+            $('pn-anchor').textContent = anchorLabel;
+            if (s.state !== 'active') logLine('[名册] ' + (s.state === 'done' ? '完成' : '中断'));
+            return;
+          }
           if (s.state === 'active') {
             roundState[s.stage] = 'active';
             setTribunalCurrentRound(s.stage, '处理中');
@@ -3547,6 +3616,7 @@
           // W-T5（U6，R7-A2）：persist 钩子 = rec.run 唯一写入口——pipeline-done/error 两时点带 patch（含 !res.ok 门禁耗尽失败路径——
           // engine L313-315 在 !res.ok 时也调 persist('pipeline-done')，无 L1188-1190 分支补写）；round-done/start 不带 patch（不写 rec.run）
           // C5：filesOp 三态——base（起始基线）/ round（轮级增量）/ final（终态全量 + 清轮级）
+          if (step === 'analysis-review-epoch') return persistSession(dir, { filesOp:'base', resumeEpoch:true });
           if (step === 'pipeline-start') {
             // Flight Recorder 只在正式真实 API run 绑定；同步旁路，不 await、不进入 Judge persist 结果。
             if (flightRecorder && settings.provider !== 'mock') {
@@ -3570,6 +3640,9 @@
             }
             return persistSession(dir, { filesOp: 'plain-batch', batchIndex: payload && payload.index });
           }
+          if (step === 'semantic-checkpoint') {
+            return persistSession(dir, { filesOp: 'semantic-checkpoint', phase: payload && payload.phase });
+          }
           if (step === 'round-done') return persistSession(dir, { filesOp: 'round', roundName: payload && payload.round ? payload.round.round : null });
           if (step === 'pipeline-done' || step === 'pipeline-error') {
             if (flightRecorder && settings.provider !== 'mock') {
@@ -3587,6 +3660,10 @@
       if (res.aborted) {
         $('run-status').textContent = TXT.run.statusAborted;
         logLine(TXT.run.logAborted);
+      } else if (!res.ok && res.postprocessFailed && res.semanticOk && !res.persistenceFailed) {
+        $('run-status').textContent = '主报告已生成；R8 章节导览待处理';
+        logLine('R8 尚未完成：' + (res.error || '请查看复核记录'));
+        logLine((res.reportPlain ? '主报告和白话报告已保存' : '主报告已保存') + '，可从历史记录查看；R8 问题按其实际影响处理。');
       } else if (!res.ok) {
         $('run-status').textContent = TXT.run.statusFailed;
         logLine(TXT.run.logPipelineFail + (res.error || TXT.run.gateBlocked));
@@ -4056,6 +4133,7 @@
     $('btn-run').onclick = function () { startRun({ force: false }); };
     $('btn-resume-run').onclick = startPreparedResume;
     $('btn-stop').onclick = stopRun;
+    $('btn-export-log').onclick = exportRunEvidence;
     $('btn-return-report').onclick = returnToCurrentReport;
     $('btn-back-run').onclick = navigateJudgeBack;
     $('btn-report-run-log').onclick = openRunLogFromReport;

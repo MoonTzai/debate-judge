@@ -107,21 +107,38 @@ function deriveAxis(axis,v) {
   return {axis:axis.key,side:side,strength:strength,diff:diff,text:axis.key+strength+'偏'+side.name+'（'+side.tag+'：'+axis.pair[0]+' '+lowV+' vs '+axis.pair[1]+' '+highV+'）'};
 }
 function deriveAllAxes(vectorInput) { var v=normalizeVectorWeights(vectorInput); return AXES.map(function(a){return deriveAxis(a,v);}); }
+// Dimensions are relative declared priorities; vector values retain their own scale.
+function dimValueLabel(v) { return v===0 ? '自动' : '手动'; }
 function dimLineText(d) {
   var active=DIM_KEYS.filter(function(k){return d[k]!==0;});
-  if (!active.length) return '三维权重：说服 0 ｜ 证明 0 ｜ 第三方 0（中立·自动——由比赛内容驱动，LLM 自行选择匹配的判准框架）';
-  var parts=DIM_KEYS.map(function(k){return k+' '+d[k]+'（'+valueLabel(d[k])+'）';});
-  var order=DIM_KEYS.slice().sort(function(a,b){return d[b]-d[a];});
-  return '三维权重：'+parts.join(' ｜ ')+'——整体侧重：'+order[0]+'侧为主'+(d[order[1]]>0?'，'+order[1]+'侧次之':'')+(d[order[2]]>0?'，'+order[2]+'侧为参考':'')+(active.length<3?'（其余维自动）':'');
+  if (!active.length) return '三维优先级：全部自动（未指定）；依据题制、题义与论证义务选择判准，不由现有分差倒推。';
+  var parts=DIM_KEYS.map(function(k){return k+' '+d[k]+'（'+dimValueLabel(d[k])+'）';});
+  var values=active.map(function(k){return d[k];}).filter(function(v,i,a){return a.indexOf(v)===i;}).sort(function(a,b){return b-a;});
+  var groups=values.map(function(v){return active.filter(function(k){return d[k]===v;}).join('、');});
+  return '三维优先级：'+parts.join(' ｜ ')+'——手动侧重顺序：'+groups.join(' > ')+'（同值并列；只指定一维时该维优先，数值低于50也不是降权；0为未指定，仍由内容判断）。';
 }
 function tendencyText(dimInput,vectorInput) {
   var d=normalizeDimWeights(dimInput),v=normalizeVectorWeights(vectorInput); if(isAuto(d,v)) return '';
-  var lines=['本场裁判倾向（由用户设定·三维权重 + 六向度看重程度）：',dimLineText(d)];
+  var lines=['本场裁判倾向（由用户设定·三维相对优先级 + 六向度看重程度）：',dimLineText(d)];
   lines.push('六向度看重程度：'+DIMENSIONS.map(function(k){return k+' '+v[k]+'（'+valueLabel(v[k])+'）';}).join(' ｜ ')+'（100=极高，0=不在意，50=常规）');
-  var derived=deriveAllAxes(v).filter(function(a){return a.side;});
+  var derived=deriveAllAxes(v);
   if(derived.length) lines.push('维内倾向（由同轴两向度对比派生）：'+derived.map(function(a){return a.text;}).join(' ｜ '));
-  lines.push('说明：三维权重决定整体侧重；各维内部倾向由对应一对向度的权重对比共同决定；六向度全部参与评判，仅看重程度不同。此为自然语言注意力引导，不参与数学公式计算。');
+  lines.push('说明：三维正值表达用户指定的相对优先级，同值不分主次，0不等于忽略该维；各维内部倾向由对应一对向度的权重对比共同决定；六向度全部参与评判，仅看重程度不同。此为自然语言注意力引导，不参与数学公式计算。');
   return lines.join('\n');
+}
+// This review result belongs to the LLM. Code checks transport, never prose semantics.
+function tendencyReviewPrompt(tendency, round) {
+  if (!tendency || !['R3','R4.5'].includes(round)) return '';
+  var text='\n\n## 用户设置与实际判准复核\n用户原始设定以本轮开头声明为准；S9/S15是待核对的模型分析，不能反过来覆盖用户。区分三维相对优先级、维内看重程度与实际比赛证据；不得因分差最大而选择主导轴，不把数值当百分比或指定胜方。默认/中立不等于取消该维度。请结合完整理由判断采用方式是否忠实，不按词语、标签顺序或是否换胜方验收。\n';
+  if (round==='R3') return text+'在现有S9倾向自述与S15判准理由中自然说明采用方式；不增加报告章节。若认为某设定在本题存在适用问题，明确解释，不能假称未设定或静默换成另一人格。\n';
+  return text+'独立比较原始设定与P3实际采用方式，审查具体理由，而不只检查S9与S15彼此一致。语义相容、同义改写或不同说明顺序均可通过；实质未遵从且无充分解释时，交R3复核。除已有review_requests可直接提出重大异议外，在正常仲裁JSON顶层增加 tendency_review: {"consistent":true,"reason":"对实际采用方式的具体解释"}。consistent是你的语义判断；不相容填false并解释，执行器交回R3一次。reason为自由文字，无关键词、固定长度或预设结论。此字段记录复核，不改变原有冲突表、得分和报告结构。\n';
+}
+function assessTendencyReview(adj, tendency) {
+  if (!tendency) return [];
+  var r=adj && adj.tendency_review;
+  if (!r || typeof r.consistent!=='boolean' || typeof r.reason!=='string' || !r.reason.trim())
+    throw new Error('请完成用户设定与实际判准的语义复核，返回 tendency_review 的 consistent 布尔值与非空 reason；不要求改判或使用固定措辞');
+  return r.consistent ? [] : [{targetRound:'R3',issue:r.reason,evidence:tendency,impact:'复核用户设定与实际判准是否相容，按原文维持或修订理由及必要下游；不强制换胜方'}];
 }
 function normalizeDepth(depth) {
   return { verdict:depth&&depth.verdict?String(depth.verdict):DEPTH_DEFAULTS.verdict,
@@ -177,6 +194,6 @@ function analysisProfileHash(settings){var n=normalizeRunSettings(settings);retu
 module.exports={
   DIM_KEYS:DIM_KEYS,DIM_DEFAULT:DIM_DEFAULT,DIMENSIONS:DIMENSIONS,VECTOR_DEFAULT:VECTOR_DEFAULT,PROFILE_KIND:PROFILE_KIND,PROFILE_VERSION:PROFILE_VERSION,PROFILE_V2_KIND:PROFILE_V2_KIND,PROFILE_V2_VERSION:PROFILE_V2_VERSION,AXES:AXES,DEPTH_DEFAULTS:DEPTH_DEFAULTS,
   KIND:CONTEXT_KIND,VERSION:CONTEXT_VERSION,DEFAULT_CONTEXT:DEFAULT_CONTEXT,USE_MODES:USE_MODES,BACKGROUND_MODES:BACKGROUND_MODES,BACKGROUND_DOMAINS:BACKGROUND_DOMAINS,FAMILIARITY:FAMILIARITY,VALUE_CONCERNS:VALUE_CONCERNS,PERSPECTIVES:PERSPECTIVES,
-  normalizeDimWeights:normalizeDimWeights,normalizeVectorWeights:normalizeVectorWeights,normalizeTendencyProfile:normalizeTendencyProfile,valueLabel:valueLabel,isAuto:isAuto,deriveAxis:deriveAxis,deriveAllAxes:deriveAllAxes,dimLineText:dimLineText,tendencyText:tendencyText,normalizeDepth:normalizeDepth,isDefaultDepth:isDefaultDepth,depthBlockText:depthBlockText,
-  normalizeJudgeContext:normalizeJudgeContext,projectJudgeContext:projectJudgeContext,contextSummary:contextSummary,normalizeRunSettings:normalizeRunSettings,analysisProfileHash:analysisProfileHash,stableJson:stableJson,sha256Hex:sha256Hex
+  normalizeDimWeights:normalizeDimWeights,normalizeVectorWeights:normalizeVectorWeights,normalizeTendencyProfile:normalizeTendencyProfile,valueLabel:valueLabel,dimValueLabel:dimValueLabel,isAuto:isAuto,deriveAxis:deriveAxis,deriveAllAxes:deriveAllAxes,dimLineText:dimLineText,tendencyText:tendencyText,normalizeDepth:normalizeDepth,isDefaultDepth:isDefaultDepth,depthBlockText:depthBlockText,
+  normalizeJudgeContext:normalizeJudgeContext,projectJudgeContext:projectJudgeContext,contextSummary:contextSummary,normalizeRunSettings:normalizeRunSettings,tendencyReviewPrompt:tendencyReviewPrompt,assessTendencyReview:assessTendencyReview,analysisProfileHash:analysisProfileHash,stableJson:stableJson,sha256Hex:sha256Hex
 };

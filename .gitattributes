@@ -8,3 +8,4 @@ MANIFEST.sha256 text eol=lf
 *.css text eol=lf
 *.html text eol=lf
 *.txt text eol=lf
+*.cff text eol=lf

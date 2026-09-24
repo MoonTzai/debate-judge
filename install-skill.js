@@ -29,10 +29,15 @@ const BLOCKS = [
   { name: 'EXECUTOR_CORE', file: 'executor/core.js', lang: 'javascript' },
   // Wayfinder frozen A59 narrow runtime control plane: shared Node/Web, no production authority cutover by itself.
   { name: 'WAYFINDER_RUNTIME', file: 'executor/wayfinder-runtime.js', lang: 'javascript', semantic_core: true, module_id: 'SEMCORE::WAYFINDER_NODE_COMMIT_TYPE_RESOLUTION_ABI_V1' },
+  { name: 'SEMANTIC_WORKFLOW', file: 'executor/semantic-workflow.js', lang: 'javascript', semantic_core: true, module_id: 'SEMCORE::SEMANTIC_WORKFLOW_V1' },
+  // S4B portable-active：production store 是共享运行时 substrate；private lifecycle/audit state 仍不进入单文件。
+  { name: 'SEMANTIC_PRODUCTION_STORE', file: 'executor/semantic-production-store.js', lang: 'javascript', semantic_core: true, module_id: 'SEMCORE::SEMANTIC_PRODUCTION_STORE_V1' },
   { name: 'EXECUTOR_HOST_NODE', file: 'executor/host-node.js', lang: 'javascript' },
   { name: 'EXECUTOR_CODEX_CLI', file: 'executor/codex-cli.js', lang: 'javascript' },
   { name: 'EXECUTOR_BROWSER', file: 'executor/browser.js', lang: 'javascript' },
   // 卡 6（260815）：产物契约模块（parseInputs 单一契约输入层——PC/RR/前端消费）
+  { name: 'SC_ORIGINAL_INTEGRATION', file: 'executor/sc-original-integration.js', lang: 'javascript' },
+  { name: 'SC_SOURCE_ROSTER', file: 'executor/sc-source-roster.js', lang: 'javascript' },
   { name: 'EXECUTOR_CONTRACT', file: 'executor/contract.js', lang: 'javascript' },
   // 卡 1（260816）：校验器簇独立模块（validate 单一接口——PC 委托消费）
   { name: 'EXECUTOR_VALIDATOR', file: 'executor/validator.js', lang: 'javascript' },
@@ -45,7 +50,8 @@ const BLOCKS = [
   { name: 'PLAIN_DICT', file: 'assets/plain-dict.json', lang: 'json' },
   { name: 'HTML_CONTRACT', file: 'scripts/html-contract.js', lang: 'javascript' },
   // 卡 5（260815）：键形提取单一引擎（key-checker/gic 双消费）
-  { name: 'KEY_EXTRACT', file: 'scripts/key-extract.js', lang: 'javascript' }
+  { name: 'KEY_EXTRACT', file: 'scripts/key-extract.js', lang: 'javascript' },
+  { name: 'CREATE_BASELINE', file: 'scripts/create-baseline.js', lang: 'javascript' }
 ].concat(
   ['criteria', 'index', 'model-snapshot', 'presentation', 'tendency'].map(s => ({
     name: 'SCHEMA_' + s.toUpperCase().replace(/-/g, '_'),
@@ -76,6 +82,7 @@ function parseArgs(argv) {
   return {
     skill: get('--skill') || path.join(SCRIPT_DIR, 'Skill-Judge.md'),
     work: get('--work') || path.join(SCRIPT_DIR, 'work-omega1-extracted'),
+    workExplicit: argv.includes('--work'),
     codexSkills: get('--codex-skills') || (process.env.CODEX_HOME
       ? path.join(process.env.CODEX_HOME, 'skills')
       : path.join(os.homedir(), '.codex', 'skills')),
@@ -230,7 +237,7 @@ license: MIT
 3. 禁止扫描 \`Output/\` 或 \`archive/\` 查找/复用旧产物（旧 transition/叙事/structure）；\`archive/\` 仅供人工追溯，执行器自动流程一律不读取（仅用户显式 \`--output-dir\` 指向时允许）。
 4. 生成完整报告时，必须在本轮新目录中产出本次中间文件后再渲染；不得复制旧目录产物。
 
-- **裁判 = 完整真实的全流程全轮次管道（唯一方式）**：核心执行拓扑、产物图与后处理阶段以 canonical Runtime Protocol 与现役执行器为唯一权威，本壳不维护第二份拓扑。执行入口：\`node pipeline-controller.js pipeline run <辩词> --provider auto\`（executor 每轮使用独立上下文并逐轮独立 API 调用；auto 按环境探测 ANTHROPIC_*/OPENAI_*，可被显式 provider 覆盖）。
+- **裁判 = 完整真实的全流程全轮次管道（唯一方式）**：核心执行拓扑、产物图与后处理阶段以 canonical Runtime Protocol 与现役执行器为唯一权威，本壳不维护第二份拓扑。执行入口：\`node pipeline-controller.js pipeline run <辩词> --provider auto\`（executor 逐轮独立 API 调用；auto 按环境探测 ANTHROPIC_*/OPENAI_*，可被显式 provider 覆盖）。
 - **⛔ 禁止单会话直接裁判**：Codex/任何 Agent 不得在单个会话里“直接按 S1–S17 分析并输出判决”来代替八轮管道；不得把辩词分段总结后裁判。没有可用执行器（API 未配置/未授权）时，**明确告知“当前环境无法执行完整管道”并停止，禁止降级冒充**。
 - **以管道产物为准，禁止自行校准**：任何展示/报告（判决摘要、比分、主线类型、六向度）一律取自管道产物（transition-final/叙事/structure/report 的 DATA），不得由执行者凭对话印象“校准”或改写；辩词不裁剪、不总结，由 buildRoundPrompt 机械内嵌全文到每轮 prompt。
 - **禁止全文读取 Skill-Judge.md**（必须 SECTION 切片）；禁止把"完整读取技能文档"作为执行前提。
@@ -240,14 +247,14 @@ license: MIT
 
 - 本项目根目录下的 render-report.js / pipeline-controller.js / render-tables.js / install-skill.js / Skill-Judge.md（含内嵌块）/ assets / schemas / tests / rules / scripts 等程序文件**默认只读**。
 - **授权只认明确措辞**（批准实施/按方案修改/执行修改）；排查、梳理、方案、推送、审计、彻底解决等措辞不构成授权；禁止以意图推断代替授权。
-- 修改前必须输出拟改文件清单并等待用户批准；未授权时必须停止写盘。
+- 修改前必须输出拟改文件清单并等待用户批准；未授权修改将用 audit-baseline-*.zip 还原。
 - 开发仓库的审批规则只约束项目维护，不是安装后裁判运行依赖；普通裁判运行只读取 canonical Runtime Protocol。
 
 ## 项目维护入口（仅当用户要求查看状态/开发/审计时）
 
 - 若当前确实位于 Debate-Judge 开发仓库，再按该仓库当前控制面推进维护；外部安装环境不得假定存在任何 Upload 交接文件。
 - 纪律：以当前项目根目录主版本为唯一开发真源；archive/backup/历史工作区只用于追溯，不作为现役开发入口；先读源后写码；中文经 PowerShell 管道会损坏，用文件方式处理。
-- 门禁：\`node pipeline-controller.js self-check\`；公开发行回归：\`node tests/run-public.js\`。私有开发仓库可另有更广的内部审计套件，不构成公开发行依赖。
+- 门禁：\`node pipeline-controller.js self-check\`；回归：\`node tests/run-all.js\`。
 
 ## 规则加载纪律
 
@@ -258,6 +265,23 @@ license: MIT
 
 \`node install-skill.js --skill <新路径>\`；卸载 \`node install-skill.js --uninstall\`。
 `;
+}
+
+// 根目录主版本镜像同步：Skill-Judge.md 是项目主真源；Debate-Judge.md 与 Claude Skill 入口保持逐字一致。
+// install-skill.js 已位于项目根，禁止再向 SCRIPT_DIR 上一级写入任何项目文件。
+// 显式 --work 的交付冒烟仍跳过根镜像同步，避免测试安装改写当前项目入口。
+function syncRootShells(skillPath, _workDir) {
+  const projectRoot = SCRIPT_DIR;
+  const source = fs.readFileSync(path.resolve(skillPath), 'utf-8');
+  const targets = [
+    path.join(projectRoot, '.claude', 'skills', 'debate-judge', 'SKILL.md'),
+    path.join(projectRoot, 'Debate-Judge.md')
+  ];
+  for (const t of targets) {
+    fs.mkdirSync(path.dirname(t), { recursive: true });
+    fs.writeFileSync(t, source, 'utf-8');
+  }
+  console.log('[install-skill] 根主版本镜像已同步: .claude/skills/debate-judge/SKILL.md, Debate-Judge.md');
 }
 
 function main() {
@@ -288,10 +312,12 @@ function main() {
   fs.mkdirSync(shellDir, { recursive: true });
   fs.writeFileSync(path.join(shellDir, 'SKILL.md'), shellTemplate(args.skill, args.work), 'utf-8');
   console.log('已安装轻量壳: ' + path.join(shellDir, 'SKILL.md'));
+  // 默认安装流程同步项目根主版本镜像；显式 --work 的交付冒烟跳过，避免改写当前项目入口。
+  if (!args.workExplicit) syncRootShells(args.skill, args.work);
   console.log('');
   console.log('下一步：打开【新】Codex 会话（技能列表在会话启动时加载），输入「加载辩论裁判技能」或提及 debate-judge 即自动触发。');
   console.log('卸载：node install-skill.js --uninstall');
 }
 
 if (require.main === module) main();
-module.exports = { BLOCKS, shellTemplate, parseArgs, verify, writeWorkspace };
+module.exports = { BLOCKS, syncRootShells, shellTemplate, parseArgs, verify, writeWorkspace };

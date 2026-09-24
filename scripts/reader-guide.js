@@ -4,10 +4,10 @@
 const crypto = require('crypto');
 const readerGuideSchema = require('../schemas/reader-guide.schema.json');
 
-const SCHEMA_VERSION = 'r8-reader-guide-v2';
-const PROMPT_VERSION = 'r8-reader-guide-prompt-v2';
+const SCHEMA_VERSION = 'r8-reader-guide-v3';
+const PROMPT_VERSION = 'r8-reader-guide-prompt-v4';
 const PLAIN_SCHEMA_VERSION = 'r8-reader-guide-plain-v1';
-const PLAIN_PROMPT_VERSION = 'r8-reader-guide-plain-prompt-v3';
+const PLAIN_PROMPT_VERSION = 'r8-reader-guide-plain-prompt-v4';
 const SECTION_IDS = Array.from({ length: 12 }, (_, i) => 'C' + (i + 1));
 const GUIDE_OUTPUT_SCHEMA = readerGuideSchema.definitions.readerGuide;
 
@@ -28,16 +28,6 @@ function hashGuideInput(input) {
 function hashPlainGuideSource(guide) {
   return hashText(stableJson(guide));
 }
-
-const DATA_PREFIXES = {
-  C1: ['S1.', 'S15.'], C2: ['S2.', 'S11.'], C3: ['S3.', 'S7.'], C4: ['S4.'],
-  C5: ['S5.'], C6: ['S6.'], C7: ['S7.', 'S8.'], C8: ['R2.5.', 'C8.'],
-  C9: ['S9.'], C10: ['S10.'], C11: ['S11.', 'S12.'], C12: ['S13.', 'S14.', 'S15.']
-};
-// C11 的逐人点评可直接引用双方人数，但只开放四项人数见证，不把 S1/S13 其它事实扩入该章。
-const DATA_EXACT_KEYS = {
-  C11: ['S1.正方人数', 'S1.反方人数', 'S13.正方人数', 'S13.反方人数']
-};
 
 function moduleText(module) {
   const parts = [module && module.xp, module && module.pre, module && module.prose]
@@ -94,154 +84,104 @@ function parseSpeechAnchors(adjudicatedData) {
   return anchors;
 }
 
-// 各章节只可见与其裁决功能相关的关键 CP。优先从相应的已裁决 DATA
-// 中读取 CP 引用；没有显式引用时才按关键 CP 轨迹的稳定顺序回退。C6
-// （关键交锋总览）与 C11（辩手逐人点评）天然需要横览全部关键 CP。
-const SPEECH_REFERENCE_PREFIXES = {
-  C1: ['S8.', 'S7.'], C2: ['S8.', 'S7.'], C3: ['S7.'], C4: ['S7.'],
-  C5: ['S8.', 'S7.'], C6: ['S7.'], C7: ['S8.', 'S7.'], C8: ['S8.', 'S7.'],
-  C9: ['S7.'], C10: ['S8.', 'S7.'], C11: ['S7.'], C12: ['S8.', 'S7.']
-};
-const SPEECH_FALLBACK_INDEX = {
-  C1: 1, C2: 1, C3: 0, C4: 0, C5: 1, C6: 0,
-  C7: 1, C8: 1, C9: 0, C10: 1, C11: 0, C12: 1
-};
-const SPEECH_OVERVIEW_SECTIONS = new Set(['C6', 'C11']);
-const SPEECH_RESPONSE_PAIR_SECTIONS = new Set(['C3', 'C7']);
-
-function cpIdOf(source) {
-  const match = String(source && source.id || '').match(/^SPEECH:(CP-\d+):/);
-  return match && match[1];
-}
-
-function cpIdsIn(text) {
-  return Array.from(new Set(String(text || '').match(/CP-\d+/g) || []));
-}
-
-function orderedSpeechGroups(speechSources) {
-  const groups = new Map();
-  for (const source of speechSources || []) {
-    const cpId = cpIdOf(source);
-    if (!cpId) continue;
-    if (!groups.has(cpId)) groups.set(cpId, []);
-    groups.get(cpId).push(source);
-  }
-  return groups;
-}
-
-function preferredCpIds(sectionId, normalized) {
-  const data = normalized && normalized.data || {};
-  const module = normalized && normalized.modules && normalized.modules[sectionId];
-  const preferred = cpIdsIn(moduleText(module));
-  for (const prefix of SPEECH_REFERENCE_PREFIXES[sectionId] || []) {
-    for (const key of Object.keys(data).sort()) {
-      // S7.CP入选列表是全场目录，而不是某章的引用；用它会让所有章节都错误偏向首项。
-      if (key.startsWith(prefix) && key !== 'S7.CP入选列表') preferred.push.apply(preferred, cpIdsIn(data[key]));
-    }
-  }
-  return Array.from(new Set(preferred));
-}
-
-const BIGRAM_STOP_WORDS = new Set(['正方', '反方', '双方', '本场', '交锋', '关键', '是否', '有关', '可以', '不能', '什么', '如何', '以及', '一个', '没有']);
-
-function chineseBigrams(text) {
-  const chars = String(text || '').match(/[\u3400-\u9fff]/g) || [];
-  const result = new Set();
-  for (let i = 0; i + 1 < chars.length; i++) {
-    const pair = chars[i] + chars[i + 1];
-    if (!BIGRAM_STOP_WORDS.has(pair)) result.add(pair);
-  }
-  return result;
-}
-
-function chapterSpeechContext(sectionId, normalized) {
-  const module = normalized && normalized.modules && normalized.modules[sectionId];
-  const data = normalized && normalized.data || {};
-  const values = [];
-  for (const key of Object.keys(data).sort()) {
-    if ((DATA_PREFIXES[sectionId] || []).some(prefix => key.startsWith(prefix))) values.push(String(data[key]));
-  }
-  return moduleText(module) + '\n' + values.join('\n');
-}
-
-function strongestLexicalCp(sectionId, normalized, groups, availableCpIds) {
-  const target = chineseBigrams(chapterSpeechContext(sectionId, normalized));
-  const scores = availableCpIds.map((cpId, index) => {
-    const sourceTokens = chineseBigrams((groups.get(cpId) || []).map(source => source.text).join('\n'));
-    let score = 0;
-    for (const token of sourceTokens) if (target.has(token)) score++;
-    return { cpId, index, score };
-  }).sort((a, b) => b.score - a.score || a.index - b.index);
-  return scores.length && scores[0].score > 0 ? scores[0].cpId : null;
-}
-
-function hasAttackAndResponse(sources) {
-  const stages = (sources || []).map(source => String(source.anchor && source.anchor.stage || ''));
-  return stages.some(stage => /·攻击$/.test(stage)) && stages.some(stage => /·回应$/.test(stage));
-}
-
+// Evidence IDs locate source material; they are not semantic eligibility gates.
+// Preserve the entire available evidence pool. Original transcript is shared once
+// in guide-input; legacy S7 excerpts remain available only when source is absent.
 function speechSourcesForSection(sectionId, normalized, speechSources) {
-  const groups = orderedSpeechGroups(speechSources);
-  const availableCpIds = Array.from(groups.keys());
-  if (SPEECH_OVERVIEW_SECTIONS.has(sectionId)) {
-    return speechSources.map(source => Object.assign({}, source, { anchor: Object.assign({}, source.anchor, { sectionId }) }));
-  }
-  const preferred = preferredCpIds(sectionId, normalized).filter(cpId => groups.has(cpId));
-  const fallback = SPEECH_FALLBACK_INDEX[sectionId] || 0;
-  const referencedCp = preferred.find(cpId => hasAttackAndResponse(groups.get(cpId)));
-  const fallbackCp = availableCpIds[fallback];
-  const pairedCp = availableCpIds.find(cpId => hasAttackAndResponse(groups.get(cpId)));
-  const lexicalCp = strongestLexicalCp(sectionId, normalized, groups, availableCpIds);
-  const preferredGroup = referencedCp || lexicalCp || (hasAttackAndResponse(groups.get(fallbackCp)) && fallbackCp)
-    || pairedCp || availableCpIds[0];
-  const sources = groups.get(preferredGroup) || [];
-  // C3/C7 的输入必须是一组同 CP 的攻—回应证据，模型不能从其它章节挪用单句。
-  if (SPEECH_RESPONSE_PAIR_SECTIONS.has(sectionId) && !hasAttackAndResponse(sources)) {
-    throw new Error('R8 guide-input 缺少 ' + sectionId + ' 的同 CP 攻击/回应辩词锚点');
-  }
-  // 在输入契约中显式写入章节归属；同一条源文本进入不同章节时须生成各自的受限见证。
-  return sources.map(source => Object.assign({}, source, { anchor: Object.assign({}, source.anchor, { sectionId }) }));
+  return (speechSources || []).map(source => Object.assign({}, source, {
+    anchor: Object.assign({}, source.anchor, { sectionId })
+  }));
 }
 
-function sourcesForSection(sectionId, normalized, structure, adjudication, speechSources) {
-  const sources = [];
-  const module = normalized.modules && normalized.modules[sectionId];
-  const text = moduleText(module);
-  if (!text) throw new Error('R8 guide-input 缺少 ' + sectionId + ' 的 R6 章节内容');
-  sources.push({ id: 'R6:' + sectionId, text });
-  const prefixes = DATA_PREFIXES[sectionId] || [];
-  const exactKeys = new Set(DATA_EXACT_KEYS[sectionId] || []);
-  for (const key of Object.keys(normalized.data || {}).sort()) {
-    if (prefixes.some(prefix => key.startsWith(prefix)) || exactKeys.has(key)) sources.push({ id: 'DATA:' + key, text: key + '=' + normalized.data[key] });
-  }
-  if ((sectionId === 'C3' || sectionId === 'C7') && structure) {
-    sources.push({ id: 'STRUCTURE:R4', text: stableJson(structure) });
-  }
-  if ((sectionId === 'C1' || sectionId === 'C12') && adjudication && typeof adjudication === 'object') {
-    sources.push({ id: 'ADJUDICATION:R4.5', text: stableJson(adjudication) });
-  }
-  return sources.concat(speechSourcesForSection(sectionId, normalized, speechSources));
-}
-
-// 外部 interface：只接已构造的 R6 normalized content model 与结构化裁决视图。
-function buildGuideInput(normalized, structure, adjudication, adjudicatedData) {
-  if (!normalized || typeof normalized !== 'object' || !normalized.modules || !normalized.data) {
-    throw new Error('R8 guide-input 需要 R6 normalized content model');
-  }
-  const speechSources = parseSpeechAnchors(adjudicatedData);
-  if (!speechSources.length) throw new Error('R8 guide-input 缺少已裁决的辩词锚点来源');
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    sections: SECTION_IDS.map(sectionId => ({ sectionId, sources: sourcesForSection(sectionId, normalized, structure, adjudication, speechSources) }))
+function originalSpeechSources(text) {
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  const out = [];
+  let start = 0;
+  const flush = end => {
+    const body = lines.slice(start, end).join('\n');
+    if (body.trim()) out.push({
+      id: 'SPEECH:RAW:L' + (start + 1) + '-L' + end,
+      text: body,
+      anchor: { speaker: '原文署名', stage: '原文第' + (start + 1) + '—' + end + '行' }
+    });
+    start = end + 1;
   };
+  for (let i = 0; i < lines.length; i++) if (!lines[i].trim()) flush(i);
+  flush(lines.length);
+  return out;
+}
+
+function sectionSources(input, section) {
+  const pool = (input && input.sections || []).flatMap(s => s.sources || [])
+    .concat(section && section.sources || [], input && input.sharedSources || []);
+  const unique = new Map();
+  for (const source of pool) {
+    if (unique.has(source.id) && unique.get(source.id).text !== source.text)
+      throw new Error('R8 同一来源编号对应不同内容: ' + source.id);
+    unique.set(source.id, source);
+  }
+  return [...unique.values()];
+}
+
+// Read the product projection, including tables, SVG labels and qualifiers.
+// Use the existing HTML parser; paragraph-only extraction loses rendered evidence.
+function reportChapters(html) {
+  const PL = require('./plain-language.js');
+  const RR = require('../render-report.js');
+  const root = PL.parseHtml(RR.stripEmbeddedReaderGuide(html).html);
+  const found = {};
+  function clean(node) {
+    if (node.type !== 'element') return node.type === 'comment' ? null : node;
+    const cls = PL.attrValue(node, 'class') || '';
+    if (['script','style','button'].includes(node.tag) || /\breader-guide\b/.test(cls)) return null;
+    // Translation cache attributes are UI state, not chapter evidence. Strip
+    // only those two attributes and canonicalize the parser's tag encoding so
+    // toggling plain mode does not invalidate unchanged professional content.
+    const attrs = (node.attrs || []).filter(a => !['data-orig','data-plain'].includes(a.name));
+    const rawOpen = '<' + node.tag + attrs.map(a => ' ' + a.name + (a.value == null ? '' : '="' + String(a.value).replace(/"/g,'&quot;') + '"')).join('') + (/\/\s*>$/.test(node.rawOpen) ? '/>' : '>');
+    return Object.assign({}, node, { rawOpen, attrs, children: (node.children || []).map(clean).filter(Boolean) });
+  }
+  function walk(node) {
+    if (node.type === 'element') {
+      const id = (PL.attrValue(node,'id') || '').toUpperCase();
+      if (SECTION_IDS.includes(id)) {
+        if (found[id]) throw new Error('R8 报告章节重复: ' + id);
+        found[id] = PL.serializeHtml({ children: [clean(node)] });
+      }
+    }
+    for (const child of node.children || []) walk(child);
+  }
+  walk(root);
+  for (const id of SECTION_IDS) if (!found[id]) throw new Error('R8 最终报告缺少章节: ' + id);
+  return found;
+}
+
+function buildGuideInput(normalized, structure, adjudication, adjudicatedData, sourceText, reportHtml) {
+  if (!normalized || !normalized.modules || !normalized.data) throw new Error('R8 guide-input 需要报告及裁决数据');
+  const original = originalSpeechSources(sourceText);
+  const speech = original.length ? [] : parseSpeechAnchors(adjudicatedData);
+  // Legacy callers may supply a content model. The actual pipeline supplies HTML.
+  const chapters = reportHtml == null ? null : reportChapters(reportHtml);
+  const shared = original.concat(speech);
+  for (const key of Object.keys(normalized.data).sort()) shared.push({id:'DATA:'+key,text:key+'='+normalized.data[key]});
+  if (structure) shared.push({id:'STRUCTURE:R4',text:stableJson(structure)});
+  if (adjudication) shared.push({id:'ADJUDICATION:R4.5',text:stableJson(adjudication)});
+  return {schemaVersion:SCHEMA_VERSION,
+    sourceMode:original.length?'original':(speech.length?'analysis-excerpts':'unavailable'),
+    reportMode:chapters?'rendered-report':'legacy-content-model', sharedSources:shared,
+    sections:SECTION_IDS.map(sectionId => {
+      const text = chapters ? chapters[sectionId] : moduleText(normalized.modules[sectionId]);
+      if (!text) throw new Error('R8 缺少 '+sectionId+' 章节');
+      return {sectionId,sources:[{id:'R6:'+sectionId,text}]};
+    })};
 }
 
 function cacheKey(input, modelSnapshot) {
   return hashText(stableJson({ inputHash: hashGuideInput(input), promptVersion: PROMPT_VERSION, modelSnapshot: modelSnapshot || {}, schemaVersion: SCHEMA_VERSION }));
 }
 
-function evidenceIds(section) {
-  return new Set((section.sources || []).map(s => s.id));
+function evidenceIds(section, input) {
+  return new Set(sectionSources(input, section).map(s => s.id));
 }
 
 function guardTokens(text) {
@@ -423,6 +363,7 @@ function isPlainObject(value) {
 // 零依赖执行 reader-guide.schema.json 的本 module 所需子集：对象封闭性、
 // required/type/const/min|max|pattern/array-items；章节集合等跨对象约束留给下层校验。
 function validateSchemaShape(value, schema, label, errors) {
+  if (schema.$ref) { const key = schema.$ref.split('/').pop(); return validateSchemaShape(value, readerGuideSchema.definitions[key] || {}, label, errors); }
   if (schema.type === 'object') {
     if (!isPlainObject(value)) { errors.push(label + ' 必须为对象'); return; }
     const properties = schema.properties || {};
@@ -454,34 +395,31 @@ function validateSchemaShape(value, schema, label, errors) {
   if (schema.const != null && value !== schema.const) errors.push(label + ' 不符合契约常量');
 }
 
-function speechAnchorErrors(sectionId, section, card, evidence) {
+function speechAnchorErrors(sectionId, section, card, evidence, input) {
   const errors = [];
-  const sources = new Map((section.sources || []).map(source => [source.id, source]));
+  const sources = new Map(sectionSources(input, section).map(source => [source.id, source]));
   const anchors = card && Array.isArray(card.anchors) ? card.anchors : [];
-  if (!anchors.length) {
-    errors.push(sectionId + ' 缺少辩词锚点');
-    return errors;
-  }
+  if (!anchors.length && !String(card && card.anchorNote || '').trim())
+    errors.push(sectionId + ' 未选直接引文时须说明引用范围或缺口');
   const used = new Set();
   for (const anchor of anchors) {
-    const sourceId = anchor && anchor.sourceId;
-    const source = sources.get(sourceId);
-    if (!sourceId || !/^SPEECH:/.test(sourceId) || !source || !source.anchor || !evidence.includes(sourceId)) {
-      errors.push(sectionId + ' 辩词锚点不存在于该卡已选来源');
-      continue;
+    const source = sources.get(anchor && anchor.sourceId);
+    if (!source || !source.anchor || !/^SPEECH:/.test(source.id) || !evidence.includes(source.id)) {
+      errors.push(sectionId + ' 辩词锚点不存在于该卡已选来源'); continue;
     }
-    if (source.anchor.sectionId !== sectionId) errors.push(sectionId + ' 辩词锚点章节归属不一致: ' + sourceId);
-    if (used.has(sourceId)) errors.push(sectionId + ' 辩词锚点重复: ' + sourceId);
-    used.add(sourceId);
-    for (const field of ['speaker', 'stage', 'quote']) {
-      if (!anchor || anchor[field] !== source.anchor[field]) errors.push(sectionId + ' 辩词锚点' + field + '与来源不一致: ' + sourceId);
-    }
-  }
-  if (SPEECH_RESPONSE_PAIR_SECTIONS.has(sectionId)) {
-    const pairedSources = anchors.map(anchor => sources.get(anchor && anchor.sourceId)).filter(source => source && source.anchor);
-    const cpIds = Array.from(new Set(pairedSources.map(cpIdOf).filter(Boolean)));
-    if (anchors.length !== 2 || pairedSources.length !== 2 || cpIds.length !== 1 || !hasAttackAndResponse(pairedSources)) {
-      errors.push(sectionId + ' 必须锚定同一 CP 的攻击与回应各一条');
+    if (source.anchor.sectionId && source.anchor.sectionId !== sectionId)
+      errors.push(sectionId + ' 辩词锚点章节归属不一致: ' + source.id);
+    const identity = source.id + '\n' + anchor.quote;
+    if (used.has(identity)) errors.push(sectionId + ' 重复引文: ' + source.id);
+    used.add(identity);
+    if (anchor.stage !== source.anchor.stage) errors.push(sectionId + ' 辩词位置与来源不一致: ' + source.id);
+    if (/^SPEECH:RAW:/.test(source.id)) {
+      if (!String(anchor.quote || '').trim() || !String(source.text).includes(anchor.quote))
+        errors.push(sectionId + ' 引文不在所指原文片段中: ' + source.id);
+      // Speaker attribution is checked against original context by the reviewer.
+    } else {
+      for (const field of ['speaker', 'quote']) if (anchor[field] !== source.anchor[field])
+        errors.push(sectionId + ' 转录锚点' + field + '与来源不一致: ' + source.id);
     }
   }
   return errors;
@@ -489,6 +427,7 @@ function speechAnchorErrors(sectionId, section, card, evidence) {
 
 function validateGuide(input, guide) {
   const errors = [];
+  const warnings = [];
   if (!input || input.schemaVersion !== SCHEMA_VERSION) errors.push('guide-input 契约版本不匹配');
   validateSchemaShape(input, readerGuideSchema.definitions.guideInput, 'guide-input', errors);
   validateSchemaShape(guide, GUIDE_OUTPUT_SCHEMA, 'reader-guide', errors);
@@ -508,26 +447,41 @@ function validateGuide(input, guide) {
       if (!text || text.length > 240) errors.push(card.sectionId + ' 的 ' + field + ' 必须为 1—240 字');
     }
     const evidence = card && Array.isArray(card.evidence) ? card.evidence : [];
-    const allowed = evidenceIds(section);
+    const allowed = evidenceIds(section, input);
     if (!evidence.length || evidence.some(id => !allowed.has(id))) errors.push(card.sectionId + ' 存在非输入来源回指');
-    errors.push.apply(errors, speechAnchorErrors(card.sectionId, section, card, evidence));
-    const corpus = (section.sources || []).filter(s => evidence.includes(s.id)).map(s => String(s.text || '')).join('\n');
+    errors.push.apply(errors, speechAnchorErrors(card.sectionId, section, card, evidence, input));
+    const corpus = sectionSources(input, section).filter(s => evidence.includes(s.id)).map(s => String(s.text || '')).join('\n');
     const cardText = ['what', 'why', 'conclusion'].map(k => card && card[k]).join('\n');
     const missingTokens = guardTokens(cardText).filter(token => !corpus.replace(/\s+/g, '').includes(token));
-    if (missingTokens.length) errors.push(card.sectionId + ' 含来源外事实 token: ' + missingTokens.join(','));
+    if (missingTokens.length) warnings.push(card.sectionId + ' 待语义复核的来源词项差异: ' + missingTokens.join(','));
     // 计数事实门逐字段执行：严格度与整卡扫描相同，但错误必须指出 what/why/conclusion，
     // 这样 R8 白话定点修复能冻结同卡其余已合格字段，而不是把整张卡交给模型重写。
     for (const field of ['what', 'why', 'conclusion']) {
-      errors.push.apply(errors, countClaimErrors(card.sectionId + ' ' + field, section, evidence, String(card && card[field] || '')));
+      warnings.push.apply(warnings, countClaimErrors(card.sectionId + ' ' + field, { sources: sectionSources(input, section) }, evidence, String(card && card[field] || '')));
     }
-    errors.push.apply(errors, factRelationshipErrors(card.sectionId, section, evidence, cardText));
+    warnings.push.apply(warnings, factRelationshipErrors(card.sectionId, { sources: sectionSources(input, section) }, evidence, cardText));
   }
-  return { ok: errors.length === 0, errors };
+  return { ok: errors.length === 0, errors, warnings, requiresSemanticReview: true };
 }
 
 function validateReview(input, guide, review) {
   const errors = [];
   if (!review || review.approved !== true) errors.push('R8 独立复核未批准');
+  // Meaning and materiality belong to the reviewer. The executor only routes its
+  // explicit decision; issue wording and issue count cannot choose a repair stage.
+  const notes = [], upstreamIssues = [], classificationErrors = [];
+  const reviewStages = ['R1','R2','R2.5','R3','R4','R4.5','R5A','R5B','R6'];
+  const issues = review && review.semanticIssues;
+  if (issues !== undefined && !Array.isArray(issues)) classificationErrors.push('semanticIssues 必须为数组');
+  for (const issue of Array.isArray(issues) ? issues : []) {
+    const detail = issue && (issue.issue || issue.reason || issue.message);
+    if (typeof detail !== 'string' || !detail.trim()) { classificationErrors.push('异议须有自由文字说明'); continue; }
+    if (issue.action === 'note') notes.push(issue);
+    else if (issue.action === 'upstream_review' && reviewStages.includes(issue.targetRound)) upstreamIssues.push(issue);
+    else classificationErrors.push('请对已有异议说明处置：action=note（不影响导览成立的备注），或 upstream_review 并给出 targetRound；由语义判断影响及责任轮，不能仅因有异议自动回到R3');
+  }
+  errors.push(...classificationErrors);
+  if (upstreamIssues.length) errors.push('R8 发现上游语义问题，模型要求回查 '+[...new Set(upstreamIssues.map(i=>i.targetRound))].join('、')+'；保留异议，不在导览改判');
   const checks = new Map(((review && review.cardChecks) || []).map(c => [c && c.sectionId, c]));
   for (const id of SECTION_IDS) {
     const c = checks.get(id);
@@ -535,7 +489,8 @@ function validateReview(input, guide, review) {
   }
   const guideCheck = validateGuide(input, guide);
   if (!guideCheck.ok) errors.push.apply(errors, guideCheck.errors);
-  return { ok: errors.length === 0, errors };
+  const reopenNodes = reviewStages.filter(stage=>upstreamIssues.some(issue=>issue.targetRound===stage));
+  return { ok: errors.length === 0, errors, notes, upstreamIssues, reopenNodes, needsClarification: classificationErrors.length > 0 };
 }
 
 function validatePlainGuide(input, guide, plainGuide) {
@@ -610,9 +565,13 @@ function parseJson(raw, label) {
   catch (e) { throw new Error('R8 ' + label + ' 不是合法 JSON: ' + e.message); }
 }
 
+const GUIDE_SEMANTIC_RULES = '解释对象是 R6 当前真实报告章节，包括表格、图示标签和限定；原始辩词是事实真源，DATA/structure/adjudication 是上游判断依据。发现两者冲突提交语义问题，不在导览暗改裁决。每卡 what/why/conclusion 用自然语言说明本章，不必复刻措辞；保留主体、否定、条件、模态、结论范围与数字意义。优先依据 sharedSources 中完整原文，按实质相关性选择来源，可跨 CP 或多段，不要求攻击/回应配对。evidence 可填任意章节 sources 或 sharedSources 的真实 ID；编号只定位，按语义相关性引用。anchors 可按需要选取原文短引，sourceId 和 stage 照录，quote 必须为该 source.text 中连续逐字片段，speaker 按原文署名填写；无法确认时如实写未标注，不猜姓名。无必要直接引文可 anchors=[]，以 anchorNote 说明依据或缺口。sourceMode=analysis-excerpts 时仅有上游转录，须说明未核对原文。所有引文及发言归属由独立复核结合上下文检查。正文数字或胜负同义表达须语义等价，不能机械沿用 token 代替理解。';
+
 function buildGuidePrompt(input, snapshot) {
-  return '你是辩论裁判报告的读者导览助手。仅依据下面不可变的 guide-input 生成 C1—C12 各一张导览卡，不得添加任何事实、数字、主体、胜负、评分、ID 或裁决。每卡只写 what（本章说什么）、why（为什么重要）、conclusion（一句话结论）、evidence（本章 sources 中的 ID 数组）和 anchors（1—2 个具体辩词锚点）。每张卡必须从本章 `SPEECH:` 来源挑选锚点，逐字复制其 sourceId、speaker、stage、quote，且 evidence 必须含相同 sourceId；优先选择最能说明本章具体交锋的引文。数字只能逐字采用已选 evidence 的直接数值，禁止从姓名表计数、禁止把两个数相加；主体和胜负词也须沿用 evidence 原词，禁止同义改写。C3 与 C7 必须恰好选择同一 CP 的一条“攻击”和一条“回应”锚点。每项文本 1—240 个字符；不得输出额外文字。输出 JSON：' +
-    '{"schemaVersion":"' + SCHEMA_VERSION + '","inputHash":"' + hashGuideInput(input) + '","promptVersion":"' + PROMPT_VERSION + '","modelSnapshot":' + JSON.stringify(snapshot || {}) + ',"cards":[{"sectionId":"C1","what":"","why":"","conclusion":"","evidence":["R6:C1","SPEECH:CP-1:1"],"anchors":[{"sourceId":"SPEECH:CP-1:1","speaker":"","stage":"","quote":""}]}]}' +
+  return '你是辩论裁判报告的读者导览助手。输出 C1—C12 各一张卡。' + GUIDE_SEMANTIC_RULES +
+    '每项正文 1—240 字，长论证仍保留在主报告；只输出 JSON：' +
+    '{"schemaVersion":"' + SCHEMA_VERSION + '","inputHash":"' + hashGuideInput(input) + '","promptVersion":"' + PROMPT_VERSION +
+    '","modelSnapshot":' + JSON.stringify(snapshot || {}) + ',"cards":[{"sectionId":"C1","what":"","why":"","conclusion":"","evidence":[],"anchors":[],"anchorNote":""}]}' +
     '\n\nguide-input:\n' + JSON.stringify(input);
 }
 
@@ -643,22 +602,27 @@ function guideRepairSectionIds(errors, guide) {
 function buildGuideRepairPrompt(input, guide, errors, sectionIds) {
   const wanted = Array.isArray(sectionIds) && sectionIds.length ? sectionIds : guideRepairSectionIds(errors, guide);
   const selected = new Set(wanted);
-  const sections = (input && input.sections || []).filter(section => selected.has(section.sectionId));
-  const currentCards = (guide && guide.cards || []).filter(card => selected.has(card.sectionId));
-  return '你是 R8 章节导览定点修复器。上一版 reader-guide 已通过其余章节，只允许重写下面点名的失败卡；未点名章节由执行器冻结并机械保留，你不得输出它们。仍须只依据对应 guide-input sections 的 sources，不得新增事实、数字、主体、胜负、评分、ID 或裁决；数字只能逐字采用本卡 evidence 的直接数值。每卡 anchors 必须严格为 1—2 项，且每项都必须逐字来自该章 SPEECH 来源并同时进入 evidence；C3/C7 必须恰好 2 项，且为同一 CP 的攻击与回应各一条。输出且只输出 JSON：{"cards":[{"sectionId":"C5","what":"","why":"","conclusion":"","evidence":[],"anchors":[]}]}。cards 集合必须恰好等于待修章节，不得多也不得少。' +
+  return '你是 R8 章节导览定点修复器。只重写点名失败卡，其余卡由执行器冻结。' + GUIDE_SEMANTIC_RULES +
+    '只输出 {"cards":[...]}，集合必须恰好等于待修章节；字段保持完整。' +
     '\n\n机械门错误：\n- ' + (errors || []).join('\n- ') +
-    '\n\n待修章节：\n' + JSON.stringify(sections) +
-    '\n\n上一版待修卡：\n' + JSON.stringify(currentCards);
+    '\n\n待修章节：\n' + JSON.stringify((input.sections || []).filter(s => selected.has(s.sectionId))) +
+    '\n\n完整只读来源（只重写待修卡）：\n' + JSON.stringify(input) +
+    '\n\nsourceMode=' + input.sourceMode +
+    '\n\n失败候选：\n' + JSON.stringify((guide.cards || []).filter(c => selected.has(c.sectionId)));
 }
 
 function buildReviewPrompt(input, guide) {
-  return '你是 R8 独立事实复核器。只依据 guide-input 检查 reader-guide：每卡是否没有新增裁决/事实，所有数字、主体、胜负、评分、ID 与结论都可由该卡 evidence 回指；数字必须是已选 evidence 的直接数值（不得数姓名表或相加），主体/胜负词不得同义改写；且 anchors 项逐字等于已选 `SPEECH:` 来源的 sourceId、speaker、stage、quote；C3 与 C7 是否各有同一 CP 的攻击和回应一对锚点。输出且只输出 JSON：' +
-    '{"approved":true,"cardChecks":[{"sectionId":"C1","noNewJudgment":true,"factsConsistent":true,"anchorsConsistent":true}]}' +
+  const hints = validateGuide(input, guide).warnings || [];
+  return '你是 R8 独立语义与事实复核器，不能以词面差异或机械门通过代替判断。' + GUIDE_SEMANTIC_RULES +
+    '结合原文及全章上下文检查三项：noNewJudgment（没有新造/改判/遗漏实质限定），factsConsistent（含比分方向、主体、轮次、否定、条件和引用语境），anchorsConsistent（引文位置、说话者与代表性）。识别反语、假设、转述和否定；同义表述可接受。词项差异列表只帮助定位，可能是假警报。来源不全时不能把待定伪装已证实；发现上游实质问题写入 semanticIssues，指出应回查的原文和阶段，不在导览改判。只输出 JSON，必须逐章覆盖：' +
+    '{"approved":true,"cardChecks":[{"sectionId":"C1","noNewJudgment":true,"factsConsistent":true,"anchorsConsistent":true}],"semanticIssues":[]}' +
+    '\n异议的影响与责任由你按完整语境判断，不由词项或数量决定。导览自身失真，在对应 cardChecks 标 false 并说明；执行器只修该导览卡。semanticIssues 也可保留不影响当前导览成立的提示，但每项须有 action：note 表示旁列备注，upstream_review 表示实质影响事实、论证、裁决或报告准确性且须修订上游；后者给出最早相关 targetRound（R1/R2/R2.5/R3/R4/R4.5/R5A/R5B/R6），解释影响及来源。不要默认回R3，也不要为继续运行把实质问题降成备注。生成分工、编辑标注或局部工件范围不当然是整份报告的裁决矛盾：理解其实际所指与影响。无法判明时说明具体不确定性及需核对的责任轮，不反复改投赞成票。approved 与 cardChecks 判断导览是否可用，note 可以并存；upstream_review 仍需处理，不能靠 approved=true 消除。自由解释无字数、关键词或固定例句要求。' +
+    '\n\n待核线索：' + JSON.stringify(hints) +
     '\n\nguide-input:\n' + JSON.stringify(input) + '\n\nreader-guide:\n' + JSON.stringify(guide);
 }
 
 function buildPlainGuideReviewPrompt(guide, plainGuide) {
-  return '你是 R8 章节导览白话层的独立语义复核器。按 C1—C12 每张卡的完整 what/why/conclusion 上下文比较原 guide 与 plain guide；不要把三个字段拆成彼此无关的孤句。白话只能降低表达门槛，绝不能改变或省略原文中的主体、胜负、因果方向、否定/保留条件、责任归属、程度、数字、评分、ID、判决或任何限定。N/M/CP/B0/Q/Phase/Lv/路径号等内部 ID 必须原样、原次数保留，但它们可以只是 locator：如果同卡或邻句已经把事件/判断说明白，不要求逐个解释 ID；关键是忽略定位码后仍能理解判断，不得把自然文本改造成机器说明书。逐章检查 semanticEquivalent、noJudgmentChange、factsConsistent、zeroBackgroundReadable、naturalReadable、noLocatorDependency 六项。任一实质性压缩、因果替换、否定丢失、判断强化/弱化、黑箱表达或编号依赖都必须 false。输出且只输出 JSON：' +
+  return '你是 R8 章节导览白话层的独立语义复核器。按 C1—C12 每张卡的完整 what/why/conclusion 上下文比较原 guide 与 plain guide；不要把三个字段拆成彼此无关的孤句。白话只能降低表达门槛，绝不能改变或省略原文中的主体、胜负、因果方向、否定/保留条件、责任归属、程度、数字、评分、ID、判决或任何限定。内部定位码的对象身份必须保留，允许去掉不承担语义的重复次数，不能换成其他对象；数字允许等价写法，但它们可以只是 locator：如果同卡或邻句已经把事件/判断说明白，不要求逐个解释 ID；关键是忽略定位码后仍能理解判断，不得把自然文本改造成机器说明书。逐章检查 semanticEquivalent、noJudgmentChange、factsConsistent、zeroBackgroundReadable、naturalReadable、noLocatorDependency 六项。任一实质性压缩、因果替换、否定丢失、判断强化/弱化、黑箱表达或编号依赖都必须 false。输出且只输出 JSON：' +
     '{"approved":true,"cardChecks":[{"sectionId":"C1","semanticEquivalent":true,"noJudgmentChange":true,"factsConsistent":true,"zeroBackgroundReadable":true,"naturalReadable":true,"noLocatorDependency":true}]}' +
     '\n\nreader-guide:\n' + JSON.stringify(guide) + '\n\nreader-guide-plain:\n' + JSON.stringify(plainGuide);
 }
@@ -678,7 +642,7 @@ function buildPlainGuideRepairPrompt(guide, plainGuide, review, sectionIds) {
   const originals = (guide && guide.cards || []).filter(card => selected.has(card.sectionId));
   const candidates = (plainGuide && plainGuide.cards || []).filter(card => selected.has(card.sectionId));
   const targetIds = wanted.flatMap(sectionId => ['what','why','conclusion'].map(field => 'R8P:' + sectionId + ':' + field));
-  return '你是 R8 白话导览定点语义修复器。只允许修改失败卡；同卡 what/why/conclusion 全部作为语义 context halo 提供，未点名卡被冻结。术语表不是固定括号模板；内部编号可以只是 locator，不要求逐个解释，但忽略编号后仍应能理解事件和判断。必须保持原卡全部事实、主体、胜负、数字、因果、否定、限定、责任、程度与结论强度，且不新增任何事实 token。输出必须且只能是 {"units":[{"id":"R8P:C1:what","text":"..."}]}，并恰好覆盖 targetIds。' +
+  return '你是 R8 白话导览定点语义修复器。只允许修改失败卡；同卡 what/why/conclusion 全部作为语义 context halo 提供，未点名卡被冻结。术语表不是固定括号模板；内部编号可以只是 locator，不要求逐个解释，但忽略编号后仍应能理解事件和判断。必须保持原卡全部事实、主体、胜负、数字、因果、否定、限定、责任、程度与结论强度，且不新增或改变事实含义。输出必须且只能是 {"units":[{"id":"R8P:C1:what","text":"..."}]}，并恰好覆盖 targetIds。' +
     '\n\ntargetIds=' + JSON.stringify(targetIds) +
     '\n\nreview=' + JSON.stringify(review) +
     '\n\noriginalCards=' + JSON.stringify(originals) +

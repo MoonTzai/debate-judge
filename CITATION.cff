@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, cite this software snapshot and record the exact tag or commit; no associated paper or DOI is claimed."
+type: software
+title: "Debate-Judge Semantic Edition"
+authors:
+  - name: "Debate-Judge contributors"
+repository-code: "https://github.com/MoonTzai/debate-judge"
+url: "https://github.com/MoonTzai/debate-judge/tree/semantic-edition"
+version: "semantic-2026.09.24-r6"
+date-released: 2026-09-24
+license: MIT
+abstract: "A staged research-software prototype for source-grounded analysis, structural clash reconstruction, adjudication, and explanation of Chinese debates. Deterministic software checks are not evidence of adjudication accuracy."

@@ -6,6 +6,8 @@ This file records third-party boundaries for the Debate-Judge public distributio
 
 The repository's original code, rule text, schemas, tests, documentation, and generated artifacts are released under the MIT License, subject to the ordinary rule that a project cannot grant rights it does not own.
 
+For `semantic-2026.09.24-r6`, the project owner explicitly authorized MIT for the published r6 material. The source Skill and installer license metadata are aligned with that grant; private snapshots and excluded third-party materials are outside this publication.
+
 The public repository does **not** vendor a third-party debate corpus, course media, model weights, proprietary SDK, or third-party UI artwork.
 
 ## Scholarly concepts referenced by name

@@ -1,5 +1,15 @@
 # Changelog
 
+## Semantic Edition — semantic-2026.09.24-r6
+
+- Established the independent `semantic-edition` branch from the public main history using the maintainer-selected GPT6 r6 source snapshot.
+- Preserved staged SC adjudication, report structure, recovery, judge settings, paragraph-aware plain-language review/repair and reader guidance.
+- Published the necessary runtime/build closure, source mirrors, synthetic tests, citation metadata and research documentation under maintainer-authorized MIT.
+- Excluded private transcripts, model outputs, audit records, credentials, obsolete nested controller/vendor copies and non-cleared artwork. Retained CSS backgrounds and report layout.
+- Made the browser build reproducible; verified Node/Web prompts and SC policy. Documented inherited self-check/key-inventory failures; no all-tests-green or semantic-accuracy claim.
+
+Earlier entries below describe the public main lineage, not a promise that its old single-source layout is retained by this frozen branch.
+
 ## [Unreleased]
 
 ## [0.1.2] - 2026-09-11

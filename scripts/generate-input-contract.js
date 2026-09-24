@@ -59,9 +59,12 @@ const s8Keys = [
 ];
 // 批 5（260812 P0-4）补丁治理（卡 5，260815）：R2.5 8 键已被 re1 字面量提取（render-report L252-253）——删除；
 // S2 8 键由 key-extract 物化（render-report L220 cats 逐字——非 PC ENUM，登记「论证完成度枚举单一源」待后续）
-const patchKeys = [
-  ...KE.s2CompletionKeys()
-];
+const c5AssessmentKeys = ['正方','反方'].flatMap(side =>
+  ['A_B0','B0_C'].flatMap(ring => [
+    'S2.' + side + '.' + ring + '.自证状态', 'S2.' + side + '.' + ring + '.判据',
+    'S10.C5.' + side + '.' + ring + '.净状态', 'S10.C5.' + side + '.' + ring + '.判据'
+  ]).concat('S10.C5.' + side + '.整链判据'));
+const patchKeys = [...KE.s2CompletionKeys(), ...c5AssessmentKeys];
 const allDataKeys = [...new Set([...dataKeys, ...c7Keys, ...s8Keys, ...patchKeys])].sort();
 
 // ---------- 2) producer 映射（前缀 → 轮次） ----------
@@ -129,6 +132,8 @@ function validateConsumerClaims(overrideMap) {
 // 「假-字面（装配链真）」条目（S3→donutSVG、S9→radarSVG/c9GaugeSVG、R2.5→c8Chart1-3、
 // S8.PhaseII→scBarSVG 等）消费发生在 buildChartData 装配链，文件级校验通过，保留。
 const CONSUMER_MAP = [
+  { re: /^S2\.(正方|反方)\.(A_B0|B0_C)\.(自证状态|判据)$/, consumer: ['buildC5V2Ui'], required: false, default: '保留正文与限定，不从词项推定' },
+  { re: /^S10\.C5\./, consumer: ['buildC5V2Ui'], required: false, default: '保留正文与限定，不自动合成净状态' },
   { re: /^S1\.辩题$/, consumer: ['renderHTML.title'], required: true, default: '（辩题未提供）' },
   { re: /^S1\.(正方|反方)人数$/, consumer: ['validate.V-S8E-A1'], required: true, default: null },
   { re: /^S2\.(正方|反方)\.B0$/, consumer: ['c2ScPanelHTML'], required: true, default: null },
@@ -287,8 +292,8 @@ const adjudication = {
     'S15.*': ['criteria_derivation', 'explanatory_power']
   },
   semantics: {
-    'S11.类型': '主线类型：1a=三阶段集中在单次交锋；1b=分布全场渐进；1c=立论预置容纳通道；1d=双SC链·后完成方B\'\'上位覆盖先完成方B\'（决胜层在最外层）；2a/2b/2c=双边碰撞无统一结晶（2b 含 B0=B\' 容纳）；0=无真正交锋。',
-    'S8.PhaseIII.完成方': '结构性交锋结晶归属方（正方/反方/无）。',
+    'S11.类型': '主线类型：已有实质完成为1型；1a=集中交锋；1b=跨发言推进；1c=内置容纳关系实际应用；1d=已证实的先后覆盖。双方独立完成不因无共识降为2b。2a=有框架未推进；2b=有推进尚未形成有根据的比较结论；2c=无容纳框架的一般交锋；0=无真正交锋。类型不直接决定胜负。',
+    'S8.PhaseIII.完成方': '实际结构性交锋完成者（正方/反方/双方/无）；双方独立完成可填双方。1d沿用后层单方含义，先层方由被覆盖完成方保留；复杂关系在正文说明。',
     'S8.PhaseIII.被覆盖完成方': '1d 中先完成第一层 SC（B\'）的一方；后完成方 B\'\' 上位覆盖该方。仅 S11=1d 时输出；枚举 {正方,反方}，无“无”值。',
     'S9.*': '六向度各轴双方得分 0-10，判定哪方在该轴更优（数值语义=相对强度，非证据计数）。',
     'C7.*': '微消化计数：C7 总有效数=S8 PhaseII 正方+反方有效数；实例表行数=SC总览有效微消化。',

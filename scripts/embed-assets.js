@@ -1,4 +1,4 @@
-// L5+C10b 单文件交付：将 assets/、schemas/ 与渲染器 JS 内嵌为 Skill-Judge.md 尾部块（幂等），只更新 canonical Skill。
+// L5+C10b 单文件交付：将 assets/、schemas/ 与渲染器 JS 内嵌为 Skill-Judge.md 尾部块（幂等），并同步三镜像。
 // 运行：node scripts/embed-assets.js
 'use strict';
 const fs = require('fs');
@@ -50,7 +50,48 @@ function upsertAssetList(skill) {
   return skill.replace(/\n*$/, '') + '\n' + listText + '\n';
 }
 
-const skillPath = path.join(root, 'Skill-Judge.md');
-const skill = upsertAssetList(embed(fs.readFileSync(skillPath, 'utf-8')));
-fs.writeFileSync(skillPath, skill, 'utf-8');
-console.log('canonical Skill updated: Skill-Judge.md');
+function syncR6aCssTemplate(content) {
+  content = String(content).replace(/\r\n/g, '\n');
+  const marker = '### R6a-3 CSS';
+  const idx = content.indexOf(marker);
+  if (idx < 0) throw new Error('R6a-3 CSS 模板未找到');
+  const open = content.indexOf('```css', idx);
+  if (open < 0) throw new Error('R6a-3 CSS 开始围栏未找到');
+  const bodyStart = open + '```css'.length;
+  const close = content.indexOf('```', bodyStart);
+  if (close < 0) throw new Error('R6a-3 CSS 结束围栏未找到');
+  const css = fs.readFileSync(path.join(root, 'assets', 'report.css'), 'utf-8').replace(/\r\n/g, '\n').trim();
+  return content.slice(0, bodyStart) + '\n' + css + '\n' + content.slice(close);
+}
+
+function renderSkillContent(content) {
+  return upsertAssetList(embed(syncR6aCssTemplate(String(content))));
+}
+
+function writeEmbeddedMirrors() {
+  const skillPath = path.join(root, 'Skill-Judge.md');
+  const skill = renderSkillContent(fs.readFileSync(skillPath, 'utf-8'));
+  fs.writeFileSync(skillPath, skill, 'utf-8');
+  for (const m of ['Debate-Judge.md', '.claude/skills/debate-judge/SKILL.md']) {
+    fs.writeFileSync(path.join(root, m), skill, 'utf-8');
+  }
+  return skill;
+}
+
+function main() {
+  writeEmbeddedMirrors();
+  console.log('embedded blocks written:', blocks.map(b => b.name).join(', '));
+  console.log('mirrors synced: Debate-Judge.md, .claude/skills/debate-judge/SKILL.md');
+}
+
+if (require.main === module) main();
+module.exports = {
+  blocks,
+  buildBlock,
+  buildAssetList,
+  embed,
+  upsertAssetList,
+  syncR6aCssTemplate,
+  renderSkillContent,
+  writeEmbeddedMirrors
+};

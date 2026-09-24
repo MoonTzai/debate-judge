@@ -6,10 +6,13 @@ Debate-Judge can be inspected and software-tested without calling an external mo
 
 ```sh
 node install-skill.js --verify-only
-node tests/run-public.js
+node web/build-judge-web.js
+node tests/run-public.js --current
 ```
 
 These commands are the public release integrity path. They do not measure judging quality.
+
+Run `node tests/run-public.js` for the complete public status, including inherited failures documented in [snapshot notes](semantic-edition.md).
 
 ## Real adjudication entry point
 

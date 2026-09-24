@@ -223,6 +223,8 @@ body.dark .tb.integrity tbody tr:nth-child(n+6){background:#15101c}
 .pn{border-radius:6px;font-size:.9em;line-height:1.55}
 .pn-zh{background:#e9f1f8;border:1px solid #c3d8e8}
 .pn-fh{background:#f9e6e3;border:1px solid #e3c0b8}
+body.dark .pn-zh,body.dark .pu{background:#142a33;color:var(--text);border-color:#365968}
+body.dark .pn-fh,body.dark .pc1,body.dark .pc2{background:#352329;color:var(--text);border-color:#715059}
 .pn-p1{border-left:3px solid #3aa0c8 !important;background:#e5f2f7}
 .pn-p2{border-left:3px solid #d0892f !important;background:#f7efe1}
 .pn-p3{border-left:3px solid #8f6bb8 !important;background:#efe9f5}

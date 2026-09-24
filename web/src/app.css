@@ -651,3 +651,8 @@ body.transient-open{overflow:hidden}
   .gate-stage .scene-line{font-size:22px}
   .qt-dots{display:none}
 }
+
+/* 日志导出是运行页操作，不改变报告正文和版式。 */
+.evidence-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px}
+.evidence-heading .surface-subtitle{margin:0}
+.evidence-heading .btn{flex-shrink:0}

@@ -442,14 +442,113 @@
       "cross_checks": []
     },
     {
-      "id": "S11.压缩度",
+      "id": "S10.C5.反方.A_B0.净状态",
       "type": "data",
       "producer": "R3",
       "consumer": [
-        "validate.V6"
+        "buildC5V2Ui"
       ],
-      "required": true,
-      "default": null,
+      "required": false,
+      "default": "保留正文与限定，不自动合成净状态",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.C5.反方.A_B0.判据",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不自动合成净状态",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.C5.反方.B0_C.净状态",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不自动合成净状态",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.C5.反方.B0_C.判据",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不自动合成净状态",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.C5.反方.整链判据",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不自动合成净状态",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.C5.正方.A_B0.净状态",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不自动合成净状态",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.C5.正方.A_B0.判据",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不自动合成净状态",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.C5.正方.B0_C.净状态",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不自动合成净状态",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.C5.正方.B0_C.判据",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不自动合成净状态",
+      "cross_checks": []
+    },
+    {
+      "id": "S10.C5.正方.整链判据",
+      "type": "data",
+      "producer": "R3",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不自动合成净状态",
       "cross_checks": []
     },
     {
@@ -608,6 +707,28 @@
       "cross_checks": []
     },
     {
+      "id": "S2.反方.A_B0.判据",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不从词项推定",
+      "cross_checks": []
+    },
+    {
+      "id": "S2.反方.A_B0.自证状态",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不从词项推定",
+      "cross_checks": []
+    },
+    {
       "id": "S2.反方.B0",
       "type": "data",
       "producer": "R1",
@@ -616,6 +737,28 @@
       ],
       "required": true,
       "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S2.反方.B0_C.判据",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不从词项推定",
+      "cross_checks": []
+    },
+    {
+      "id": "S2.反方.B0_C.自证状态",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不从词项推定",
       "cross_checks": []
     },
     {
@@ -682,6 +825,28 @@
       ]
     },
     {
+      "id": "S2.正方.A_B0.判据",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不从词项推定",
+      "cross_checks": []
+    },
+    {
+      "id": "S2.正方.A_B0.自证状态",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不从词项推定",
+      "cross_checks": []
+    },
+    {
       "id": "S2.正方.B0",
       "type": "data",
       "producer": "R1",
@@ -690,6 +855,28 @@
       ],
       "required": true,
       "default": null,
+      "cross_checks": []
+    },
+    {
+      "id": "S2.正方.B0_C.判据",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不从词项推定",
+      "cross_checks": []
+    },
+    {
+      "id": "S2.正方.B0_C.自证状态",
+      "type": "data",
+      "producer": "R1",
+      "consumer": [
+        "buildC5V2Ui"
+      ],
+      "required": false,
+      "default": "保留正文与限定，不从词项推定",
       "cross_checks": []
     },
     {
@@ -1200,28 +1387,6 @@
     },
     {
       "id": "S8.PhaseIII.⑥双方SC关系",
-      "type": "data",
-      "producer": "R2",
-      "consumer": [
-        "checkS8"
-      ],
-      "required": true,
-      "default": null,
-      "cross_checks": []
-    },
-    {
-      "id": "S8.PhaseIII.压缩度",
-      "type": "data",
-      "producer": "R2",
-      "consumer": [
-        "checkS8"
-      ],
-      "required": true,
-      "default": null,
-      "cross_checks": []
-    },
-    {
-      "id": "S8.PhaseIII.压缩度类型",
       "type": "data",
       "producer": "R2",
       "consumer": [
@@ -2461,8 +2626,24 @@
           "required": true
         },
         {
+          "id": "S2.反方.A_B0.判据",
+          "required": false
+        },
+        {
+          "id": "S2.反方.A_B0.自证状态",
+          "required": false
+        },
+        {
           "id": "S2.反方.B0",
           "required": true
+        },
+        {
+          "id": "S2.反方.B0_C.判据",
+          "required": false
+        },
+        {
+          "id": "S2.反方.B0_C.自证状态",
+          "required": false
         },
         {
           "id": "S2.反方.SC容量预判",
@@ -2485,8 +2666,24 @@
           "required": true
         },
         {
+          "id": "S2.正方.A_B0.判据",
+          "required": false
+        },
+        {
+          "id": "S2.正方.A_B0.自证状态",
+          "required": false
+        },
+        {
           "id": "S2.正方.B0",
           "required": true
+        },
+        {
+          "id": "S2.正方.B0_C.判据",
+          "required": false
+        },
+        {
+          "id": "S2.正方.B0_C.自证状态",
+          "required": false
         },
         {
           "id": "S2.正方.SC容量预判",
@@ -2681,14 +2878,6 @@
           "required": true
         },
         {
-          "id": "S8.PhaseIII.压缩度",
-          "required": true
-        },
-        {
-          "id": "S8.PhaseIII.压缩度类型",
-          "required": true
-        },
-        {
           "id": "S8.PhaseIII.完成方",
           "required": true
         },
@@ -2841,8 +3030,44 @@
           "required": true
         },
         {
-          "id": "S11.压缩度",
-          "required": true
+          "id": "S10.C5.反方.A_B0.净状态",
+          "required": false
+        },
+        {
+          "id": "S10.C5.反方.A_B0.判据",
+          "required": false
+        },
+        {
+          "id": "S10.C5.反方.B0_C.净状态",
+          "required": false
+        },
+        {
+          "id": "S10.C5.反方.B0_C.判据",
+          "required": false
+        },
+        {
+          "id": "S10.C5.反方.整链判据",
+          "required": false
+        },
+        {
+          "id": "S10.C5.正方.A_B0.净状态",
+          "required": false
+        },
+        {
+          "id": "S10.C5.正方.A_B0.判据",
+          "required": false
+        },
+        {
+          "id": "S10.C5.正方.B0_C.净状态",
+          "required": false
+        },
+        {
+          "id": "S10.C5.正方.B0_C.判据",
+          "required": false
+        },
+        {
+          "id": "S10.C5.正方.整链判据",
+          "required": false
         },
         {
           "id": "S11.类型",
@@ -3124,7 +3349,6 @@
       "C7.微消化.反方.实例表行数",
       "C7.微消化.总有效数",
       "C7.微消化.正方.实例表行数",
-      "S11.压缩度",
       "S11.类型",
       "S11.闭合",
       "S15.反方得分",
@@ -3155,8 +3379,6 @@
       "S8.PhaseIII.④致命交锋复核.未覆盖数",
       "S8.PhaseIII.⑤价值深度",
       "S8.PhaseIII.⑥双方SC关系",
-      "S8.PhaseIII.压缩度",
-      "S8.PhaseIII.压缩度类型",
       "S8.PhaseIII.完成方",
       "S8.PhaseIII.状态",
       "S8.PhaseIII.被覆盖完成方",
@@ -3210,8 +3432,8 @@
       ]
     },
     "semantics": {
-      "S11.类型": "主线类型：1a=三阶段集中在单次交锋；1b=分布全场渐进；1c=立论预置容纳通道；1d=双SC链·后完成方B''上位覆盖先完成方B'（决胜层在最外层）；2a/2b/2c=双边碰撞无统一结晶（2b 含 B0=B' 容纳）；0=无真正交锋。",
-      "S8.PhaseIII.完成方": "结构性交锋结晶归属方（正方/反方/无）。",
+      "S11.类型": "主线类型：已有实质完成为1型；1a=集中交锋；1b=跨发言推进；1c=内置容纳关系实际应用；1d=已证实的先后覆盖。双方独立完成不因无共识降为2b。2a=有框架未推进；2b=有推进尚未形成有根据的比较结论；2c=无容纳框架的一般交锋；0=无真正交锋。类型不直接决定胜负。",
+      "S8.PhaseIII.完成方": "实际结构性交锋完成者（正方/反方/双方/无）；双方独立完成可填双方。1d沿用后层单方含义，先层方由被覆盖完成方保留；复杂关系在正文说明。",
       "S8.PhaseIII.被覆盖完成方": "1d 中先完成第一层 SC（B'）的一方；后完成方 B'' 上位覆盖该方。仅 S11=1d 时输出；枚举 {正方,反方}，无“无”值。",
       "S9.*": "六向度各轴双方得分 0-10，判定哪方在该轴更优（数值语义=相对强度，非证据计数）。",
       "C7.*": "微消化计数：C7 总有效数=S8 PhaseII 正方+反方有效数；实例表行数=SC总览有效微消化。",

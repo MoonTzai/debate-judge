@@ -11,8 +11,8 @@ const CORE_GLOSSARY = require('../assets/plain-dict.json');
 
 const PROFILE_BODY = 'professional_explanation';
 const PROFILE_GUIDE = 'zero_background_summary';
-const READABILITY_REVIEW_PROMPT_VERSION = 'plain-readability-review-v1';
-const READABILITY_REPAIR_PROMPT_VERSION = 'plain-readability-repair-v1';
+const READABILITY_REVIEW_PROMPT_VERSION = 'plain-readability-review-v3';
+const READABILITY_REPAIR_PROMPT_VERSION = 'plain-readability-repair-v3';
 
 // Compatibility export: CONCEPTS is now derived from the single glossary source.
 const CONCEPTS = Object.entries(CORE_GLOSSARY)
@@ -61,11 +61,26 @@ function internalMarkers(text) {
   return [...new Set(out)];
 }
 
-// Hard invariant: these tokens must have the same multiset in source and candidate.
+// Normalize explicit numeral spellings as review hints, not semantic truth.
+function numeralValue(text) {
+  const digit = { 零:0, 〇:0, 一:1, 二:2, 两:2, 三:3, 四:4, 五:5, 六:6, 七:7, 八:8, 九:9 };
+  const unit = { 十:10, 百:100, 千:1000, 万:10000 };
+  if (!/[十百千万]/.test(text)) return Number([...text].map(ch => digit[ch]).join(''));
+  let value=0, section=0, current=0;
+  for (const ch of text) {
+    if (digit[ch] !== undefined) current=digit[ch];
+    else if (ch === '万') { value += (section + current || 1) * 10000; section=0; current=0; }
+    else if (unit[ch]) { section += (current || 1)*unit[ch]; current=0; }
+  }
+  return value+section+current;
+}
+function locatorTokens(text) {
+  return [...new Set((String(text || '').match(/\bM-[A-Za-z]+-\d+\b|\bCP-(?:[A-Za-z]+-)?\d+\b|\bN\d+\b|\bS\d+(?:\.\d+)?\b|\bB0\b|\bQ[1-4]\b|\bLv[0-6]\b|\bPhase\s*(?:I{1,3}|[1-3])\b/gi) || []).map(x=>x.replace(/\s+/g,'').toLowerCase()))].sort();
+}
 function protectedTokens(text) {
-  const s = normalizeText(text);
-  const re = /\bM-[A-Za-z]+-\d+\b|\bCP-(?:[A-Za-z]+-)?\d+\b|\bN\d+\b|\bS\d+(?:\.\d+)?\b|\bB0\b|\bQ[1-4]\b|\bLv[0-6]\b|\bPhase\s*(?:I{1,3}|[1-3])\b|\d+\s*[:：]\s*\d+|\d+(?:\.\d+)?\s*[%％]?/gi;
-  return (s.match(re) || []).map(token => token.replace(/\s+/g, '').toLowerCase()).sort();
+  const s = normalizeText(text).replace(/[零〇一二两三四五六七八九十百千万]+(?=轮|次|分|票|人|名|个|条|比)/g, numeralValue);
+  const numeric = (s.match(/\d+\s*[:：]\s*\d+|\d+(?:\.\d+)?\s*[%％]?/g) || []).map(x=>x.replace(/\s+/g,''));
+  return [...new Set(locatorTokens(s).concat(numeric))].sort();
 }
 
 function pushIssue(issues, code, message, detail) {
@@ -81,18 +96,21 @@ function inspectPlainText(original, plain, options) {
   const src = normalizeText(original);
   const out = normalizeText(plain);
   const issues = [];
+  const warnings = [];
   if (!out && src) pushIssue(issues, 'empty', '白话文本为空');
   const sourceTokens = protectedTokens(src);
   const outputTokens = protectedTokens(out);
+  const newLocators = locatorTokens(out).filter(id => !locatorTokens(src).includes(id));
+  if (newLocators.length) pushIssue(issues, 'protected-token-drift', '白话新增了本单元未引用的对象 ID', newLocators);
   if (JSON.stringify(sourceTokens) !== JSON.stringify(outputTokens)) {
-    pushIssue(issues, 'protected-token-drift', '数字、比分、轮次或内部 ID 与原文不一致', {
-      source: sourceTokens,
-      output: outputTokens
-    });
+    warnings.push({ code: 'semantic-fact-review', message: '数字或定位表达变化，独立复核其实际含义、主体、否定和范围；词项差异不自动等于事实错误',
+      source: sourceTokens, output: outputTokens });
   }
   return {
     ok: issues.length === 0,
     issues,
+    warnings,
+    requiresSemanticReview: true,
     metrics: {
       concepts: conceptMatches(out).length,
       internalMarkers: internalMarkers(out).length,
@@ -162,9 +180,14 @@ function valueForId(textForId, id) {
 }
 
 function unitContainerKey(unit) {
-  const path = Array.isArray(unit && unit.path) ? unit.path : [];
-  const parentPath = path.length > 1 ? path.slice(0, -1) : path;
-  return [unit && unit.module || '', unit && unit.containerTag || '', JSON.stringify(parentPath)].join('|');
+  // Same tag/class paths can belong to unrelated paragraphs. No guessed grouping.
+  return unit && unit.semanticBlockId || 'unit:' + String(unit && unit.id);
+}
+
+function expandSemanticBlockIds(units, ids) {
+  const requested = new Set(ids || []);
+  const keys = new Set((units || []).filter(u => requested.has(u.id)).map(unitContainerKey));
+  return (units || []).filter(u => keys.has(unitContainerKey(u))).map(u => u.id);
 }
 
 function orderedContextRows(units, textForId, glossary, targetIds, haloSize) {
@@ -182,8 +205,27 @@ function orderedContextRows(units, textForId, glossary, targetIds, haloSize) {
   if (target.size === list.length && list.every(unit => target.has(unit.id))) {
     for (let i = 0; i < list.length; i++) indices.add(i);
   }
+  const emittedContext = new Set();
+  const emittedTables = new Set(), emittedRows = new Set();
+  const visibleIds = new Set([...indices].map(index => list[index].id));
   return [...indices].sort((a, b) => a - b).map(index => {
     const unit = list[index];
+    const sourceContext = emittedContext.has(unitContainerKey(unit)) ? undefined : unit.readingContext;
+    // The ordered sequence already contains original and candidate prose. Refer to
+    // it by block/row identity instead of copying full paragraphs several times.
+    let readingContext;
+    if (sourceContext) {
+      readingContext = {
+        heading: sourceContext.heading,
+        tableId: sourceContext.tableId, rowId: sourceContext.rowId,
+        fixedSlots: (sourceContext.slots || []).filter(slot => !visibleIds.has(slot.id)),
+        tableHeaders: emittedTables.has(sourceContext.tableId) ? undefined : sourceContext.tableHeaders,
+        tableRow: emittedRows.has(sourceContext.rowId) ? undefined : sourceContext.tableRow
+      };
+      if (sourceContext.tableId) emittedTables.add(sourceContext.tableId);
+      if (sourceContext.rowId) emittedRows.add(sourceContext.rowId);
+    }
+    emittedContext.add(unitContainerKey(unit));
     return {
       order: index,
       id: unit.id,
@@ -192,6 +234,9 @@ function orderedContextRows(units, textForId, glossary, targetIds, haloSize) {
       blockType: unit.blockType || '',
       containerTag: unit.containerTag || '',
       path: unit.path || [],
+      semanticBlockId: unit.semanticBlockId,
+      inlineTags: unit.inlineTags || [],
+      readingContext,
       originalText: String(unit.text == null ? '' : unit.text),
       plainText: valueForId(textForId, unit.id),
       glossaryHints: glossaryHintsForText(unit.text, glossary)
@@ -216,6 +261,9 @@ function buildReadabilityReviewPrompt(units, textForId, glossary, options) {
     'PLAIN 独立可理解性复核 · ' + READABILITY_REVIEW_PROMPT_VERSION,
     '你不是生成器，也不是机械正则。请按下面的有序阅读上下文独立判断候选白话。',
     '只审 writable=true 的 ID；其它行是只读 context halo，用来理解邻句、同卡、同表格或同容器语义。',
+    '数字、比分顺序、主体、否定、条件、模态和结论范围必须等价；重复 locator 可省略，不能省略实际推理。机械检查通过不证明事实无变化。',
+    '同一 semanticBlockId 的片段要先按顺序连读成完整解释，再判断其中各 ID。ID 是回填坐标，不是独立论断。空片段若其含义已自然保留在同段其它片段，不算丢失；不要要求每片段各自解释全部术语。',
+    '设想一位从未学过辩论的读者：他能否从这段及已给出的邻文，理解双方实际在争什么、回应改变了什么、为什么得到这个判断，以及判断还受什么条件限制？只在该段涉及这些内容时检查，不强求每段完成整场复述。仅把术语换成另一术语、贴固定括号或说“完成/有效/有影响”而省略原文已有关系，都不代表可理解。允许原本清楚的文字保持不变；若原文本就不确定或欠解释，须如实保留，不能补造理由。',
     '必须逐个判断四件事：semanticEquivalent（语义等价）、zeroBackgroundReadable（零背景读者可理解）、naturalReadable（自然人话，不像机器说明书）、noLocatorDependency（忽略内部编号/定位码后仍能理解正文判断）。',
     'N/M/CP/B0/Q/Phase/Lv 等编号可以合法保留为 locator；如果邻文已经解释事件或判断，不要求把每个定位码逐个解释，也不要为了“解释编号”制造重复编号。',
     '不得新增、删除或改变主体、事实、胜负、比分、因果方向、否定、限定、责任、程度与结论强度。',
@@ -223,7 +271,7 @@ function buildReadabilityReviewPrompt(units, textForId, glossary, options) {
     '若存在问题，approved=false，并在 issues 中逐项给出 {id,codes,message}；codes 只能从 semanticEquivalent/zeroBackgroundReadable/naturalReadable/noLocatorDependency 中选择。',
     '若全部通过，approved=true 且 issues=[]。只输出严格 JSON。',
     'targetIds=' + JSON.stringify(targetIds),
-    'orderedReadingSequence=' + JSON.stringify(rows, null, 2),
+    'orderedReadingSequence=' + JSON.stringify(rows),
     '输出格式={"approved":true,"checkedIds":["..."],"issues":[]}'
   ].join('\n\n');
 }
@@ -282,31 +330,36 @@ function buildReadabilityRepairPrompt(units, textForId, review, glossary, option
   const issueRows = (review && Array.isArray(review.issues) ? review.issues : []).filter(issue => targetIds.includes(String(issue && issue.id || '')));
   return [
     'PLAIN 定点语义修复 · ' + READABILITY_REPAIR_PROMPT_VERSION,
-    '只允许改 writable=true 的失败 ID；read-only context halo 仅供理解邻句、同卡、同表格或同容器上下文，禁止输出或改写它们。',
-    '已通过的其它单元会由执行器 byte-identical 冻结。不要把语义搬到邻句，也不要把 locator 改写成机器说明书。',
-    '保留所有主体、事实、胜负、数字、比分、ID、因果方向、否定、限定、责任、程度与结论强度。',
+    '只允许改 writable=true 的 ID；它们包含被点名问题的完整真实段落片段。read-only context halo 仅供理解，禁止输出或改写它们。',
+    '其它段落由执行器 byte-identical 冻结。同一 semanticBlockId 内可以联合重写、拆句，并在槽位之间自然调整措辞；不能把必要解释搬到只读邻段。text 可为空字符串，但整段意义必须完整，空槽只由程序保留为排版空白；不要输出 HTML。保持加粗/链接等局部片段的自然衔接。',
+    '保留所有主体、事实、胜负、数字意义、比分顺序、对象身份、因果方向、否定、限定、责任、程度与结论强度；重复定位码可省，数字允许等价写法。',
     'glossaryHints 只帮助理解概念；可以用自然等价解释，不要求逐字括号模板。',
     '输出必须且只能是 {"units":[{"id":"...","text":"..."}]}，ID 集合必须恰好等于 targetIds。',
     'targetIds=' + JSON.stringify(targetIds),
     'reviewIssues=' + JSON.stringify(issueRows, null, 2),
-    'orderedContextHalo=' + JSON.stringify(rows, null, 2)
+    'orderedContextHalo=' + JSON.stringify(rows)
   ].join('\n\n');
 }
 
 function buildPromptContract(options) {
   const profile = options && options.profile || PROFILE_BODY;
-  const audience = profile === PROFILE_GUIDE ? '零背景章节导览' : '专业正文白话';
+  const audience = profile === PROFILE_GUIDE ? '零背景章节导览' : '面向从未学过辩论的读者的正文解释';
   return [
     'PLAIN 生成合同（' + audience + '）：不是同义词替换，也不是删减。',
     '术语表只是认知提示：可以保留术语并用自然语言解释，也可以在语义不变时直接改成自然等价表达；禁止为了满足模板机械塞“术语（固定释义）”。',
-    '内部 ID/编号按原文逐字、逐次数保留；它们可以只是 locator。不要为了说明 locator 再复述同一个编号，也不要要求每个编号都单独解释。',
+    '内部 ID 保持对象身份，不新增或改号；不承担语义的重复可自然合并，不能把不同对象合并。数字允许等价写法，实际数值、主体和关系不得改变。',
     '目标是让零背景读者从上下文直接理解事件、比较和推理；可以补出原文已经蕴含的理解台阶，但不得新增理由或事实。',
+    'semanticBlockId 相同的 units 是一段话因 HTML 排版拆出的回填槽：先理解 readingContext.originalText，再连贯改写并分配到这些槽；不要把每个槽当独立句子。允许拆句、扩写原文已蕴含的理解台阶、在同段槽位间调整措辞，个别 text 可为空，但整段不得丢失信息。不输出 HTML，保留加粗/链接所指对象。没有 semanticBlockId 时按原独立字段处理。',
+    'inlineTags 告诉你槽位是否加粗、斜体或链接；保留这些强调/链接所指的内容，不要为省事把整个段落塞进一个强调词或链接槽。它们是排版上下文，不能迫使你保留难懂词序。',
+    'readingContext 的 heading/tableHeaders/tableRow/previous/next 仅帮助消解指代和比较对象。不得拿邻段新理由替代本段理由；遇到含糊或证据不足，保留这个限度。先让读者明白实际主张和回应怎样影响结论，而非只解释术语定义；无需生硬套固定问答、表格、长度或句式。',
     '任何主体、事实、胜负、数字、比分、因果方向、否定、条件、责任、程度与结论强度必须保持不变。',
     '输出只负责候选 draft；最终 zeroBackgroundReadable/naturalReadable/noLocatorDependency/semanticEquivalent 由独立 reviewer 判定。'
   ].join('\n');
 }
 
 module.exports = {
+  unitContainerKey,
+  expandSemanticBlockIds,
   PROFILE_BODY,
   PROFILE_GUIDE,
   READABILITY_REVIEW_PROMPT_VERSION,

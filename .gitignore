@@ -11,6 +11,18 @@ node_modules/
 *.tmp
 *.zip
 
+# Private development/evaluation material is never part of a public snapshot.
+Upload/
+Source/
+测试用辩词/
+**/.api-config.json
+**/.env
+**/.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
 # Local-only evaluation data must never enter the public repository.
 local-data/
 local-test-data/

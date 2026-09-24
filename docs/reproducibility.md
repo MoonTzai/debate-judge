@@ -1,33 +1,28 @@
 # Reproducibility
 
-Debate-Judge separates **software reproducibility** from **scientific validation**.
+Check out tag `semantic-2026.09.24-r6` for this snapshot. Complete sources, compatibility mirrors and generated HTML are versioned. The checksum manifest is supplementary transport integrity, not a substitute for files or a semantic authority.
 
-## Software acceptance
+## Offline software verification
 
-The public deterministic acceptance path is:
+Validated environment: Node.js 24.16.0, Windows x64. No npm package installation or external API credential is needed:
 
 ```sh
 node install-skill.js --verify-only
-node pipeline-controller.js self-check
-node tests/run-public.js
 node web/build-judge-web.js
+node tests/run-public.js --current
 node scripts/secret-scan.js .
-node scripts/generate-manifest.js
 ```
 
-The release acceptance helper runs the same core checks through:
+`tests/semantic-edition.test.js` compares a rebuild with the distributed HTML, checks mirrors and module loading, and compares Node/Web prompts and SC policy. Sources use LF line endings; the distributed build contains no current-time stamp. `web/dist/` is an ignored build intermediate.
 
-```sh
-node scripts/accept-release.js --build
-node scripts/accept-release.js --test
-```
+Run `node tests/run-public.js` to inspect all inherited public checks. It currently exits nonzero: the old self-check and key-engine suites fail, as does `pipeline-controller.js self-check`. These failures also occur in unmodified r6. They are not suppressed or converted into passing results. See [limitations](semantic-edition.md).
 
-For v0.1.0, the repository was rebuilt and tested from a fresh public clone on Node v24.16.0 / Windows x64. A build-time timestamp that initially broke byte-level reproduction was removed before final acceptance.
-
-`MANIFEST.sha256` is the current checksum authority for the publishable tree. `web/dist/` is a Git-ignored build/test intermediate; `web/judge.html` is the tracked generated browser artifact.
-
-Future releases should repeat fresh-clone build/test/scan/manifest acceptance rather than copying old hashes into documentation.
+`node scripts/accept-release.js --build` verifies the closure and builds without rewriting the frozen Skill. `--test-current` runs the documented subset; `--test` runs all public checks and currently reports known failures.
 
 ## Scientific reproduction
 
-Passing software checks does not reproduce an adjudication-quality result. Scientific evaluation requires a frozen software version, authorized data, a human/reference protocol, baselines, model/provider configuration, uncertainty/error analysis, and reproducible result artifacts.
+Private transcripts, actual model responses, reports and run logs are excluded. Synthetic tests verify transport, review behavior, contracts and source propagation. They do not reproduce human agreement, SC recall/precision, or novice comprehension quality.
+
+Empirical work must record the exact tag/commit, provider/model version, sampling parameters, judge settings, authorized corpus, annotation protocol, repeated-run variation, cost/latency, and failures. Evaluate discovery, classification, outcome impact and report fidelity separately. Include difficult/failed runs.
+
+Publication packaging does not establish journal readiness. Public history, maintenance, research use and external evaluation must come from actual evidence, not backdated or manufactured records.

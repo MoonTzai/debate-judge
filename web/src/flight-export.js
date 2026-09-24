@@ -242,7 +242,28 @@ function buildFlightExportArchive(input) {
   return { bytes: makeZip(entries), manifest: manifest, entries: entries.map(function (e) { return e.path; }) };
 }
 
+function summarizeFlightManifest(manifest) {
+  var s = { sessions: 0, requests: 0, missingItems: 0, affectedRequests: 0, truncatedRequests: 0, truncatedRuns: 0, complete: true };
+  // Top-level missing repeats nested details; count the nested evidence once.
+  (manifest.sessions || []).forEach(function (session) {
+    s.sessions++;
+    s.missingItems += (session.missing || []).length;
+    (session.flightRuns || []).forEach(function (run) {
+      s.missingItems += (run.missing || []).length;
+      if (run.capture_truncated) s.truncatedRuns++;
+      (run.requests || []).forEach(function (req) {
+        s.requests++;
+        if (req.capture_truncated) s.truncatedRequests++;
+        if ((req.missing || []).length || (req.mismatch || []).length || req.capture_truncated || req.artifact_read_error) s.affectedRequests++;
+      });
+    });
+  });
+  s.complete = !(s.missingItems || s.affectedRequests || s.truncatedRuns);
+  return s;
+}
+
 module.exports = {
+  summarizeFlightManifest: summarizeFlightManifest,
   buildFlightExportArchive: buildFlightExportArchive,
   makeZip: makeZip,
   crc32: crc32,
