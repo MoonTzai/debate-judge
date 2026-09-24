@@ -24,6 +24,7 @@ function createEngine(bundle, hooks) {
 
   var PC = load('pipelineController');
   var host = load('hostNode');
+  var semanticWorkflow = load('semanticWorkflow');
   var api = load('apiProvider');
   var tendency = load('tendency');
   var judgeContext = load('judgeContext');
@@ -307,7 +308,7 @@ function createEngine(bundle, hooks) {
   //   onLog: fn(string)
   //   onRoster: async fn({anchor, workDir, session}) -> {action:'confirm'|'skip'|'abort'|'edit', editedAnchor?}
   //   onRound: fn({round, ok, skipped, errors, attempt, postprocess?})  轮次/后处理结束回调（UI 时间线）
-  //   onStage: fn({stage, state, postprocess?})  后处理活动态回调（R7/R8，不改变 core.ROUNDS 权威）
+  //   onStage: fn({stage, state, postprocess?, semanticFirst?, authorityScope?})  前置语义/后处理实时阶段回调（不改变 core.ROUNDS 权威）
   //   persist: async fn(step, payload)  持久化钩子（UI 存 IndexedDB）
   //   abortSignal: AbortSignal|null（外部中止信号，W-T10：轮间 apiStub 前置检查 + 进行中请求合并 abort）
   // }
@@ -321,13 +322,31 @@ function createEngine(bundle, hooks) {
 
   async function runSession(opts) {
     var log = opts.onLog || function () {};
-    var settings = opts.settings || {};
+    var testSemanticAuthority = bundle && bundle.testSemantic;
+    if (!testSemanticAuthority || testSemanticAuthority.schema !== 'judge-production-semantic-profile-v2' || testSemanticAuthority.mode !== 'active') {
+      throw new Error('[judge-web TEST] PRODUCTION_ACTIVE semantic attestation missing/invalid');
+    }
+    // TEST artifact route is immutable. Imported/history settings may carry old off/shadow values,
+    // but they are data only and cannot downgrade this artifact's execution route.
+    var settings = Object.assign({}, opts.settings || {}, {
+      semanticFirstMode: 'active',
+      semanticRoute: 'PRODUCTION_ACTIVE',
+      semanticTestIdentity: testSemanticAuthority.test_identity,
+      semanticProfileId: testSemanticAuthority.profile_id,
+      semanticPromptBundleSha256: testSemanticAuthority.prompt_bundle_sha256
+    });
+    var semanticFirstMode = 'active';
+    if (!semanticWorkflow || typeof semanticWorkflow.createWorkflow !== 'function' ||
+        typeof semanticWorkflow.parseReviewDecision !== 'function' || typeof semanticWorkflow.parseFidelityDecision !== 'function') {
+      throw new Error('[judge-web TEST] semantic-workflow active bundle closure 不可用');
+    }
     var resumeStartNode = canonicalResumeNode(opts.resumeStartNode || 'auto');
     var targetedResume = !!opts.resumeDir && resumeStartNode !== 'auto';
     // 定点续跑由 planner 决定失效面；force 全量覆盖与该语义互斥，避免绕过 planner 重跑上游。
     var effectiveForce = targetedResume ? false : !!opts.force;
     var resumePlan = null;
     var resumeEntrySnapshot = null;
+    var resumeRewind = null;
     // W-T5（E3）：本 run 的 onRound 事件序列（runSession 级，每次调用开头重置——多场次/续跑不串，R2-3）
     var runEvents = [];
     // W-T10：外部中止信号（单一中止事实源）。abortSignal 存在时构建 apiStub 包装——
@@ -339,6 +358,9 @@ function createEngine(bundle, hooks) {
     // 才允许下一笔真实 API。barrier 自身永不 reject；失败单独锁进 checkpointFailure，避免 fire-and-forget unhandled rejection。
     var checkpointBarrier = Promise.resolve();
     var checkpointFailure = null;
+    // If a semantic authority epoch cannot become durable, the old durable epoch must remain untouched.
+    // Do not let terminal/error persistence mix new current/provenance into old BASE/R* records.
+    var semanticEpochPersistenceFailure = null;
     // 普通 Judge round durability 与 PLAIN checkpoint 分开排队：观察事件仍同步，IO 只由 paid-request seam 消费。
     var roundDurabilityBarrier = Promise.resolve();
     var roundDurabilityFailure = null;
@@ -370,7 +392,7 @@ function createEngine(bundle, hooks) {
     }
     function queueRoundCheckpoint(r) {
       if (typeof opts.persist !== 'function') return;
-      roundDurabilityBarrier = roundDurabilityBarrier.then(async function () {
+      checkpointBarrier = checkpointBarrier.then(async function () {
         if (roundDurabilityFailure) return;
         try {
           await persistRequired('round-done', { workDir: workDir, round: r }, 'round checkpoint ' + String(r && r.round || '?'));
@@ -405,6 +427,30 @@ function createEngine(bundle, hooks) {
         });
       });
     }
+    function queueSemanticCheckpoint(phase) {
+      if ((semanticFirstMode !== 'shadow' && semanticFirstMode !== 'active') || typeof opts.persist !== 'function') return;
+      checkpointBarrier = checkpointBarrier.then(async function () {
+        if (checkpointFailure) return;
+        try {
+          var authorityRevision = null;
+          if (semanticFirstMode === 'active' && workDir) {
+            try {
+              var current = host.readTestSemanticCurrent(workDir);
+              authorityRevision = current && Number.isInteger(current.revision) ? current.revision : null;
+            } catch (e) { authorityRevision = null; }
+          }
+          await persistRequired('semantic-checkpoint', {
+            workDir: workDir,
+            phase: String(phase || 'checkpoint'),
+            semanticFirstMode: semanticFirstMode,
+            route: semanticFirstMode === 'active' ? 'PRODUCTION_ACTIVE' : 'SHADOW',
+            authorityRevision: authorityRevision
+          }, 'semantic checkpoint ' + String(phase || 'checkpoint'));
+        } catch (e) {
+          checkpointFailure = e;
+        }
+      });
+    }
     async function durabilityBarrierError() {
       // 所有 paid-request 与 terminal persist 共用同一 durability 汇合点：先等普通轮次，再等 PLAIN/R8 私有 checkpoint。
       // 返回首个已锁定失败而不直接抛出，供异常收口路径仍可尝试写 durable error snapshot。
@@ -418,6 +464,9 @@ function createEngine(bundle, hooks) {
     }
     var apiStubWrap = async function (cfg, msgs, o) {
       if (abortSignal && abortSignal.aborted) throw makeAbortError();
+      // host shadow capture 在调用本 seam 前已同步写 request；此处必须先把 request + 既有 raw
+      // 提交到同一 IndexedDB checkpoint barrier，成功后才允许下一笔 upstream。
+      queueSemanticCheckpoint('before-paid-request');
       await requireDurability();
       if (abortSignal && abortSignal.aborted) throw makeAbortError();
       var reqOpts = Object.assign({}, o || {});
@@ -476,13 +525,36 @@ function createEngine(bundle, hooks) {
     }
 
     // 6) 名册确认（源锚层 v1 浏览器化）
+    // A72：记录“本轮 source-anchor 状态已经 fresh 解析并由本地策略确认”。只有这个显式信号才能让
+    // host 在 normal run 中刷新 A71 control-view binding；archive/history verification 本身绝不拥有该能力。
     var anchor = null;
-    try { anchor = PC.extractSourceAnchor(vfs.readFileSync(workDir + '/.tmp-debate.txt', 'utf-8')); }
-    catch (e) { log('[judge-web] 名册抽取失败（按降级登记继续）: ' + e.message); }
+    var sourceAnchorExtractionResolved = false;
+    var sourceAnchorFreshResolved = false;
+    // A75：resume 前一版人工 aliases 只有在当前 provenance 已 exact-bound sourceAnchor 时才可继承。
+    // 先验真再读取，避免把 archive/损坏 VFS 中的任意 aliases 洗入 fresh anchor；新场次或旧未绑定包自然为 null。
+    var priorBoundAnchor = null;
+    try {
+      var priorSourceAnchorPath = workDir + '/source-anchor.json';
+      var priorProvenance = host.readTestProvenance(workDir);
+      if (priorProvenance && priorProvenance.consumerBinding && vfs.existsSync(priorSourceAnchorPath)) {
+        host.resolveConsumerBinding(workDir, priorProvenance.consumerBinding, ['sourceAnchor']);
+        priorBoundAnchor = JSON.parse(vfs.readFileSync(priorSourceAnchorPath, 'utf-8'));
+      }
+    } catch (priorAnchorError) {
+      priorBoundAnchor = null;
+      log('[judge-web TEST] 旧 source-anchor aliases 未通过 same-version binding 验证，本轮不继承');
+    }
+    try {
+      anchor = PC.extractSourceAnchor(vfs.readFileSync(workDir + '/.tmp-debate.txt', 'utf-8'));
+      sourceAnchorExtractionResolved = true;
+    } catch (e) { log('[judge-web] 名册抽取失败（按降级登记继续）: ' + e.message); }
     if (anchor && anchor.extracted) {
-      anchor = PC.mergeRosterAliases(anchor, null);
+      anchor = PC.mergeRosterAliases(anchor, priorBoundAnchor);
       vfs.writeFileSync(workDir + '/source-anchor.json', JSON.stringify(anchor, null, 2));
-      if (!settings.skipRosterConfirm && typeof opts.onRoster === 'function') {
+      if (settings.skipRosterConfirm) {
+        // skip 是接收端本地显式执行配置（A67 已禁止由 import envelope 注入），因此可作为本轮 fresh resolution。
+        sourceAnchorFreshResolved = true;
+      } else if (typeof opts.onRoster === 'function') {
         var decision = await opts.onRoster({ anchor: anchor, workDir: workDir, session: opts });
         if (!decision || decision.action === 'abort') {
           if (targetedResume) { removeSession(workDir); restoreSession(resumeEntrySnapshot || {}); }
@@ -498,6 +570,7 @@ function createEngine(bundle, hooks) {
             vfs.writeFileSync(workDir + '/source-anchor.json', JSON.stringify(remerged, null, 2));
             vfs.writeFileSync(workDir + '/source-anchor.confirmed', JSON.stringify(
               { by: 'judge-web（编辑重抽）', at: new Date().toISOString(), rosterHash: remerged.rosterHash }, null, 2));
+            sourceAnchorFreshResolved = true;
             log('[judge-web] 名册已编辑重抽并确认');
           } catch (e) {
             throw new Error('[judge-web] 名册编辑无效: ' + e.message);
@@ -506,13 +579,61 @@ function createEngine(bundle, hooks) {
           // confirm / skip（skip 与确认等效：写确认标记，断点续跑不再问）
           vfs.writeFileSync(workDir + '/source-anchor.confirmed', JSON.stringify(
             { by: 'judge-web', at: new Date().toISOString(), rosterHash: anchor.rosterHash }, null, 2));
+          sourceAnchorFreshResolved = true;
           log('[judge-web] 名册已确认（rosterHash=' + anchor.rosterHash.slice(0, 8) + '…）');
         }
+      } else {
+        if (targetedResume) { removeSession(workDir); restoreSession(resumeEntrySnapshot || {}); }
+        return { ok: false, aborted: true, workDir: workDir, results: [], resumePlan: resumePlan,
+          error: '[judge-web TEST] source-anchor 需要本地人工确认，但 onRoster seam 不可用' };
       }
+    } else if (sourceAnchorExtractionResolved) {
+      // fresh extractor 明确判定“本轮没有可用 source-anchor”时，旧 bound anchor 不得残留并继续影响报告/校验。
+      if (vfs.existsSync(workDir + '/source-anchor.json')) vfs.unlinkSync(workDir + '/source-anchor.json');
+      if (vfs.existsSync(workDir + '/source-anchor.confirmed')) vfs.unlinkSync(workDir + '/source-anchor.confirmed');
+      sourceAnchorFreshResolved = true;
     }
 
     // 6.5) 受控 rewind：必须在 roster/plan 成功之后、pipeline-start durable BASE 之前完成。
-    if (targetedResume) applyResumeRewind(workDir, resumePlan);
+    // PRODUCTION_ACTIVE provenance is part of the same-version authority. When the planner deliberately deletes
+    // downstream views, trim those exact views from the binding before host preparation; never weaken the
+    // provenance validator to accept missing files. Any pruning failure restores the complete entry snapshot.
+    if (targetedResume) {
+      try {
+        resumeRewind = applyResumeRewind(workDir, resumePlan);
+        var existingSemanticProvenance = host.readTestProvenance(workDir);
+        if (existingSemanticProvenance) {
+          var workPrefix = posixOf(workDir).replace(/\/+$/, '') + '/';
+          var removedNames = (resumeRewind.removedFiles || []).map(function (full) {
+            var normalized = posixOf(full);
+            return normalized.slice(0, workPrefix.length) === workPrefix ? normalized.slice(workPrefix.length) : normalized;
+          });
+          // A72：targeted resume 在 host preparation 前已经写入本轮 fresh source-anchor；先从旧 binding 裁掉
+          // sourceAnchor，避免合法人工编辑被旧 hash 当作 provenance drift。host 仅凭 fresh-resolved 信号重新绑定。
+          if (sourceAnchorFreshResolved && removedNames.indexOf('source-anchor.json') < 0) removedNames.push('source-anchor.json');
+          var prunedBinding = host.pruneConsumerBindingAfterInvalidation(
+            workDir, existingSemanticProvenance.consumerBinding, removedNames);
+          host.updateTestProvenance(workDir, testSemanticAuthority, prunedBinding, {
+            plain: !!(prunedBinding.views && prunedBinding.views.reportPlain),
+            readerGuide: !!(prunedBinding.views && prunedBinding.views.readerGuide && prunedBinding.views.readerGuideHtml),
+            semanticIdentityPreserved: true
+          });
+          log('[judge-web TEST] targeted resume 已同步裁剪 semantic consumer binding：removed=' + removedNames.length);
+        }
+      } catch (resumeBindingError) {
+        removeSession(workDir);
+        restoreSession(resumeEntrySnapshot || {});
+        return {
+          ok: false,
+          semanticOk: null,
+          resumeBlocked: true,
+          error: '[judge-web TEST] targeted resume semantic binding rewind failed: ' + String(resumeBindingError.message || resumeBindingError),
+          workDir: workDir,
+          results: [],
+          resumePlan: resumePlan
+        };
+      }
+    }
 
     if (typeof opts.persist === 'function') {
       try {
@@ -547,22 +668,65 @@ function createEngine(bundle, hooks) {
         apiStub: apiStubWrap,
         requestCompletion: apiStubWrap,
         onBatchCheckpoint: function (info) { queueBatchCheckpoint(info); },
+        // PRODUCTION_ACTIVE reopen 必须在下一笔 paid request 前切换 durability epoch：
+        // 先等待旧 round/semantic checkpoint 全部 durable，再让 UI 以当前 VFS 写新 BASE 并原子退役旧 FINAL/R*。
+        onSemanticEpochCheckpoint: async function (info) {
+          try {
+            await requireDurability();
+            await persistRequired('semantic-epoch-checkpoint', Object.assign({ workDir: workDir }, info || {}), 'semantic authority epoch');
+            if (info && info.reason === 'r3-reopen') runEvents.length = 0;
+            return true;
+          } catch (epochError) {
+            semanticEpochPersistenceFailure = epochError || makePersistenceError('semantic authority epoch', null);
+            semanticEpochPersistenceFailure.semanticEpochPersistenceFailure = true;
+            throw semanticEpochPersistenceFailure;
+          }
+        },
+        // Reviewed SC semantic staging is not current authority yet. Persist only the active semantic subtree
+        // before sc-project so a representation-only failure can resume from reviewed semantic without rerunning
+        // discovery/review. This does not retire BASE/R* and does not mint a consumerBinding.
+        onScSemanticStageCheckpoint: async function (info) {
+          await requireDurability();
+          await persistRequired('semantic-checkpoint',
+            Object.assign({ workDir: workDir, authorityScope: 'sc', phase: 'sc-reviewed-semantic' }, info || {}),
+            'SC reviewed semantic stage');
+          return true;
+        },
+        // V10 SC authority has an independent CAS/revision. Its epoch still shares the same atomic BASE/FINAL
+        // persistence primitive so a new SC current can never coexist durably with resurrectable old P2+ views.
+        onScSemanticEpochCheckpoint: async function (info) {
+          try {
+            await requireDurability();
+            await persistRequired('semantic-epoch-checkpoint', Object.assign({ workDir: workDir, authorityScope: 'sc' }, info || {}), 'SC semantic authority epoch');
+            return true;
+          } catch (epochError) {
+            semanticEpochPersistenceFailure = epochError || makePersistenceError('SC semantic authority epoch', null);
+            semanticEpochPersistenceFailure.semanticEpochPersistenceFailure = true;
+            throw semanticEpochPersistenceFailure;
+          }
+        },
         onLog: function (m) { log(m); },   // C1：日志仅人类消费（事件已结构化）
         onRound: onRoundWrap,   // C1：结构化事件（P4 注入回调）
         onStage: function (s) {
           if (typeof opts.onStage === 'function') { try { opts.onStage(s); } catch (e) {} }
         },
+        semanticFirstMode: semanticFirstMode,
+        testSemanticAuthority: testSemanticAuthority,
+        sourceAnchorFreshResolved: sourceAnchorFreshResolved,
         force: effectiveForce,
         plain: !!settings.plain,
         plainReplayOnly: !!(resumePlan && resumePlan.requirePlainCacheHit),
         plainDict: plainDictPath(settings, log),
         skipRosterConfirm: true
       });
-      // 最后一批/最后一轮之后可能没有下一笔 API，因此 terminal path 也必须等全部 durability barrier。
+      // 最后一笔 semantic raw 之后可能没有下一笔 API，因此 host terminal 必须主动提交 semantic subtree。
+      queueSemanticCheckpoint('host-terminal');
       await requireDurability();
     } catch (e) {
-      // host 可能在最后一个 round/checkpoint 尚在落盘时先抛出；终态仍需等待这些写入收口。
-      var durabilityError = await durabilityBarrierError() || (e && e.name === 'PersistenceError' ? e : null);
+      // If semantic epoch installation failed, writing any new semantic checkpoint/FINAL into the old epoch
+      // would recreate a half-cutover. Preserve the old durable epoch unchanged and fail closed in memory.
+      if (!semanticEpochPersistenceFailure) queueSemanticCheckpoint('host-terminal-error');
+      var durabilityError = semanticEpochPersistenceFailure || await durabilityBarrierError() || (e && e.name === 'PersistenceError' ? e : null);
       var aborted = !durabilityError && !!e && (e.name === 'AbortError' || /aborted|abort/i.test(String(e.message || '')));
       // W-T5（E5）：中止/异常路径构建 runModel（catch 内 res 未赋值——L277 抛错时保持 undefined，必须 (res && res.results) || []，R7-A1）；
       // 构建外包 try/catch（R12-1：catch 内不得二次抛出——原路径仅带 .catch() 的 persist，异常逃逸语义必须保持）
@@ -579,7 +743,7 @@ function createEngine(bundle, hooks) {
       // W-PH：批次档案先写 → persist 快照同帧带出（runModel 可能 null，append 内防御）；新批并入 runModel 重算判定
       attachRunBatch(runModel, appendRunBatch(workDir, runModel, runEvents));
       var terminalPersistenceError = durabilityError;
-      if (typeof opts.persist === 'function') {
+      if (!semanticEpochPersistenceFailure && typeof opts.persist === 'function') {
         try {
           await persistRequired('pipeline-error', { workDir: workDir, error: String(e.message || e), aborted: aborted, runModel: runModel }, 'FINAL/error snapshot');
         } catch (pe) {
@@ -606,7 +770,10 @@ function createEngine(bundle, hooks) {
         // mock R6b 历史上是轻量手写 HTML；R8 需要正式报告的 plain-toggle runtime。
         // plain=true 时 applyPlain 已完成该迁移；plain=false 时先用现有机械 renderer 生成正式同形报告。
         if (cfg.provider === 'mock' && !settings.plain) {
-          host.renderReport(workDir);
+          host.renderReport(workDir, { consumerBinding: res.consumerBinding || null });
+          if (res.consumerBinding) {
+            res.consumerBinding = host.consumerBindingFromProducedViews(workDir, res.consumerBinding, { report: 'report.html' });
+          }
           var mockAdjData = workDir + '/.tmp-adjudicated-data.md';
           var mockDisclaimer = false;
           try {
@@ -623,13 +790,23 @@ function createEngine(bundle, hooks) {
           }
           log('[judge-web] mock R8 前已机械重建正式同形 report.html，并通过 final gate');
         }
-        log('[judge-web] 主裁决完成，开始 R8 章节导览（独立后处理）');
+        var semanticBeforeR8 = host.readTestSemanticCurrent(workDir);
+        log('[judge-web] 主裁决完成，开始 R8 章节导览（独立后处理；PRODUCTION_ACTIVE semantic identity 冻结）');
         if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R8', state: 'active', postprocess: true }); } catch (e) {} }
-        await host.applyReaderGuide(workDir, cfg, function (m) { log(m); }, {
+        var guideResult = await host.applyReaderGuide(workDir, cfg, function (m) { log(m); }, {
           cache: !effectiveForce,
           requestCompletion: apiStubWrap,
-          onBatchCheckpoint: function (info) { queueBatchCheckpoint(info); }
+          onBatchCheckpoint: function (info) { queueBatchCheckpoint(info); },
+          consumerBinding: res.consumerBinding || null
         });
+        if (guideResult && guideResult.consumerBinding) res.consumerBinding = guideResult.consumerBinding;
+        host.assertSemanticIdentityUnchanged(semanticBeforeR8, host.readTestSemanticCurrent(workDir), 'R8 reader guide');
+        res.semanticProvenance = host.updateTestProvenance(workDir, testSemanticAuthority, res.consumerBinding || null, {
+          plain: !!settings.plain,
+          readerGuide: true,
+          semanticIdentityPreserved: true
+        });
+        queueSemanticCheckpoint('after-r8-presentation');
         readerGuideApplied = true;
         if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R8', state: 'done', postprocess: true }); } catch (e) {} }
       } catch (r8e) {
@@ -685,6 +862,16 @@ function createEngine(bundle, hooks) {
       }
     }
 
+    if (res && res.ok) {
+      res.semanticProvenance = host.updateTestProvenance(workDir, testSemanticAuthority, res.consumerBinding || null, {
+        plain: !!settings.plain,
+        readerGuide: readerGuideApplied,
+        semanticIdentityPreserved: true
+      });
+      queueSemanticCheckpoint('final-provenance');
+      await requireDurability();
+    }
+
     // 9) 产物读取——R8 开启时必须在其机械嵌入之后读取，保证返回/持久化的是最终 report。
     var reportHtml = readReportHtml(workDir);   // C4（A9）：同构直读收敛（report-plain 无对应方法保持原样）
     var reportPlain = vfs.existsSync(workDir + '/report-plain.html') ? vfs.readFileSync(workDir + '/report-plain.html', 'utf-8') : null;
@@ -732,6 +919,9 @@ function createEngine(bundle, hooks) {
       reportPlain: reportPlain,
       reportFile: settings.plain && reportPlain ? 'report-plain.html' : 'report.html',
       readerGuideApplied: readerGuideApplied,
+      semanticFirstMode: semanticFirstMode,
+      semanticRoute: 'PRODUCTION_ACTIVE',
+      semanticProvenance: res && res.semanticProvenance || null,
       resumePlan: resumePlan,
       runModel: runModel   // W-T5：终态 run 模型（F10 双通道：payload 附带 + return 附带）
     };
@@ -878,6 +1068,103 @@ function createEngine(bundle, hooks) {
   function restoreSession(files) {
     vfs.restore(files);
   }
+  function proveTestSessionAuthority(workDir) {
+    var base = posixOf(workDir || '').replace(/\/+$/, '');
+    var attestation = bundle && bundle.testSemantic;
+    if (!attestation || attestation.schema !== 'judge-production-semantic-profile-v2' || attestation.mode !== 'active') {
+      throw new Error('[judge-web TEST] 当前 bundle 缺少有效 PRODUCTION_ACTIVE attestation');
+    }
+    var current = host.readTestSemanticCurrent(base);
+    if (!current || !Number.isInteger(current.revision) || current.revision < 1) {
+      throw new Error('[judge-web TEST] 历史/导入会话缺少已发布 TEST semantic current');
+    }
+    var provenance = host.readTestProvenance(base);
+    if (!provenance) throw new Error('[judge-web TEST] 历史/导入会话缺少 TEST provenance');
+    var validated = host.validateTestProvenance(base, { attestation: attestation }, current, provenance);
+    return { current: current, provenance: validated };
+  }
+  // External/history session payloads are data, never VFS authority. Constrain every restored key to its declared workDir.
+  // Internal targeted-resume rollback keeps using restoreSession() with an engine-owned snapshot.
+  function restoreSessionScoped(files, workDir) {
+    if (!files || typeof files !== 'object' || Array.isArray(files)) throw new Error('[judge-web TEST] session files 必须为对象');
+    var base = posixOf(workDir || '').replace(/\/+$/, '');
+    var baseSegments = base.split('/');
+    var lowerBase = base.toLowerCase();
+    var inJudgeOutputNamespace = lowerBase.indexOf('/output/judge-') === 0;
+    // VFS restore normalizes duplicate slashes and dot segments. External authority must not rely on that silent
+    // canonicalization because two raw JSON keys could otherwise collapse onto one authority-bearing file.
+    if (!base || base === '/' || base.charAt(0) !== '/' || base.indexOf('//') >= 0 ||
+        baseSegments.indexOf('.') >= 0 || baseSegments.indexOf('..') >= 0 || !inJudgeOutputNamespace) {
+      throw new Error('[judge-web TEST] session workDir 非法、非规范或越出 /Output/judge-* 会话命名空间: ' + String(workDir || ''));
+    }
+    var seenCanonicalKeys = Object.create(null);
+    Object.keys(files).forEach(function (rawKey) {
+      var key = posixOf(rawKey);
+      var segments = key.split('/');
+      if (!key || key.charAt(0) !== '/' || key.indexOf('//') >= 0 || key.charAt(key.length - 1) === '/' ||
+          segments.indexOf('.') >= 0 || segments.indexOf('..') >= 0 || key.slice(0, base.length + 1) !== base + '/') {
+        throw new Error('[judge-web TEST] session restore 路径非规范或越出 workDir: ' + rawKey);
+      }
+      if (Object.prototype.hasOwnProperty.call(seenCanonicalKeys, key)) {
+        throw new Error('[judge-web TEST] session restore 路径别名冲突: ' + seenCanonicalKeys[key] + ' <=> ' + rawKey);
+      }
+      seenCanonicalKeys[key] = rawKey;
+    });
+    vfs.restore(files);
+    return true;
+  }
+  // A64/A71：外部/history 包里的控制文件不能仅因 surrounding semantic session 有效就升级成 authority。
+  // source-anchor.json 会改变锚校验/免责声明呈现；source-anchor-exemptions.json 更会改变 validator authority。
+  // 两者一旦存在，都必须已经是当前 same-version consumer binding 中 exact-name + exact-hash 的 control view。
+  function proveExternalSessionControlFiles(base, proof) {
+    var sourceAnchorPath = base + '/source-anchor.json';
+    if (vfs.existsSync(sourceAnchorPath)) {
+      try {
+        host.resolveConsumerBinding(base, proof.provenance.consumerBinding, ['sourceAnchor']);
+      } catch (e) {
+        throw new Error('[judge-web TEST] unbound source-anchor.json cannot become report/anchor authority: ' +
+          (e && e.message ? e.message : String(e)));
+      }
+    }
+    var exemptionPath = base + '/source-anchor-exemptions.json';
+    if (vfs.existsSync(exemptionPath)) {
+      try {
+        host.resolveConsumerBinding(base, proof.provenance.consumerBinding, ['sourceAnchorExemptions']);
+      } catch (e2) {
+        throw new Error('[judge-web TEST] unbound source-anchor-exemptions.json cannot become human authority: ' +
+          (e2 && e2.message ? e2.message : String(e2)));
+      }
+    }
+    return proof;
+  }
+  function restoreVerifiedTestSession(files, workDir) {
+    var base = posixOf(workDir || '').replace(/\/+$/, '');
+    var before = vfs.snapshot(base + '/');
+    vfs.removeTree(base);
+    try {
+      restoreSessionScoped(files, base);
+      return proveExternalSessionControlFiles(base, proveTestSessionAuthority(base));
+    } catch (e) {
+      vfs.removeTree(base);
+      vfs.restore(before);
+      throw new Error('[judge-web TEST] session authority verification failed: ' + (e && e.message ? e.message : String(e)));
+    }
+  }
+  function verifyTestSessionFiles(files, workDir, requiredViews) {
+    var base = posixOf(workDir || '').replace(/\/+$/, '');
+    var before = vfs.snapshot(base + '/');
+    vfs.removeTree(base);
+    try {
+      restoreSessionScoped(files, base);
+      var proof = proveExternalSessionControlFiles(base, proveTestSessionAuthority(base));
+      var required = Array.isArray(requiredViews) ? requiredViews.filter(Boolean) : [];
+      if (required.length) host.resolveConsumerBinding(base, proof.provenance.consumerBinding, required);
+      return proof;
+    } finally {
+      vfs.removeTree(base);
+      vfs.restore(before);
+    }
+  }
 
   function removeSession(workDir) {
     vfs.removeTree(String(workDir).replace(/\\/g, '/'));
@@ -889,34 +1176,102 @@ function createEngine(bundle, hooks) {
     var base = posixOf(workDir);
     return vfs.existsSync(base + '/report.html') ? vfs.readFileSync(base + '/report.html', 'utf-8') : null;
   }
-  // 历史记录外围恢复 seam：基础兼容入口，仅机械重渲染 R6 report。
-  function rerenderReport(workDir) {
-    var base = posixOf(workDir);
-    host.renderReport(base);
-    return readReportHtml(base);
-  }
-
   // 历史“重新出报告”完整四组合 seam：唯一配置真值是该历史 session 的 settings。
   // 固定顺序 = R6 base → approved PLAIN（可选）→ verified R8（可选）；
   // 不进入 runSession/fetch/API，PLAIN 模型路径由 host 内部 0-API fuse 封死。
   async function rebuildHistoricalReport(workDir, historicalSettings) {
     var base = posixOf(workDir);
-    var saved = historicalSettings && typeof historicalSettings === 'object' ? historicalSettings : {};
+    var saved = Object.assign({}, historicalSettings && typeof historicalSettings === 'object' ? historicalSettings : {}, {
+      semanticFirstMode: 'active',
+      semanticRoute: 'PRODUCTION_ACTIVE',
+      semanticTestIdentity: bundle.testSemantic.test_identity,
+      semanticProfileId: bundle.testSemantic.profile_id,
+      semanticPromptBundleSha256: bundle.testSemantic.prompt_bundle_sha256
+    });
+    var entry = vfs.snapshot(base + '/');
+    // External plain dictionaries are merged through one shared transient staging file. Historical reissue is a
+    // read/derive transaction and must not leak that staging across sessions, on either success or failure.
+    var plainDictStagePath = '/input/plain-dict-ext.json';
+    var plainDictStageBefore = vfs.existsSync(plainDictStagePath)
+      ? { exists: true, text: vfs.readFileSync(plainDictStagePath, 'utf8') }
+      : { exists: false, text: null };
     try {
-      host.renderReport(base);
+      var proof = proveTestSessionAuthority(base);
+      var binding = JSON.parse(JSON.stringify(proof.provenance.consumerBinding));
+
+      // R6: only bound adjudicated/narrative inputs may rebuild the base report. Immediately rebind
+      // the deterministic report before any optional presentation layer consumes it.
+      host.renderReport(base, { consumerBinding: binding });
+      binding = host.consumerBindingFromProducedViews(base, binding, { report: 'report.html' });
+
       if (saved.plain === true) {
         var plainCfg = buildApiCfg(Object.assign({}, saved, { apiKey: '' }));
         var dictPath = plainDictPath(saved, function () {});
-        await host.rebuildApprovedPlainReport(base, plainCfg, dictPath);
+        var plainResult = await host.rebuildApprovedPlainReport(base, plainCfg, dictPath, { consumerBinding: binding });
+        binding = plainResult && plainResult.consumerBinding || binding;
       }
-      if (saved.readerGuide === true) host.embedVerifiedReaderGuide(base);
+      if (saved.readerGuide === true) {
+        host.resolveConsumerBinding(base, binding, ['report', 'readerGuideInput', 'readerGuide', 'readerGuidePlain', 'readerGuideHtml']);
+        host.embedVerifiedReaderGuide(base, { consumerBinding: binding });
+        binding = host.consumerBindingFromProducedViews(base, binding, { report: 'report.html' });
+      }
+
+      var finalPlan = host.resolveConsumerBinding(base, binding, []);
+      var provenance = host.updateTestProvenance(base, bundle.testSemantic, binding, {
+        plain: !!(finalPlan.views && finalPlan.views.reportPlain && saved.plain === true),
+        readerGuide: !!(finalPlan.views && finalPlan.views.readerGuide && finalPlan.views.readerGuideHtml && saved.readerGuide === true),
+        semanticIdentityPreserved: true
+      });
+      proveTestSessionAuthority(base);
       var html = readReportHtml(base);
       if (!html) throw new Error('机械链未生成 report.html');
-      return { html: html, plainApplied: saved.plain === true, readerGuideApplied: saved.readerGuide === true };
+      return { html: html, plainApplied: saved.plain === true, readerGuideApplied: saved.readerGuide === true, semanticProvenance: provenance };
     } catch (e) {
+      vfs.removeTree(base);
+      vfs.restore(entry);
       throw new Error('[judge-web] 无法完整重建历史报告：' + (e && e.message ? e.message : String(e)));
+    } finally {
+      try {
+        if (plainDictStageBefore.exists) vfs.writeFileSync(plainDictStagePath, plainDictStageBefore.text, 'utf8');
+        else if (vfs.existsSync(plainDictStagePath)) vfs.unlinkSync(plainDictStagePath);
+      } catch (stageRestoreError) {
+        // Cleanup failure invalidates the whole presentation transaction. Never return/throw with a newly committed
+        // workDir presentation while shared staging restoration is unknown.
+        try {
+          vfs.removeTree(base);
+          vfs.restore(entry);
+        } catch (entryRestoreError) {
+          throw new Error('[judge-web] 历史报告重建 shared staging 与 workDir rollback 均失败: ' +
+            (stageRestoreError && stageRestoreError.message ? stageRestoreError.message : String(stageRestoreError)) +
+            '；workDir=' + (entryRestoreError && entryRestoreError.message ? entryRestoreError.message : String(entryRestoreError)));
+        }
+        throw new Error('[judge-web] 历史报告重建 shared staging rollback 失败，workDir 已回滚: ' +
+          (stageRestoreError && stageRestoreError.message ? stageRestoreError.message : String(stageRestoreError)));
+      }
     }
   }
+  // Complete history reissue transaction: verified history install + same-version presentation rebuild share one
+  // outer entry snapshot. A late rebuild failure must restore the live VFS that existed before the user clicked reissue,
+  // not merely the just-installed history snapshot used by rebuildHistoricalReport's inner transaction.
+  async function rebuildVerifiedHistoricalReport(files, workDir, historicalSettings) {
+    var base = posixOf(workDir || '').replace(/\/+$/, '');
+    var outerEntry = vfs.snapshot(base + '/');
+    try {
+      restoreVerifiedTestSession(files, base);
+      return await rebuildHistoricalReport(base, historicalSettings);
+    } catch (e) {
+      try {
+        vfs.removeTree(base);
+        vfs.restore(outerEntry);
+      } catch (restoreError) {
+        throw new Error('[judge-web TEST] 历史 reissue outer rollback 失败: ' +
+          (restoreError && restoreError.message ? restoreError.message : String(restoreError)) +
+          '；原错误=' + (e && e.message ? e.message : String(e)));
+      }
+      throw e;
+    }
+  }
+
   function readDebateCopy(workDir) {
     var base = posixOf(workDir);
     return vfs.existsSync(base + '/.tmp-debate.txt') ? vfs.readFileSync(base + '/.tmp-debate.txt', 'utf-8') : null;
@@ -926,6 +1281,10 @@ function createEngine(bundle, hooks) {
     runSession: runSession,
     snapshotSession: snapshotSession,
     restoreSession: restoreSession,
+    restoreSessionScoped: restoreSessionScoped,
+    proveTestSessionAuthority: proveTestSessionAuthority,
+    restoreVerifiedTestSession: restoreVerifiedTestSession,
+    verifyTestSessionFiles: verifyTestSessionFiles,
     removeSession: removeSession,
     buildRunModel: buildRunModel,                 // W-T5（E6）
     buildRunModelFromFiles: buildRunModelFromFiles,   // W-T5（E6）
@@ -937,8 +1296,8 @@ function createEngine(bundle, hooks) {
     vfs: vfs,
     buildThinkingExtra: buildThinkingExtra,
     readReportHtml: readReportHtml,               // C4：直读收窄（UI 入口）
-    rerenderReport: rerenderReport,               // 历史记录：基础 R6 兼容入口
-    rebuildHistoricalReport: rebuildHistoricalReport, // 历史记录：按历史 settings 四组合 0-API 完整机械重建
+    rebuildHistoricalReport: rebuildHistoricalReport, // 已安装 TEST session 的 same-version 0-API presentation transaction
+    rebuildVerifiedHistoricalReport: rebuildVerifiedHistoricalReport, // history files verified-install + rebuild 的 outer rollback transaction
     readDebateCopy: readDebateCopy                // C4：直读收窄（UI 入口）
   };
 }

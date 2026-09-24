@@ -19,6 +19,11 @@
 (function () {
   var BUNDLE = (typeof window !== 'undefined' ? window : globalThis).JUDGE_BUNDLE;
   if (!BUNDLE) { console.error('[judge-web] JUDGE_BUNDLE 未就绪'); return; }
+  var TEST_SEMANTIC = BUNDLE.testSemantic;
+  if (!TEST_SEMANTIC || TEST_SEMANTIC.schema !== 'judge-production-semantic-profile-v2' || TEST_SEMANTIC.mode !== 'active') {
+    console.error('[judge-web TEST] PRODUCTION_ACTIVE semantic attestation missing/invalid');
+    return;
+  }
 
   var tendencyMod = BUNDLE.modules.tendency();
   var judgeContextMod = BUNDLE.modules.judgeContext();
@@ -63,8 +68,8 @@
   // settings 值语义（value 键）、HTML 结构串（'block'/'none' 等）。
   var TXT = {
     brand: {
-      title: '辩论筑基 · Debate-Judge · 评委与复盘AI · 完全版',
-      ver: '深度评审·完整剖析·AI评委斩杀线'
+      title: '辩论筑基 · Debate-Judge · Semantic-First',
+      ver: 'PRODUCTION_ACTIVE · 独立测试版 · Semantic-First 全流程验证'
     },
     top: {
       sessions: '🗂 历史记录',
@@ -597,6 +602,31 @@
     if (menu && menu.open && e && e.target && !menu.contains(e.target)) menu.open = false;
   }, true);
 
+  function semanticTestMetadata() {
+    return {
+      route: 'PRODUCTION_ACTIVE',
+      testIdentity: TEST_SEMANTIC.test_identity,
+      profileId: TEST_SEMANTIC.profile_id,
+      promptBundleSha256: TEST_SEMANTIC.prompt_bundle_sha256
+    };
+  }
+  function assertSemanticTestMetadata(meta) {
+    var expected = semanticTestMetadata();
+    if (!meta || meta.route !== expected.route || meta.testIdentity !== expected.testIdentity ||
+        meta.profileId !== expected.profileId || meta.promptBundleSha256 !== expected.promptBundleSha256) {
+      throw new Error('会话 identity/profile/prompt bundle 与当前 Semantic-First Production 不一致');
+    }
+    return true;
+  }
+  function applySemanticTestRoute(s) {
+    s = s && typeof s === 'object' ? s : {};
+    s.semanticFirstMode = 'active';
+    s.semanticRoute = 'PRODUCTION_ACTIVE';
+    s.semanticTestIdentity = TEST_SEMANTIC.test_identity;
+    s.semanticProfileId = TEST_SEMANTIC.profile_id;
+    s.semanticPromptBundleSha256 = TEST_SEMANTIC.prompt_bundle_sha256;
+    return s;
+  }
   function loadSettings() {
     var d = {
       provider: 'deepseek',
@@ -638,7 +668,7 @@
         localStorage.setItem(LS_KEY, JSON.stringify(d));
       }
     } catch (e) {}
-    return d;
+    return applySemanticTestRoute(d);
   }
   function saveSettings() {
     try { localStorage.setItem(LS_KEY, JSON.stringify(settings)); } catch (e) {}
@@ -670,7 +700,26 @@
     try { s.judgeContext = judgeContextMod.normalizeJudgeContext(s.judgeContext === undefined ? null : s.judgeContext); }
     catch (ctxErr) { s.judgeContext = judgeContextMod.normalizeJudgeContext(null); }
     if (s.provider === 'opencode-go') s.provider = 'custom';
-    return s;
+    return applySemanticTestRoute(s);
+  }
+  // External session JSON is evidence/data, not authority to redirect live model traffic or suppress a human gate.
+  // Preserve historical analysis/presentation preferences, but keep transport/execution credentials-adjacent controls
+  // on the receiver's current local configuration. This prevents a valid exported TEST file set plus a modified
+  // outer settings envelope from redirecting a stored provider API key to an attacker endpoint on resume.
+  function sanitizeImportedSessionSettings(imported, local) {
+    // Deny by default. The portable envelope is not covered by semantic/provenance authority, so no current or
+    // future session setting from it may silently become run authority. This includes transport, paid-call shape,
+    // human gates, tendency/dimension weights, Judge Persona Context, depth, PLAIN/R8 switches and dictionaries.
+    // The imported value remains in the user's source JSON as evidence, but the receiver's active/persisted session
+    // settings start from the receiver's explicit local configuration only.
+    void imported;
+    var trustedLocal = (local && typeof local === 'object' && !Array.isArray(local))
+      ? JSON.parse(JSON.stringify(local)) : {};
+    trustedLocal = normalizeSettingsKeys(trustedLocal) || {};
+    // API credentials are never session metadata; run-time API_KEY remains in the dedicated local provider slot.
+    delete trustedLocal.apiKey;
+    delete trustedLocal.api_key;
+    return applySemanticTestRoute(trustedLocal);
   }
   function apiKeySlot(provider) {
     return PROVIDER_PRESETS[provider] ? provider : (provider === 'custom' ? 'custom' : '');
@@ -744,16 +793,6 @@
     });
     return idbPending;
   }
-  function idbPut(rec) {
-    return idbOpen().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction(DB_STORE, 'readwrite');
-        tx.objectStore(DB_STORE).put(rec);
-        tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { reject(tx.error); };
-      });
-    });
-  }
   function idbAll() {
     return idbOpen().then(function (db) {
       return new Promise(function (resolve, reject) {
@@ -761,16 +800,6 @@
         var req = tx.objectStore(DB_STORE).getAll();
         req.onsuccess = function () { resolve(req.result || []); };
         req.onerror = function () { reject(req.error); };
-      });
-    });
-  }
-  function idbDel(id) {
-    return idbOpen().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction(DB_STORE, 'readwrite');
-        tx.objectStore(DB_STORE).delete(id);
-        tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { reject(tx.error); };
       });
     });
   }
@@ -784,21 +813,97 @@
       });
     });
   }
-  // C5：sessionFiles store 专用 API（记录 id = dir + '#BASE' / '#R{n}' / '#FINAL'；前缀过滤统一内存侧——真实 IDB 与桩均无前缀 API）
-  function idbPutFile(id, files) {
+  // A78: Web durable history has its own generation, separate from semantic revision.
+  // Missing historyRevision on a legacy metadata row is generation 0; malformed values fail closed.
+  function normalizedHistoryRevision(rec) {
+    if (!rec || rec.historyRevision === undefined || rec.historyRevision === null) return 0;
+    var n = Number(rec.historyRevision);
+    return isFinite(n) && n >= 0 && Math.floor(n) === n ? n : null;
+  }
+  // A88: revision alone has an ABA hole when a workDir is deleted then recreated from generation 1.
+  // Each local ownership incarnation therefore carries an immutable instance token. Legacy rows get a stable
+  // synthetic token only for that pre-A88 incarnation; any delete+recreate mints a fresh h1 token.
+  function mintHistoryInstanceId(dir) {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') return 'h1:' + window.crypto.randomUUID();
+    } catch (_) {}
+    return 'h1:' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2, 14) + ':' + String(dir || '').length.toString(36);
+  }
+  function normalizedHistoryInstanceId(rec, dir) {
+    if (!rec) return null;
+    var explicit = String(rec.historyInstanceId || '').trim();
+    return explicit || ('legacy-v0:' + String(dir || rec.id || ''));
+  }
+  function assertHistoryCas(existing, expectedRevision, dir, expectedInstanceId) {
+    if (expectedRevision === null || expectedRevision === undefined) {
+      if (existing) throw new Error('history CAS collision: expected new session but metadata already exists for ' + dir);
+      if (expectedInstanceId !== null && expectedInstanceId !== undefined) throw new Error('history CAS new session must not inherit an instance id');
+      return { nextRevision: 1, instanceId: mintHistoryInstanceId(dir) };
+    }
+    var expected = Number(expectedRevision);
+    var actual = normalizedHistoryRevision(existing);
+    var actualInstance = normalizedHistoryInstanceId(existing, dir);
+    var expectedInstance = String(expectedInstanceId || '');
+    if (!Number.isInteger(expected) || expected < 0 || !existing || actual === null || actual !== expected ||
+        !expectedInstance || actualInstance !== expectedInstance) {
+      throw new Error('history CAS stale generation/incarnation for ' + dir + ': expected=' + expectedRevision + '/' + expectedInstance +
+        ' actual=' + (actual === null ? 'invalid' : actual) + '/' + String(actualInstance || 'missing'));
+    }
+    return { nextRevision: expected + 1, instanceId: actualInstance };
+  }
+  function idbMutateSessionMetadataCas(dir, expectedRevision, expectedInstanceId, mutator) {
     return idbOpen().then(function (db) {
       return new Promise(function (resolve, reject) {
-        var tx = db.transaction('sessionFiles', 'readwrite');
-        tx.objectStore('sessionFiles').put({ id: id, files: files, logicalBytes: historyGovernance.estimateValueBytes(files) });
-        tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { reject(tx.error); };
+        var tx = db.transaction(DB_STORE, 'readwrite');
+        var store = tx.objectStore(DB_STORE);
+        var req = store.get(dir);
+        var result = null, casError = null;
+        req.onsuccess = function () {
+          var existing = req.result || null;
+          try {
+            var cas = assertHistoryCas(existing, expectedRevision, dir, expectedInstanceId);
+            var next = JSON.parse(JSON.stringify(existing));
+            if (typeof mutator === 'function') mutator(next);
+            next.historyRevision = cas.nextRevision;
+            next.historyInstanceId = cas.instanceId;
+            store.put(next);
+            result = next;
+          } catch (e) {
+            casError = e;
+            try { tx.abort(); } catch (_) {}
+          }
+        };
+        req.onerror = function () { try { tx.abort(); } catch (_) {} };
+        tx.oncomplete = function () { resolve(result); };
+        tx.onerror = function () { reject(casError || tx.error || new Error('session metadata CAS transaction failed')); };
+        tx.onabort = function () { reject(casError || tx.error || new Error('session metadata CAS transaction aborted')); };
       });
     });
   }
+  // C5/A78：sessionFiles 只能通过 metadata+files 同事务 checkpoint/CAS primitives 写入；
+  // 禁止保留独立 blind put API，避免未来绕过 session generation 边界。
+  // Evidence/session archives may legitimately represent an intermediate TEST state with no report yet.
+  // But once canonical report.html is present, the archive is also carrying a concrete presentation claim;
+  // semantic-session proof alone is insufficient (A59). Require exact report binding in that case.
+  function sessionEvidenceRequiredViews(files, workDir) {
+    if (!files || typeof files !== 'object' || Array.isArray(files)) return [];
+    var base = String(workDir || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    if (!base) return [];
+    return Object.prototype.hasOwnProperty.call(files, base + '/report.html') ? ['report'] : [];
+  }
   // 指定节点续跑的旧终态只读版本。物理复用 sessionFiles store，但使用 @VERSION: 命名空间；
   // idbAllFiles(dir) 只读取 dir#...，因此版本永远不会进入 checkpoint merge / resume authority。
+  // A91: build the immutable pre-resume record here, but do not write it separately.
+  // The actual @VERSION add is committed atomically with the resume BASE/CAS in idbCommitResumeEpoch.
   function idbCreateSessionVersionSnapshot(session, files) {
-    if (!session || !session.id || !session.dir || !files || typeof files !== 'object') return Promise.reject(new Error('session version snapshot 输入不完整'));
+    if (!session || !session.id || !session.dir || !files || typeof files !== 'object') throw new Error('session version snapshot 输入不完整');
+    var sourceHistoryRevision = normalizedHistoryRevision(session);
+    var sourceHistoryInstanceId = normalizedHistoryInstanceId(session, session.dir);
+    if (sourceHistoryRevision === null || !sourceHistoryInstanceId) throw new Error('session version snapshot history generation/incarnation 非法');
+    // Version archive is authority-bearing evidence, not an arbitrary file bag. Re-prove immediately before
+    // the immutable write so a stale/corrupt concurrent history read cannot be blessed as a read-only version.
+    try { engine.verifyTestSessionFiles(files, session.dir, sessionEvidenceRequiredViews(files, session.dir)); }
+    catch (e) { throw new Error('session version snapshot TEST authority/report binding 验证失败: ' + (e && e.message ? e.message : e)); }
     var createdAt = new Date().toISOString();
     var versionId = '@VERSION:' + encodeURIComponent(String(session.dir)) + ':' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2, 10);
     var settingsCopy = null, summaryCopy = null;
@@ -811,6 +916,8 @@
       sessionId: String(session.dir),
       createdAt: createdAt,
       sourceUpdatedAt: session.updatedAt || null,
+      sourceHistoryRevision: sourceHistoryRevision,
+      sourceHistoryInstanceId: sourceHistoryInstanceId,
       title: session.title || String(session.dir).split('/').pop(),
       status: session.status || null,
       reportReady: !!session.reportReady,
@@ -819,24 +926,26 @@
       files: files,
       logicalBytes: historyGovernance.estimateValueBytes(files)
     };
-    return idbOpen().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction('sessionFiles', 'readwrite');
-        tx.objectStore('sessionFiles').put(record);
-        tx.oncomplete = function () { resolve(record); };
-        tx.onerror = function () { reject(tx.error || new Error('session version snapshot write failed')); };
-        tx.onabort = function () { reject(tx.error || new Error('session version snapshot write aborted')); };
-      });
-    });
+    return record;
+  }
+  function historyVersionMatchesInstance(version, expectedInstanceId) {
+    if (!version) return false;
+    var expected = String(expectedInstanceId || '');
+    var actual = String(version.sourceHistoryInstanceId || '');
+    if (!expected) return true; // ownership/collision scans intentionally inspect every incarnation for this dir.
+    if (expected.indexOf('legacy-v0:') === 0) return !actual || actual === expected;
+    return actual === expected;
   }
   function idbListSessionVersions(dir) {
+    var expectedInstanceId = arguments.length > 1 ? arguments[1] : null;
     return idbOpen().then(function (db) {
       return new Promise(function (resolve, reject) {
         var tx = db.transaction('sessionFiles', 'readonly');
         var req = tx.objectStore('sessionFiles').getAll();
         req.onsuccess = function () {
           resolve((req.result || []).filter(function (row) {
-            return row && row.kind === 'judge-session-version-v1' && row.sessionId === dir;
+            return row && row.kind === 'judge-session-version-v1' && row.sessionId === dir &&
+              historyVersionMatchesInstance(row, expectedInstanceId);
           }).sort(function (a, b) { return String(a.createdAt || '').localeCompare(String(b.createdAt || '')); }));
         };
         req.onerror = function () { reject(req.error || new Error('session version list failed')); };
@@ -845,60 +954,141 @@
   }
   // 新 resume epoch：新 BASE 与旧 FINAL/R* 的退役必须是同一事务。
   // 这样任意刷新只能看到“旧 epoch 完整不动”或“新 epoch BASE 已 durable”，不存在旧 FINAL 复活窗口。
-  function idbCommitResumeEpoch(rec, baseFiles, dir) {
+  function idbCommitResumeEpoch(rec, baseFiles, dir, expectedHistoryRevision, expectedHistoryInstanceId, resumeVersionRecord) {
     return idbOpen().then(function (db) {
       return new Promise(function (resolve, reject) {
         var settled = false;
+        var casError = null;
         function fail(e) { if (settled) return; settled = true; reject(e || new Error('resume epoch transaction failed')); }
         try {
           var tx = db.transaction([DB_STORE, 'sessionFiles'], 'readwrite');
           var meta = tx.objectStore(DB_STORE);
           var files = tx.objectStore('sessionFiles');
-          tx.oncomplete = function () { if (settled) return; settled = true; resolve(true); };
-          tx.onerror = function () { fail(tx.error || new Error('resume epoch transaction error')); };
-          tx.onabort = function () { fail(tx.error || new Error('resume epoch transaction aborted')); };
-          meta.put(rec);
-          files.put({ id: dir + '#BASE', files: baseFiles, logicalBytes: historyGovernance.estimateValueBytes(baseFiles) });
-          var req = files.getAll();
-          req.onsuccess = function () {
+          var metaReq = meta.get(dir);
+          var filesReq = files.getAll();
+          var metaReady = false, filesReady = false, existingMeta = null, existingRows = [];
+          tx.oncomplete = function () { if (settled) return; settled = true; resolve(rec.historyRevision); };
+          tx.onerror = function () { fail(casError || tx.error || new Error('resume epoch transaction error')); };
+          tx.onabort = function () { fail(casError || tx.error || new Error('resume epoch transaction aborted')); };
+          function maybeCommit() {
+            if (!metaReady || !filesReady) return;
+            try {
+              var cas = assertHistoryCas(existingMeta, expectedHistoryRevision, dir, expectedHistoryInstanceId);
+              rec.historyRevision = cas.nextRevision;
+              rec.historyInstanceId = cas.instanceId;
+              if (resumeVersionRecord) {
+                if (resumeVersionRecord.kind !== 'judge-session-version-v1' || resumeVersionRecord.sessionId !== dir ||
+                    Number(resumeVersionRecord.sourceHistoryRevision) !== Number(expectedHistoryRevision) ||
+                    String(resumeVersionRecord.sourceHistoryInstanceId || '') !== String(expectedHistoryInstanceId || '')) {
+                  throw new Error('resume version record does not match the CAS source generation/incarnation');
+                }
+                files.add(resumeVersionRecord);
+              }
+            }
+            catch (e) { casError = e; try { tx.abort(); } catch (_) { fail(casError); } return; }
+            meta.put(rec);
+            files.put({ id: dir + '#BASE', files: baseFiles, logicalBytes: historyGovernance.estimateValueBytes(baseFiles) });
             var rPre = dir + '#R';
             var finalId = dir + '#FINAL';
-            (req.result || []).forEach(function (row) {
+            existingRows.forEach(function (row) {
               var id = row && row.id;
               if (id === finalId || (id && id.slice(0, rPre.length) === rPre)) files.delete(id);
             });
-          };
-          req.onerror = function () { try { tx.abort(); } catch (e) { fail(req.error || e); } };
+          }
+          metaReq.onsuccess = function () { existingMeta = metaReq.result || null; metaReady = true; maybeCommit(); };
+          metaReq.onerror = function () { try { tx.abort(); } catch (e) { fail(metaReq.error || e); } };
+          filesReq.onsuccess = function () { existingRows = filesReq.result || []; filesReady = true; maybeCommit(); };
+          filesReq.onerror = function () { try { tx.abort(); } catch (e) { fail(filesReq.error || e); } };
         } catch (e) { fail(e); }
       });
     });
   }
   // W-T1：正式 Judge checkpoint 单一原子提交 primitive。metadata + file record + FINAL 清旧 R* 同一 transaction；只有 oncomplete 才算 durable。
-  function idbCommitSessionCheckpoint(rec, fileRecord, clearRoundDir) {
+  function idbCommitSessionCheckpoint(rec, fileRecord, clearRoundDir, expectedHistoryRevision, expectedHistoryInstanceId) {
     return idbOpen().then(function (db) {
       return new Promise(function (resolve, reject) {
         var settled = false;
+        var casError = null;
         function fail(e) { if (settled) return; settled = true; reject(e || new Error('Judge checkpoint transaction failed')); }
         try {
           var tx = db.transaction([DB_STORE, 'sessionFiles'], 'readwrite');
           var meta = tx.objectStore(DB_STORE);
           var files = tx.objectStore('sessionFiles');
-          tx.oncomplete = function () { if (settled) return; settled = true; resolve(true); };
-          tx.onerror = function () { fail(tx.error || new Error('Judge checkpoint transaction error')); };
-          tx.onabort = function () { fail(tx.error || new Error('Judge checkpoint transaction aborted')); };
-          meta.put(rec);
-          if (fileRecord) files.put(fileRecord);
-          if (clearRoundDir) {
-            var req = files.getAll();
-            req.onsuccess = function () {
-              var rPre = clearRoundDir + '#R';
-              (req.result || []).forEach(function (row) {
-                var id = row && row.id;
-                if (id && id.slice(0, rPre.length) === rPre) files.delete(id);
-              });
-            };
-            req.onerror = function () { try { tx.abort(); } catch (e) { fail(req.error || e); } };
+          var metaReq = meta.get(rec.id);
+          tx.oncomplete = function () { if (settled) return; settled = true; resolve(rec.historyRevision); };
+          tx.onerror = function () { fail(casError || tx.error || new Error('Judge checkpoint transaction error')); };
+          tx.onabort = function () { fail(casError || tx.error || new Error('Judge checkpoint transaction aborted')); };
+          metaReq.onsuccess = function () {
+            try {
+              var cas = assertHistoryCas(metaReq.result || null, expectedHistoryRevision, rec.id, expectedHistoryInstanceId);
+              rec.historyRevision = cas.nextRevision;
+              rec.historyInstanceId = cas.instanceId;
+            }
+            catch (e) { casError = e; try { tx.abort(); } catch (_) { fail(casError); } return; }
+            meta.put(rec);
+            if (fileRecord) files.put(fileRecord);
+            if (clearRoundDir) {
+              var req = files.getAll();
+              req.onsuccess = function () {
+                var rPre = clearRoundDir + '#R';
+                (req.result || []).forEach(function (row) {
+                  var id = row && row.id;
+                  if (id && id.slice(0, rPre.length) === rPre) files.delete(id);
+                });
+              };
+              req.onerror = function () { try { tx.abort(); } catch (e2) { fail(req.error || e2); } };
+            }
+          };
+          metaReq.onerror = function () { try { tx.abort(); } catch (e) { fail(metaReq.error || e); } };
+        } catch (e) { fail(e); }
+      });
+    });
+  }
+  // Imported session creation requires a transaction-local no-overwrite proof. The earlier UI collision probe is
+  // only a friendly preflight; another tab could create the same workDir after that probe. This primitive checks
+  // metadata + all owned checkpoint/version rows and writes metadata + FINAL in the same readwrite transaction.
+  function idbCommitImportedSessionCreateOnly(rec, finalRecord, dir) {
+    if (!rec || !finalRecord || finalRecord.id !== dir + '#FINAL') {
+      return Promise.reject(new Error('import create-only transaction requires exact FINAL record'));
+    }
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var settled = false;
+        var collisionError = null;
+        function fail(e) { if (settled) return; settled = true; reject(e || new Error('import create-only transaction failed')); }
+        try {
+          var tx = db.transaction([DB_STORE, 'sessionFiles'], 'readwrite');
+          var meta = tx.objectStore(DB_STORE);
+          var files = tx.objectStore('sessionFiles');
+          var metaReq = meta.get(dir);
+          var filesReq = files.getAll();
+          var metaReady = false, filesReady = false, existingMeta = null, existingRows = [];
+          tx.oncomplete = function () { if (settled) return; settled = true; resolve(rec.historyRevision); };
+          tx.onerror = function () { fail(collisionError || tx.error || new Error('import create-only transaction error')); };
+          tx.onabort = function () { fail(collisionError || tx.error || new Error('import create-only transaction aborted')); };
+          function maybeCommit() {
+            if (!metaReady || !filesReady) return;
+            var pre = dir + '#';
+            var occupiedRows = existingRows.filter(function (row) {
+              var id = row && row.id;
+              var versionOwned = !!(row && row.kind === 'judge-session-version-v1' && row.sessionId === dir);
+              return !!((id && id.slice(0, pre.length) === pre) || versionOwned);
+            });
+            if (existingMeta || occupiedRows.length) {
+              collisionError = new Error('import create-only collision: local authority/history appeared before durable commit');
+              try { tx.abort(); } catch (abortErr) { fail(collisionError); }
+              return;
+            }
+            // add, never put: even an implementation/race not observed by the reads remains fail-closed on key collision.
+            rec.historyRevision = 1;
+            rec.historyInstanceId = mintHistoryInstanceId(dir);
+            meta.add(rec);
+            files.add(finalRecord);
           }
+          metaReq.onsuccess = function () { existingMeta = metaReq.result || null; metaReady = true; maybeCommit(); };
+          metaReq.onerror = function () { try { tx.abort(); } catch (e) { fail(metaReq.error || e); } };
+          filesReq.onsuccess = function () { existingRows = filesReq.result || []; filesReady = true; maybeCommit(); };
+          filesReq.onerror = function () { try { tx.abort(); } catch (e) { fail(filesReq.error || e); } };
         } catch (e) { fail(e); }
       });
     });
@@ -916,41 +1106,85 @@
       });
     });
   }
-  function idbAllFileIds() {
-    return idbOpen().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction('sessionFiles', 'readonly');
-        var os = tx.objectStore('sessionFiles');
-        var req = typeof os.getAllKeys === 'function' ? os.getAllKeys() : os.getAll();
-        req.onsuccess = function () {
-          var rows = req.result || [];
-          resolve(rows.map(function (r) { return typeof r === 'string' ? r : r.id; }).filter(Boolean));
-        };
-        req.onerror = function () { reject(req.error); };
-      });
-    });
-  }
-  // 完整删除 primitive：metadata + BASE + FINAL + 全部 R* 在同一 IDB readwrite transaction 中删除。
-  function idbDeleteSessionComplete(dir) {
+  // 完整删除 primitive：metadata + BASE + FINAL + 全部 R* + @VERSION 在同一事务中删除。
+  // A85：档案页删除基于用户刚看到的 generation；若另一标签页已推进/正在运行，拒绝 stale delete，要求刷新后重新确认。
+  function idbDeleteSessionComplete(dir, expectedHistoryRevision, expectedHistoryInstanceId) {
     return idbOpen().then(function (db) {
       return new Promise(function (resolve, reject) {
         var tx = db.transaction([DB_STORE, 'sessionFiles'], 'readwrite');
         var meta = tx.objectStore(DB_STORE);
         var files = tx.objectStore('sessionFiles');
-        var req = typeof files.getAllKeys === 'function' ? files.getAllKeys() : files.getAll();
-        req.onsuccess = function () {
+        var metaReq = meta.get(dir);
+        // Need row values, not only keys: immutable @VERSION: ids do not share the dir# prefix, so ownership
+        // is carried by row.sessionId. getAllKeys() would make versionOwned permanently false in modern browsers.
+        var filesReq = files.getAll();
+        var current = null, rows = null, metaReady = false, filesReady = false, deleted = false;
+        function maybeDelete() {
+          if (!metaReady || !filesReady) return;
+          var currentRevision = normalizedHistoryRevision(current);
+          var currentInstanceId = normalizedHistoryInstanceId(current, dir);
+          var expected = Number(expectedHistoryRevision);
+          var expectedInstanceId = String(expectedHistoryInstanceId || '');
+          if (!current || current.status === 'running' || currentRevision === null ||
+              !Number.isInteger(expected) || expected < 0 || currentRevision !== expected ||
+              !expectedInstanceId || currentInstanceId !== expectedInstanceId) return;
           var pre = dir + '#';
-          (req.result || []).forEach(function (row) {
-            var id = typeof row === 'string' ? row : row.id;
-            var versionOwned = !!(row && typeof row === 'object' && row.kind === 'judge-session-version-v1' && row.sessionId === dir);
+          rows.forEach(function (row) {
+            var id = row && row.id;
+            var versionOwned = !!(row && row.kind === 'judge-session-version-v1' && row.sessionId === dir);
             if ((id && id.slice(0, pre.length) === pre) || versionOwned) files.delete(id);
           });
           meta.delete(dir);
-        };
-        req.onerror = function () { reject(req.error); };
-        tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { reject(tx.error); };
+          deleted = true;
+        }
+        metaReq.onsuccess = function () { current = metaReq.result || null; metaReady = true; maybeDelete(); };
+        metaReq.onerror = function () { try { tx.abort(); } catch (_) {} };
+        filesReq.onsuccess = function () { rows = filesReq.result || []; filesReady = true; maybeDelete(); };
+        filesReq.onerror = function () { try { tx.abort(); } catch (_) {} };
+        tx.oncomplete = function () { resolve(deleted); };
+        tx.onerror = function () { reject(tx.error || new Error('history delete failed')); };
         tx.onabort = function () { reject(tx.error || new Error('history delete aborted')); };
+      });
+    });
+  }
+  // A80: retention eviction is not the same as an explicit user delete. Re-check candidate generation/status
+  // inside the delete transaction so a session resumed/renamed by another tab after victim selection cannot be removed.
+  function idbEvictSessionIfEligible(candidate) {
+    if (!candidate || !candidate.id) return Promise.resolve(false);
+    var dir = candidate.id;
+    var expectedRevision = normalizedHistoryRevision(candidate);
+    var expectedInstanceId = normalizedHistoryInstanceId(candidate, dir);
+    if (expectedRevision === null || !expectedInstanceId) return Promise.resolve(false);
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction([DB_STORE, 'sessionFiles'], 'readwrite');
+        var meta = tx.objectStore(DB_STORE);
+        var files = tx.objectStore('sessionFiles');
+        var metaReq = meta.get(dir);
+        var filesReq = files.getAll();
+        var metaReady = false, filesReady = false, current = null, rows = [], deleted = false;
+        function maybeDelete() {
+          if (!metaReady || !filesReady) return;
+          var currentRevision = normalizedHistoryRevision(current);
+          var currentInstanceId = normalizedHistoryInstanceId(current, dir);
+          if (!current || current.status === 'running' || currentRevision === null || currentRevision !== expectedRevision ||
+              currentInstanceId !== expectedInstanceId) return;
+          var pre = dir + '#';
+          rows.forEach(function (row) {
+            var id = row && row.id;
+            var versionOwned = !!(row && row.kind === 'judge-session-version-v1' && row.sessionId === dir);
+            if ((id && id.slice(0, pre.length) === pre) || versionOwned) files.delete(id);
+          });
+          meta.delete(dir);
+          deleted = true;
+        }
+        metaReq.onsuccess = function () { current = metaReq.result || null; metaReady = true; maybeDelete(); };
+        metaReq.onerror = function () { try { tx.abort(); } catch (_) {} };
+        filesReq.onsuccess = function () { rows = filesReq.result || []; filesReady = true; maybeDelete(); };
+        filesReq.onerror = function () { try { tx.abort(); } catch (_) {} };
+        tx.oncomplete = function () { resolve(deleted); };
+        tx.onerror = function () { reject(tx.error || new Error('history retention eviction failed')); };
+        tx.onabort = function () { reject(tx.error || new Error('history retention eviction aborted')); };
       });
     });
   }
@@ -966,22 +1200,58 @@
       });
     });
   }
+  // A81: orphan discovery must observe metadata and file ownership from one IndexedDB generation.
+  // Separate idbAll()/file-id reads can classify a just-created session FINAL as orphan across transactions.
   function idbScanOrphans() {
-    return Promise.all([idbAll(), idbAllFileIds()]).then(function (parts) {
-      var rows = parts[1].map(function (id) { return { id: id }; });
-      return historyGovernance.findOrphanFileRecords(rows, parts[0]);
-    });
-  }
-  function idbCleanupOrphans(orphanRows) {
-    var ids = (orphanRows || []).map(function (r) { return r && r.id; }).filter(Boolean);
-    if (!ids.length) return Promise.resolve(0);
     return idbOpen().then(function (db) {
       return new Promise(function (resolve, reject) {
-        var tx = db.transaction('sessionFiles', 'readwrite');
-        var os = tx.objectStore('sessionFiles');
-        ids.forEach(function (id) { os.delete(id); });
-        tx.oncomplete = function () { resolve(ids.length); };
-        tx.onerror = function () { reject(tx.error); };
+        var tx = db.transaction([DB_STORE, 'sessionFiles'], 'readonly');
+        var metaReq = tx.objectStore(DB_STORE).getAll();
+        var filesReq = tx.objectStore('sessionFiles').getAll();
+        var sessions = null, rows = null;
+        metaReq.onsuccess = function () { sessions = metaReq.result || []; };
+        metaReq.onerror = function () { reject(metaReq.error || new Error('orphan scan metadata read failed')); };
+        filesReq.onsuccess = function () { rows = filesReq.result || []; };
+        filesReq.onerror = function () { reject(filesReq.error || new Error('orphan scan files read failed')); };
+        tx.oncomplete = function () { resolve(historyGovernance.findOrphanFileRecords(rows || [], sessions || [])); };
+        tx.onerror = function () { reject(tx.error || new Error('orphan scan transaction failed')); };
+      });
+    });
+  }
+  // Scan results are advisory. Before deletion, re-check owner absence and record existence inside one
+  // metadata+files readwrite transaction so an owner that appeared after the scan cannot lose its live checkpoint.
+  function idbCleanupOrphans(orphanRows) {
+    var candidates = (orphanRows || []).map(function (r) {
+      var id = r && r.id;
+      var owner = historyGovernance.sessionIdFromFileRecordId(id);
+      return id && owner ? { id: id, owner: owner } : null;
+    }).filter(Boolean);
+    if (!candidates.length) return Promise.resolve(0);
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction([DB_STORE, 'sessionFiles'], 'readwrite');
+        var meta = tx.objectStore(DB_STORE);
+        var files = tx.objectStore('sessionFiles');
+        var metaReq = meta.getAll();
+        var filesReq = files.getAll();
+        var sessions = null, rows = null, deleted = 0;
+        function maybeDelete() {
+          if (!sessions || !rows) return;
+          var owners = {};
+          sessions.forEach(function (s) { if (s && s.id) owners[s.id] = true; });
+          var existing = {};
+          rows.forEach(function (r) { if (r && r.id) existing[r.id] = true; });
+          candidates.forEach(function (c) {
+            if (!owners[c.owner] && existing[c.id]) { files.delete(c.id); deleted++; }
+          });
+        }
+        metaReq.onsuccess = function () { sessions = metaReq.result || []; maybeDelete(); };
+        metaReq.onerror = function () { try { tx.abort(); } catch (_) {} };
+        filesReq.onsuccess = function () { rows = filesReq.result || []; maybeDelete(); };
+        filesReq.onerror = function () { try { tx.abort(); } catch (_) {} };
+        tx.oncomplete = function () { resolve(deleted); };
+        tx.onerror = function () { reject(tx.error || new Error('orphan cleanup transaction failed')); };
+        tx.onabort = function () { reject(tx.error || new Error('orphan cleanup transaction aborted')); };
       });
     });
   }
@@ -1021,26 +1291,6 @@
   function idbEstimateHistoryBytes() {
     return Promise.all([idbEstimateStoreBytes(DB_STORE), idbEstimateStoreBytes('sessionFiles')]).then(function (n) { return n[0] + n[1]; });
   }
-  // 清轮级记录（dir#R*）——终态后防冗余累积；BASE/FINAL 保留（FINAL 终态全量、BASE 基线，合并时被 FINAL 覆盖）
-  // 修正（实施期）：原前缀 dir# 会误删刚写入的 FINAL/BASE（final 链 put FINAL → 自删 → sessionFiles 恒空）
-  function idbClearRounds(dir) {
-    return idbOpen().then(function (db) {
-      return new Promise(function (resolve, reject) {
-        var tx = db.transaction('sessionFiles', 'readwrite');
-        var os = tx.objectStore('sessionFiles');
-        var req = os.getAll();
-        req.onsuccess = function () {
-          var rPre = dir + '#R';
-          var victims = (req.result || []).filter(function (r) { return r.id.slice(0, rPre.length) === rPre; });
-          victims.forEach(function (r) { os.delete(r.id); });
-          tx.oncomplete = function () { resolve(); };
-          tx.onerror = function () { reject(tx.error); };
-        };
-        req.onerror = function () { reject(req.error); };
-      });
-    });
-  }
-
   // ================= 工具 =================
   function $(id) { return document.getElementById(id); }
   function esc(s) {
@@ -1612,7 +1862,12 @@
   var POSTPROCESS_STEPS = ['R7', 'R8'];
   var ROUND_LABELS = {
     R1: '架构提取', R2: '交锋追迹', 'R2.5': '修辞合成', R3: '终判合成', R4: '结构归约', 'R4.5': '裁决仲裁',
-    R5A: '前半叙事', R5B: '后半叙事', R6a: '结构图表', R6b: '报告组装', R7: '白话报告', R8: '章节导览'
+    R5A: '前半叙事', R5B: '后半叙事', R6a: '结构图表', R6b: '报告组装', R7: '白话报告', R8: '章节导览',
+    'semantic-analyze': '全局语义·独立发现', 'semantic-review': '全局语义·独立复核',
+    'semantic-project': '全局语义·权威投影', 'semantic-fidelity': '全局语义·忠实度复核',
+    'sc-inventory-discover': 'SC语义·候选发现', 'sc-inventory-review': 'SC语义·候选独立复核并冻结',
+    'sc-analyze': 'SC语义·冻结候选成文', 'sc-review': 'SC语义·独立复核',
+    'sc-project': 'SC语义·标准投影', 'sc-fidelity': 'SC语义·忠实度复核'
   };
   function roundLabel(round) { return ROUND_LABELS[round] || round; }
   function isPostprocessStage(round) { return POSTPROCESS_STEPS.indexOf(round) >= 0; }
@@ -1634,6 +1889,8 @@
   var anchorLabel = '';
   // 活性指示状态（SSE 进度遥测）
   var liveProgress = null;
+  var liveStage = null;   // SemanticFirst 前置阶段只做实时活动投影，不计入 R1-R8 正式 round authority
+  var semanticReturnRound = null;
   var liveLastAt = 0;
   var runTimer = null;
   var runStartAt = 0;
@@ -1662,10 +1919,18 @@
   function currentSessionEstimatedTokens() {
     return sessionEstimatedTokensBase + currentRunEstimatedTokens();
   }
-  function estimateRecordedSessionTokens(workDir) {
-    if (!flightRecorder || !workDir) return Promise.resolve(0);
+  function flightRunMatchesHistory(run, workDir, historyInstanceId) {
+    if (!run || run.workDir !== workDir) return false;
+    var expected = String(historyInstanceId || '');
+    var actual = String(run.historyInstanceId || '');
+    if (!expected) return false;
+    if (expected.indexOf('legacy-v0:') === 0) return !actual || actual === expected;
+    return actual === expected;
+  }
+  function estimateRecordedSessionTokens(workDir, historyInstanceId) {
+    if (!flightRecorder || !workDir || !historyInstanceId) return Promise.resolve(0);
     return flightRecorder.listRuns().then(function (runs) {
-      var matched = (runs || []).filter(function (r) { return r && r.workDir === workDir; });
+      var matched = (runs || []).filter(function (r) { return flightRunMatchesHistory(r, workDir, historyInstanceId); });
       return Promise.all(matched.map(function (r) { return flightRecorder.listRequests(r.id); })).then(function (groups) {
         var total = 0;
         groups.forEach(function (reqs) {
@@ -1687,6 +1952,7 @@
     if (!el) return;
     var now = Date.now();
     var lines = [TXT.run.liveElapsed + fmtMMSS(now - runStartAt)];
+    if (liveStage) lines.push('当前阶段：' + roundLabel(liveStage));
     if (liveProgress) {
       lines.push(telemetryLine(TXT.run.liveChars + liveProgress.chars + TXT.run.liveCharsTail));
       if (liveProgress.reasonChars > 0) lines.push(telemetryLine(TXT.run.liveReason + liveProgress.reasonChars + TXT.run.liveCharsTail));
@@ -1786,6 +2052,16 @@
     if (!roundState[round] || roundState[round] === 'pending') roundState[round] = 'active';
     renderTimeline(round);
   }
+  function isSemanticFirstStage(stage) {
+    return /^semantic-(?:analyze|review|project|fidelity)$/.test(String(stage || '')) ||
+      /^sc-(?:analyze|review|project|fidelity)$/.test(String(stage || ''));
+  }
+  function setTribunalTransientStage(stage, note) {
+    var el = $('run-current-round');
+    if (!el) return;
+    el.textContent = 'SF · ' + roundLabel(stage) + (note ? ' · ' + note : '');
+    renderTimeline(null); // 不把前置 authority 阶段写进正式 roundState / 轮次计数
+  }
   function activateNextTribunalRound(completedRound) {
     var steps = roundSteps();
     var idx = steps.indexOf(completedRound);
@@ -1851,11 +2127,15 @@
   //  - pipeline-start：写 BASE（起始基线）
   //  - round-done：与内存基线 diff（vfs.snapshot 浅拷贝 → === 引用比较）→ 仅写变更到 dir#R{n}
   //  - pipeline-done/error：写 FINAL 全量 + 清 dir#R* 轮级记录（防冗余累积）
-  // 顺序不变式（A9）：先完成 filesOp 计算（diff/快照/基线更新）→ 再 idbPut(rec)（reportReady 已定稿）→ 再文件写——
-  // IDB 结构化克隆在 put 调用时即发生，rec 必须在 put 前定稿
+  // 顺序不变式（A9/A78）：先完成 filesOp 计算（diff/快照/基线更新）→ 再进入 metadata+files 单事务 CAS；
+  // rec.reportReady 必须在事务写入前定稿，且 historyRevision 只能由事务内 CAS 推进。
   var persistFileBase = null;
+  var persistHistoryRevision = null;   // A78: generation bound to the exact durable snapshot used to start this run
+  var persistHistoryInstanceId = null; // A88: immutable ownership incarnation; revision alone is vulnerable to delete/recreate ABA
   function snapshotDiffFromBase(workDir, base) {
-    var cur = engine.snapshotSession(workDir, ['/input']);
+    // TEST durable history is self-contained under workDir. /input is transient staging only;
+    // persisting it would make the session fail its own scoped restore contract.
+    var cur = engine.snapshotSession(workDir);
     var changed = {};
     if (base) {
       for (var k in cur) if (cur[k] !== base[k]) changed[k] = cur[k];               // 新增或内容变更（引用比较）
@@ -1893,7 +2173,7 @@
     var clearRoundDir = null;
     var nextBase = null;
     if (patch.filesOp === 'base') {
-      nextBase = engine.snapshotSession(workDir, ['/input']);                       // 仅事务成功后提交为内存基线
+      nextBase = engine.snapshotSession(workDir);                                  // TEST history authority 只允许 workDir 后代；仅事务成功后提交为内存基线
       rec.reportReady = !!(nextBase[workDir + '/report.html']);
       fileRecord = makeSessionFileRecord(workDir + '#BASE', nextBase);
     } else if (patch.filesOp === 'round') {
@@ -1963,16 +2243,57 @@
       }
       rec.reportReady = !!(r8Snapshot[workDir + '/report.html']);
       fileRecord = makeSessionFileRecord(workDir + '#RZZR8', r8Files);
+    } else if (patch.filesOp === 'semantic-epoch-base') {
+      // PRODUCTION_ACTIVE semantic authority revision = 新 persistence epoch。
+      // initial 0→1 publication 或 successful R3 reopen 后，旧 R1-R8 projection 已在 VFS 删除；这里把“删除后的完整现场”写成新 BASE，
+      // 并在同一 transaction 退役旧 FINAL/R*，否则崩溃恢复可能复活 legacy/旧 revision projection 后再贴上新 revision。
+      // /input 不是 session authority；跨会话恢复只允许 workDir 内的自包含证据树。
+      nextBase = engine.snapshotSession(workDir);
+      rec.reportReady = !!(nextBase[workDir + '/report.html']);
+    } else if (patch.filesOp === 'semantic-checkpoint') {
+      // SemanticFirst-E2E PRODUCTION_ACTIVE：request/raw/source/review/fidelity/semantic/projection/current/commit
+      // 全部位于 active store subtree；根级 provenance 同 checkpoint 保存。刷新/重开必须能自行证明 authority。
+      var semanticSnapshot = engine.snapshotSession(workDir);
+      var semanticPrefix = workDir + '/.semantic-first-production-v1/';
+      var semanticFiles = {};
+      var semanticCount = 0;
+      for (var semanticKey in semanticSnapshot) {
+        if (semanticKey.slice(0, semanticPrefix.length) !== semanticPrefix) continue;
+        semanticFiles[semanticKey] = semanticSnapshot[semanticKey];
+        semanticCount++;
+      }
+      var semanticProvenancePath = workDir + '/semantic-first-provenance.json';
+      if (semanticProvenancePath in semanticSnapshot) semanticFiles[semanticProvenancePath] = semanticSnapshot[semanticProvenancePath];
+      if (!semanticCount) {
+        console.warn('[judge-web TEST] semantic checkpoint 缺少 active semantic store subtree:', workDir, patch.phase || '');
+        return Promise.resolve(false);
+      }
+      rec.reportReady = !!(semanticSnapshot[workDir + '/report.html']);
+      fileRecord = makeSessionFileRecord(workDir + '#RZZSEMANTIC', semanticFiles);
     } else if (patch.filesOp === 'final') {
-      nextBase = engine.snapshotSession(workDir, ['/input']);
+      nextBase = engine.snapshotSession(workDir);
       rec.reportReady = !!(nextBase[workDir + '/report.html']);
       fileRecord = makeSessionFileRecord(workDir + '#FINAL', nextBase);
       clearRoundDir = workDir;                                                       // 与 FINAL put 同一事务清普通/PLAIN #R* 增量；BASE/FINAL 不匹配该前缀
     }
-    var commitPromise = (patch.filesOp === 'base' && patch.resumeEpoch)
-      ? idbCommitResumeEpoch(rec, nextBase, workDir)
-      : idbCommitSessionCheckpoint(rec, fileRecord, clearRoundDir);
-    return commitPromise.then(function () {
+    var expectedHistoryRevision = patch.importCreateOnly === true ? null : persistHistoryRevision;
+    var expectedHistoryInstanceId = patch.importCreateOnly === true ? null : persistHistoryInstanceId;
+    var commitPromise = patch.importCreateOnly === true
+      ? idbCommitImportedSessionCreateOnly(rec, fileRecord, workDir)
+      : (((patch.filesOp === 'base' && patch.resumeEpoch) || patch.filesOp === 'semantic-epoch-base')
+        ? idbCommitResumeEpoch(rec, nextBase, workDir, expectedHistoryRevision, expectedHistoryInstanceId, patch.resumeVersionRecord || null)
+        : idbCommitSessionCheckpoint(rec, fileRecord, clearRoundDir, expectedHistoryRevision, expectedHistoryInstanceId));
+    return commitPromise.then(function (committedHistoryRevision) {
+      if (!Number.isInteger(Number(committedHistoryRevision)) || Number(committedHistoryRevision) < 1) {
+        throw new Error('history CAS commit returned invalid revision: ' + committedHistoryRevision);
+      }
+      // A84: create-only import creates an archive generation; it is not a running-session cursor.
+      // Only real run checkpoints may advance the run-local expected generation used by subsequent CAS writes.
+      if (patch.importCreateOnly !== true) {
+        persistHistoryRevision = Number(committedHistoryRevision);
+        persistHistoryInstanceId = normalizedHistoryInstanceId(rec, workDir);
+        if (!persistHistoryInstanceId) throw new Error('history CAS commit returned missing instance id');
+      }
       if (nextBase) persistFileBase = nextBase;                                     // Memory follows disk：仅 oncomplete 后推进
       return true;
     }).catch(function (e) {
@@ -1987,15 +2308,19 @@
     return idbAll().then(function (list) {
       var victims = historyGovernance.selectEvictionVictims(list, limit, protectedIds);
       var p = Promise.resolve();
+      var deletedCount = 0;
       victims.forEach(function (s) {
         p = p.then(function () {
-          return idbDeleteSessionComplete(s.id).then(function () {
-            if (engine) engine.removeSession(s.dir || s.id);
+          return idbEvictSessionIfEligible(s).then(function (deleted) {
+            if (deleted) {
+              deletedCount++;
+              if (engine) engine.removeSession(s.dir || s.id);
+            }
           });
         });
       });
       return p.then(function () {
-        return { before: list.length, deleted: victims.length, target: limit, remaining: list.length - victims.length };
+        return { before: list.length, deleted: deletedCount, target: limit, remaining: list.length - deletedCount };
       });
     }).catch(function (e) {
       console.warn('[judge-web] 历史保留治理失败:', e);
@@ -2038,30 +2363,30 @@
     }
     return merged;
   }
-  async function getSessionFiles(dir) {
-    var items = await idbAllFiles(dir);
-    if (!items.length) {
-      var rec = await idbGet(dir);
-      if (rec && rec.files) {   // v1 惰性迁移：回退 + 回写 FINAL + rec.files 清空（写失败回退原值）
-        try {
-          var rec2 = JSON.parse(JSON.stringify(rec));
-          delete rec2.files;
-          await idbPutFile(dir + '#FINAL', rec.files);
-          await idbPut(rec2);
-        } catch (e) {}
-        return rec.files;
-      }
-      return null;
-    }
-    return mergeFileRecords(items);
-  }
-  // 历史“重新出报告”专用只读路径：不得借读取动作触发 v1 → v2 惰性迁移，
-  // 更不得写 FINAL/R*。v2 只合并现有 sessionFiles；v1 直接返回旧 rec.files。
-  async function getSessionFilesReadOnly(dir) {
-    var items = await idbAllFiles(dir);
-    if (items.length) return mergeFileRecords(items);
-    var rec = await idbGet(dir);
-    return rec && rec.files ? rec.files : null;
+  // A78: resume authority must be read as one durable generation. Metadata/settings and BASE/R*/FINAL
+  // are therefore captured in the same readonly transaction instead of two independently timed reads.
+  function idbReadSessionSnapshot(dir) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction([DB_STORE, 'sessionFiles'], 'readonly');
+        var metaReq = tx.objectStore(DB_STORE).get(dir);
+        var filesReq = tx.objectStore('sessionFiles').getAll();
+        var session = null, rows = null;
+        metaReq.onsuccess = function () { session = metaReq.result || null; };
+        metaReq.onerror = function () { reject(metaReq.error || new Error('session snapshot metadata read failed')); };
+        filesReq.onsuccess = function () { rows = filesReq.result || []; };
+        filesReq.onerror = function () { reject(filesReq.error || new Error('session snapshot files read failed')); };
+        tx.oncomplete = function () {
+          if (!session) { resolve({ session: null, files: null }); return; }
+          var pre = dir + '#';
+          var owned = (rows || []).filter(function (row) { return row && row.id && row.id.slice(0, pre.length) === pre; });
+          var files = owned.length ? mergeFileRecords(owned) : (session.files || null);
+          resolve({ session: session, files: files });
+        };
+        tx.onerror = function () { reject(tx.error || new Error('session snapshot transaction failed')); };
+        tx.onabort = function () { reject(tx.error || new Error('session snapshot transaction aborted')); };
+      });
+    });
   }
   // ================= W-T5：run 徽章 / 断点预览 / 迁移（UI 投影层消费侧） =================
   // 徽章状态词与 si-meta 状态词语义不同，须独立键（R17-1）；未知值透传原文
@@ -2154,19 +2479,31 @@
   // 语义：无 rec.run 的旧/导入会话 → files 推导 runModel（纯函数）+ 回写 s.run + s.status（R18-1 与 D11 同款直映）
   async function migrateSession(s) {
     try {
+      // A86: `running` may be a live run in another tab. Boot/background migration has no liveness lease,
+      // so it must never relabel or advance that session's durable generation by guessing it crashed.
+      if (s && s.status === 'running') return false;
       if (!engine) initEngine();
-      var files = s.files || (await getSessionFiles(s.dir)) || {};
-      var plain = !!(s.settings && s.settings.plain) || !!files[s.dir + '/report-plain.html'];   // R13-1：plain 推断
-      var runModel = engine.buildRunModelFromFiles(s.dir, files, { plain: plain });
+      // TEST history migration is authority-gated and read-only on file storage: do not let a legacy/unproven
+      // record mutate v1→v2 storage before it proves current + immutable receipt chain + provenance + views.
+      var migrationSnapshot = await idbReadSessionSnapshot(s.dir);
+      var durableSession = migrationSnapshot && migrationSnapshot.session;
+      var files = migrationSnapshot && migrationSnapshot.files;
+      if (!durableSession || !files || durableSession.status === 'running') return false;
+      engine.verifyTestSessionFiles(files, durableSession.dir);
+      var plain = !!(durableSession.settings && durableSession.settings.plain) || !!files[durableSession.dir + '/report-plain.html'];   // R13-1：plain 推断
+      var runModel = engine.buildRunModelFromFiles(durableSession.dir, files, { plain: plain });
       // derivedStatus 派生（F8 时点规则近似）：running → interrupted；done → reportReady? done : failed；其余值直通
       var derived;
-      if (s.status === 'running') derived = 'interrupted';
-      else if (s.status === 'done') derived = runModel.summary.reportReady ? 'done' : 'failed';
-      else derived = s.status;
+      if (durableSession.status === 'done') derived = runModel.summary.reportReady ? 'done' : 'failed';
+      else derived = durableSession.status;
       runModel.summary.derivedStatus = derived;
-      s.run = runModel;
-      s.status = derived;
-      await idbPut(s).catch(function () {});   // A2：await 串行确定性（原 fire-and-forget）
+      var migrationExpectedRevision = normalizedHistoryRevision(durableSession);
+      var migrationExpectedInstanceId = normalizedHistoryInstanceId(durableSession, durableSession.dir);
+      if (migrationExpectedRevision === null || !migrationExpectedInstanceId) throw new Error('migration history generation/incarnation invalid');
+      await idbMutateSessionMetadataCas(durableSession.dir, migrationExpectedRevision, migrationExpectedInstanceId, function (next) {
+        next.run = runModel;
+        next.status = derived;
+      }).catch(function () {});   // A78：迁移不得用 blind put 越过并发 generation
     } catch (e) {}
   }
   // C6：boot 一次性迁移全部无 run 会话（逐会话 try/catch 不阻断 boot；失败 console.warn 有信号，A5）
@@ -2175,7 +2512,7 @@
       if (!engine) initEngine();
       var list = await idbAll();
       for (var i = 0; i < list.length; i++) {
-        if (!list[i].run) {
+        if (!list[i].run && list[i].status !== 'running') {
           try { await migrateSession(list[i]); }
           catch (e) { console.warn('[judge-web] 会话迁移失败:', e); }
         }
@@ -2354,15 +2691,23 @@
   function exportSessionRunMeta(s) {
     try {
       if (!engine) initEngine();
-      var dumpMeta = function (run) {
+      idbReadSessionSnapshot(s.dir).then(function (snapshot) {
+        var durableSession = snapshot && snapshot.session;
+        var files = snapshot && snapshot.files;
+        if (!durableSession || !files) return;
+        engine.verifyTestSessionFiles(files, durableSession.dir);
+        var run = durableSession.run || engine.buildRunModelFromFiles(durableSession.dir, files);
         exportFile(TXT.sess.metaFile + tsName() + '.json', JSON.stringify({
           kind: 'judge-web-run-v1',
-          session: { id: s.id, title: s.title, createdAt: s.createdAt, updatedAt: s.updatedAt, status: s.status },
+          session: {
+            id: durableSession.id, title: durableSession.title, createdAt: durableSession.createdAt,
+            updatedAt: durableSession.updatedAt, status: durableSession.status,
+            historyRevision: normalizedHistoryRevision(durableSession),
+            historyInstanceId: normalizedHistoryInstanceId(durableSession, durableSession.dir)
+          },
           run: run
         }, null, 2), 'application/json', { kind: 'run-meta' });
-      };
-      if (s.run) { dumpMeta(s.run); return; }
-      getSessionFiles(s.dir).then(function (files) { dumpMeta(engine.buildRunModelFromFiles(s.dir, files || {})); }).catch(function () {});
+      }).catch(function () {});
     } catch (e) {}
   }
   function versionReportHtml(version) {
@@ -2373,27 +2718,43 @@
     for (var i = 0; i < keys.length; i++) if (/\/report\.html$/.test(keys[i]) && files[keys[i]] != null) return String(files[keys[i]]);
     return null;
   }
-  function exportSessionVersion(version, displayIndex) {
+  async function exportSessionVersion(version, displayIndex) {
     if (!version) return;
-    var payload = {
-      kind: 'judge-web-session-version-v1', versionId: version.versionId, sessionId: version.sessionId,
-      createdAt: version.createdAt, sourceUpdatedAt: version.sourceUpdatedAt || null, title: version.title || '',
-      settings: version.settings || null, runSummary: version.runSummary || null, files: version.files || {}
-    };
-    exportFile('Judge历史版本-v' + String(displayIndex || 1) + '-' + tsName() + '.json', JSON.stringify(payload, null, 2), 'application/json', { kind: 'history-version' });
+    try {
+      if (!engine) initEngine();
+      // A read-only version is an evidence export. Re-prove the complete TEST authority at export time so
+      // corrupted/stale IndexedDB bytes cannot be packaged as a canonical version merely because creation once succeeded.
+      engine.verifyTestSessionFiles(version.files || {}, version.sessionId,
+        sessionEvidenceRequiredViews(version.files || {}, version.sessionId));
+      var payload = {
+        kind: 'judge-web-session-version-v1', versionId: version.versionId, sessionId: version.sessionId,
+        createdAt: version.createdAt, sourceUpdatedAt: version.sourceUpdatedAt || null,
+        sourceHistoryRevision: version.sourceHistoryRevision == null ? null : version.sourceHistoryRevision,
+        sourceHistoryInstanceId: version.sourceHistoryInstanceId || null, title: version.title || '',
+        settings: version.settings || null, runSummary: version.runSummary || null, files: version.files || {},
+        semanticTest: semanticTestMetadata()
+      };
+      await exportFile('Judge历史版本-v' + String(displayIndex || 1) + '-' + tsName() + '.json', JSON.stringify(payload, null, 2), 'application/json', { kind: 'history-version' });
+    } catch (e) {
+      alert('只读历史版本 TEST authority 验证失败，拒绝导出：' + (e && e.message ? e.message : e));
+    }
   }
   function viewSessionVersion(version, displayIndex) {
     var html = versionReportHtml(version);
     if (!html) { alert('该只读版本没有 report.html。'); return; }
+    if (!engine) initEngine();
+    try { engine.verifyTestSessionFiles(version.files || {}, version.sessionId, ['report']); }
+    catch (e) { alert('该只读版本无法证明当前 TEST authority/report binding，拒绝按内部报告展示：' + (e && e.message ? e.message : e)); return; }
     closeHistoryManager();
-    // 旧版本属于 Judge 自产可信文档，但 workDir=null：可阅读/章节导航，不具备 Run 返回、续跑或会话导出 authority。
+    // 只有自包含 TEST authority/provenance 验真通过的版本才可获得 internal trust。
     showReport(html, null, 'internal', '只读历史版本 v' + String(displayIndex || 1));
   }
   function renderSessionVersions(s, hostEl) {
     if (!hostEl || !s) return;
     hostEl.setAttribute('data-session-version-owner', s.id);
     hostEl.innerHTML = '<div class="hint">读取只读版本…</div>';
-    idbListSessionVersions(s.dir).then(function (versions) {
+    var versionHistoryInstanceId = normalizedHistoryInstanceId(s, s.dir);
+    idbListSessionVersions(s.dir, versionHistoryInstanceId).then(function (versions) {
       if (!hostEl.parentNode || hostEl.getAttribute('data-session-version-owner') !== s.id) return;
       if (!versions.length) { hostEl.innerHTML = '<div class="hint">暂无定点续跑前版本。</div>'; return; }
       hostEl.innerHTML = versions.map(function (v, idx) {
@@ -2423,6 +2784,8 @@
     try { historicalSettings = normalizeSettingsKeys(JSON.parse(JSON.stringify(s.settings || settings || {}))); }
     catch (e) { historicalSettings = normalizeSettingsKeys({}); }
     var nodes = engine.resumeNodeOrder(historicalSettings);
+    var aggregateR5Insert = nodes.indexOf('R5B');
+    if (aggregateR5Insert >= 0 && nodes.indexOf('R5') < 0) nodes.splice(aggregateR5Insert + 1, 0, 'R5');
     var ov = document.createElement('div');
     ov.className = 'overlay';
     ov.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="resume-target-title">' +
@@ -2484,12 +2847,19 @@
     el.querySelector('[data-archive-act=resume-target]').onclick = function () { showTargetedResumeDialog(s, runModel); };
     var viewReportBtn = el.querySelector('[data-archive-act=view-report]');
     viewReportBtn.onclick = function () { viewSavedSessionReport(s); };
-    getSessionFilesReadOnly(s.dir).then(function (files) {
+    idbReadSessionSnapshot(s.dir).then(function (snapshot) {
       if (!viewReportBtn.parentNode || el.getAttribute('data-session-owner') !== s.id) return;
-      var reportPath = String(s.dir || '').replace(/\/+$/, '') + '/report.html';
-      var available = !!(files && typeof files[reportPath] === 'string' && files[reportPath].trim());
+      var durableSession = snapshot && snapshot.session;
+      var files = snapshot && snapshot.files;
+      var reportPath = String((durableSession && durableSession.dir) || s.dir || '').replace(/\/+$/, '') + '/report.html';
+      var available = !!(durableSession && files && typeof files[reportPath] === 'string' && files[reportPath].trim());
+      if (available) {
+        try { engine.verifyTestSessionFiles(files, durableSession.dir, ['report']); }
+        catch (e) { available = false; viewReportBtn.title = '历史快照无法证明当前 TEST authority/report binding；拒绝按内部报告打开'; }
+      }
       viewReportBtn.disabled = !available;
-      viewReportBtn.title = available ? '只读打开历史快照中现有 report.html' : '该历史会话没有现成 report.html；不会自动重新生成';
+      if (available) viewReportBtn.title = '只读打开已验真的 TEST 历史 report.html';
+      else if (!viewReportBtn.title || viewReportBtn.title === '正在核验已有 report.html') viewReportBtn.title = '该历史会话没有可验真的现成 report.html；不会自动重新生成';
     }).catch(function () {
       if (viewReportBtn.parentNode) { viewReportBtn.disabled = true; viewReportBtn.title = '历史报告读取失败；不会自动重新生成'; }
     });
@@ -2499,8 +2869,11 @@
     el.querySelector('[data-archive-act=rename]').onclick = function () {
       var nt = prompt(TXT.sess.renamePrompt, s.title);
       if (nt && nt !== s.title) {
-        s.title = nt;
-        idbPut(s).then(function () {
+        var renameExpectedRevision = normalizedHistoryRevision(s);
+        var renameExpectedInstanceId = normalizedHistoryInstanceId(s, s.dir);
+        if (renameExpectedRevision === null || !renameExpectedInstanceId) return;
+        idbMutateSessionMetadataCas(s.dir, renameExpectedRevision, renameExpectedInstanceId, function (next) { next.title = nt; }).then(function (next) {
+          if (next) Object.assign(s, next);
           if (currentSession && currentSession.dir === s.dir) currentSession.title = nt;
           refreshSessionList();
         }).catch(function () {});
@@ -2509,7 +2882,15 @@
     renderSessionVersions(s, el.querySelector('[data-archive-versions]'));
     el.querySelector('[data-archive-act=delete]').onclick = function () {
       if (!confirm(TXT.sess.delConfirm + s.title + TXT.sess.delConfirmTail)) return;
-      idbDeleteSessionComplete(s.id).then(function () {
+      var deleteExpectedRevision = normalizedHistoryRevision(s);
+      var deleteExpectedInstanceId = normalizedHistoryInstanceId(s, s.dir || s.id);
+      if (deleteExpectedRevision === null || !deleteExpectedInstanceId) { alert('该历史会话 generation/incarnation 非法，拒绝删除。'); return; }
+      idbDeleteSessionComplete(s.id, deleteExpectedRevision, deleteExpectedInstanceId).then(function (deleted) {
+        if (!deleted) {
+          alert('该会话已被另一页面推进或正在运行，当前删除确认已过期。请刷新历史记录后重新确认。');
+          refreshHistoryManager();
+          return;
+        }
         if (engine) engine.removeSession(s.dir || s.id);
         if (currentSession && currentSession.dir === s.dir) currentSession = null;
         archiveSelectedSessionId = null;
@@ -2589,9 +2970,9 @@
       if (ready) stopBtn.disabled = true;
     }
   }
-  function prepareResumeSession(s, runModel, requestedNode) {
+  function prepareResumeSession(s, runModel, requestedNode, historyRevision, historyInstanceId) {
     var startNode = requestedNode || 'auto';
-    pendingResume = { dir: s.dir, startNode: startNode };
+    pendingResume = { dir: s.dir, startNode: startNode, historyRevision: historyRevision, historyInstanceId: historyInstanceId };
     var resumeText = engine ? engine.readDebateCopy(s.dir) : null;
     if (resumeText !== null) $('transcript').value = resumeText;
     roundState = {};
@@ -2622,61 +3003,81 @@
   async function resumeSession(s, requestedNode) {
     if (running) return;
     if (!engine) initEngine();
-    var files = await getSessionFiles(s.dir);   // C5：v2 经 sessionFiles 合并恢复（v1 惰性迁移）
-    if (!files) { alert(TXT.sess.noReport); return; }
-    // 历史 session 快照是续跑 authority；restore 前先清同 workDir VFS，避免旧内存残留补回磁盘快照已不存在的下游产物。
-    engine.removeSession(s.dir);
-    engine.restoreSession(files);
-    currentSession = { dir: s.dir, title: s.title, createdAt: s.createdAt };
-    settings = normalizeSettingsKeys(s.settings) || settings;
+    // A78: metadata/settings + files must come from one IndexedDB readonly transaction/generation.
+    // Never pair a stale archive-list row with a later file snapshot from another tab.
+    var durableSnapshot = await idbReadSessionSnapshot(s.dir);
+    var durableSession = durableSnapshot && durableSnapshot.session;
+    var files = durableSnapshot && durableSnapshot.files;
+    if (!durableSession || !files) { alert(TXT.sess.noReport); return; }
+    var historyRevision = normalizedHistoryRevision(durableSession);
+    var historyInstanceId = normalizedHistoryInstanceId(durableSession, durableSession.dir);
+    if (historyRevision === null || !historyInstanceId) { alert('历史会话 history generation/incarnation 非法，拒绝续跑。'); return; }
+    // 历史 session 只有在 current + immutable receipt chain + provenance + bound views 全部自证后才是续跑 authority。
+    engine.restoreVerifiedTestSession(files, durableSession.dir);
+    currentSession = { dir: durableSession.dir, title: durableSession.title, createdAt: durableSession.createdAt };
+    settings = applySemanticTestRoute(normalizeSettingsKeys(durableSession.settings) || settings);
     syncSettingsToForm();
     if (settings.baseUrl) $('cfg-base').value = settings.baseUrl;   // Resume 必须沿用该 session 保存的 transport endpoint；preset 只负责 UI 默认值。
-    var runModel = s.run || engine.buildRunModelFromFiles(s.dir, files || {});
-    prepareResumeSession(s, runModel, requestedNode || 'auto');
+    var runModel = durableSession.run || engine.buildRunModelFromFiles(durableSession.dir, files || {});
+    prepareResumeSession(durableSession, runModel, requestedNode || 'auto', historyRevision, historyInstanceId);
   }
   async function exportSessionRecord(s) {
     try {
-      var files = await getSessionFiles(s.dir);
-      if (!files) { alert(TXT.sess.noSession); return; }
-      var payload = { kind: 'judge-web-session-v1', exportedAt: new Date().toISOString(), workDir: s.dir, files: files, settings: s.settings || settings };
+      var snapshot = await idbReadSessionSnapshot(s.dir);
+      var durableSession = snapshot && snapshot.session;
+      var files = snapshot && snapshot.files;
+      if (!durableSession || !files) { alert(TXT.sess.noSession); return; }
+      if (!engine) initEngine();
+      engine.verifyTestSessionFiles(files, durableSession.dir, sessionEvidenceRequiredViews(files, durableSession.dir));
+      var payload = {
+        kind: 'judge-web-session-v1', exportedAt: new Date().toISOString(), workDir: durableSession.dir,
+        historyRevision: normalizedHistoryRevision(durableSession),
+        historyInstanceId: normalizedHistoryInstanceId(durableSession, durableSession.dir), files: files,
+        settings: applySemanticTestRoute(Object.assign({}, durableSession.settings || settings)), semanticTest: semanticTestMetadata()
+      };
       await exportFile(TXT.sess.sessionFile + tsName() + '.json', JSON.stringify(payload, null, 2), 'application/json', { kind: 'history-session' });
     } catch (e) { alert(String(e && e.message || e)); }
   }
   async function viewSavedSessionReport(s) {
     if (!engine) initEngine();
-    var files = await getSessionFilesReadOnly(s.dir);   // 严格只读：不迁移、不重建、不写 Judge history。
-    if (!files) { alert(TXT.sess.noSession); return; }
-    var workDir = s.dir;
+    var snapshot = await idbReadSessionSnapshot(s.dir);   // 严格只读且 metadata/files 同一 durable generation。
+    var durableSession = snapshot && snapshot.session;
+    var files = snapshot && snapshot.files;
+    if (!durableSession || !files) { alert(TXT.sess.noSession); return; }
+    var workDir = durableSession.dir;
     var reportPath = String(workDir || '').replace(/\/+$/, '') + '/report.html';
     var html = files[reportPath];
     if (typeof html !== 'string' || !html.trim()) {
       alert('该历史会话没有现成 report.html；“查看报告”不会自动重新生成。');
       return;
     }
-    // 仅同步浏览器内存 VFS，保证该 report 的同 workDir 导出读取同一历史快照；不改变 currentSession / Run authority。
-    engine.removeSession(workDir);
-    engine.restoreSession(files);
+    // 只有完整 TEST authority/provenance 自证通过的历史快照才可获得 internal trust。
+    // 查看是严格只读动作：只在临时 verification transaction 中安装/回滚，不把历史 authority 留在 live VFS。
+    try { engine.verifyTestSessionFiles(files, workDir, ['report']); }
+    catch (e) { alert('历史会话 TEST authority/report binding 验证失败，拒绝展示：' + (e && e.message ? e.message : e)); return; }
     closeHistoryManager();
-    showReport(html, workDir, 'internal', '历史现有 report.html');
+    // workDir=null 故报告页不会把 live VFS 误当作这个只读快照的 session-export authority；档案页仍提供已验真的 session export。
+    showReport(html, null, 'internal', '已验真 TEST 历史 report.html');
   }
   async function reissueSessionReport(s) {
     if (!engine) initEngine();
-    var files = await getSessionFilesReadOnly(s.dir);   // 纯读取正式 Judge session；Recorder 与 v1 惰性迁移都不参与。
-    if (!files) { alert(TXT.sess.noSession); return; }
-    var workDir = s.dir;
-    // restore 是覆盖式而非镜像式；必须先清同 workDir 旧 VFS，防缺失正式产物被内存残留假满足。
-    engine.removeSession(workDir);
-    engine.restoreSession(files);
+    var snapshot = await idbReadSessionSnapshot(s.dir);   // 纯读取且 metadata/settings/files 同一 durable generation。
+    var durableSession = snapshot && snapshot.session;
+    var files = snapshot && snapshot.files;
+    if (!durableSession || !files) { alert(TXT.sess.noSession); return; }
+    var workDir = durableSession.dir;
     try {
-      var historicalSettings = normalizeSettingsKeys(JSON.parse(JSON.stringify(s.settings || {})));
+      // 重新出报告只能从已自证 TEST session 开始；verified install + same-version rebuild 必须共享一个 outer rollback transaction，
+      // 这样任意晚失败都会恢复“点击 reissue 前”的 live VFS，而不是停在刚安装的历史快照。
+      var historicalSettings = normalizeSettingsKeys(JSON.parse(JSON.stringify(durableSession.settings || {})));
       // P0-6：用户点击“重新出报告”即明确要求走现有 0-API 四组合机械重建；即使已有 report.html 也不走查看捷径。
-      var rebuilt = await engine.rebuildHistoricalReport(workDir, historicalSettings);
+      var rebuilt = await engine.rebuildVerifiedHistoricalReport(files, workDir, historicalSettings);
       var html = rebuilt && rebuilt.html;
       if (!html) throw new Error('机械重建未生成 report.html');
       // 重新出报告是纯派生恢复：不写 #FINAL、不清 #R*、不改 reportReady/updatedAt/淘汰顺序。
       logLine(TXT.sess.reissueBuilt);
-      currentSession = { dir: workDir, title: s.title, createdAt: s.createdAt };
-      showReport(html, workDir);
+      currentSession = { dir: workDir, title: durableSession.title, createdAt: durableSession.createdAt };
+      showReport(html, workDir, 'internal', '已验真 TEST 历史重建 report.html');
     } catch (e) {
       alert(TXT.sess.noReport + (e && e.message ? e.message : e));
     }
@@ -2881,7 +3282,7 @@
     var doc = reportHostMod.createReportDocument({
       canonicalHtml: String(html == null ? '' : html),
       workDir: workDir,
-      trust: trust || 'internal',
+      trust: trust === 'internal' ? 'internal' : 'external',
       sourceName: sourceName || (workDir ? 'report.html' : '')
     });
     showReportDocument(doc);
@@ -3025,7 +3426,10 @@
       for (var si = 0; si < sessions.length; si++) {
         var s = sessions[si];
         var workDir = s.dir || s.id;
-        var matchedRuns = (allRuns || []).filter(function (r) { return r && r.workDir === workDir; }).slice();
+        var sessionHistoryInstanceId = normalizedHistoryInstanceId(s, workDir);
+        var matchedRuns = (allRuns || []).filter(function (r) {
+          return flightRunMatchesHistory(r, workDir, sessionHistoryInstanceId);
+        }).slice();
         matchedRuns.sort(function (a, b) { return String(a.startedAt || '').localeCompare(String(b.startedAt || '')); });
         var flightRuns = [];
         for (var ri = 0; ri < matchedRuns.length; ri++) {
@@ -3046,8 +3450,11 @@
           }
           flightRuns.push({ run: JSON.parse(JSON.stringify(run)), requests: requestSources });
         }
+        var flightSessionRecord = JSON.parse(JSON.stringify(s));
+        flightSessionRecord.historyRevision = normalizedHistoryRevision(s);
+        flightSessionRecord.historyInstanceId = sessionHistoryInstanceId;
         sources.push({
-          sessionRecord: JSON.parse(JSON.stringify(s)),
+          sessionRecord: flightSessionRecord,
           runModel: s.run == null ? null : JSON.parse(JSON.stringify(s.run)),
           flightRuns: flightRuns
         });
@@ -3414,6 +3821,23 @@
 
   async function startRun(opts) {
     opts = opts || {};
+    // A79: a brand-new analysis must not inherit archive metadata identity from the previously viewed/completed session.
+    // Resume keeps the verified historical identity installed by resumeSession; fresh run mints identity on first persist.
+    if (!opts.resumeDir) currentSession = null;
+    // A78: bind this run to the exact durable generation loaded by resumeSession. Do not re-read and
+    // silently adopt a newer generation here: if another tab advanced history after prepare, the first CAS write must fail.
+    persistHistoryRevision = null;
+    persistHistoryInstanceId = null;
+    if (opts.resumeDir) {
+      var expectedHistoryRevision = Number(opts.expectedHistoryRevision);
+      var expectedHistoryInstanceId = String(opts.expectedHistoryInstanceId || '');
+      if (!Number.isInteger(expectedHistoryRevision) || expectedHistoryRevision < 0 || !expectedHistoryInstanceId) {
+        alert('续跑缺少合法 history generation/incarnation；请重新从历史记录载入。');
+        return;
+      }
+      persistHistoryRevision = expectedHistoryRevision;
+      persistHistoryInstanceId = expectedHistoryInstanceId;
+    }
     var transcript = $('transcript').value;
     // 历史续跑的辩词权威 = 该会话已保存的 .tmp-debate.txt。页面编辑框可能残留其它上传/粘贴内容，
     // 不能让它污染 resume；若用户要分析另一份辩词，应走“新建分析”而不是复用旧 workDir。
@@ -3437,7 +3861,7 @@
         var priorRec = await idbGet(opts.resumeDir);
         var storedTotal = priorRec && priorRec.estimatedTokensTotal != null ? Number(priorRec.estimatedTokensTotal) : 0;
         if (!isFinite(storedTotal) || storedTotal < 0) storedTotal = 0;
-        var recordedTotal = await estimateRecordedSessionTokens(opts.resumeDir);
+        var recordedTotal = await estimateRecordedSessionTokens(opts.resumeDir, persistHistoryInstanceId);
         sessionEstimatedTokensBase = Math.max(storedTotal, Number(recordedTotal) || 0);
       } catch (tokenRestoreErr) {
         sessionEstimatedTokensBase = 0;
@@ -3447,13 +3871,23 @@
     // 非 auto 定点续跑：任何 rewind / 新 epoch 之前，先把当前正式终态固化为不可变只读版本。
     // snapshot 失败直接返回；此时 running=false、旧 FINAL/R* 未动、engine.runSession 尚未进入，因此 paid request=0。
     var resumeStartNode = opts.resumeStartNode || 'auto';
+    var resumeVersionRecord = null;
     if (opts.resumeDir && resumeStartNode !== 'auto') {
       try {
-        var versionSession = await idbGet(opts.resumeDir);
-        var versionFiles = await getSessionFilesReadOnly(opts.resumeDir);
+        var versionSnapshot = await idbReadSessionSnapshot(opts.resumeDir);
+        var versionSession = versionSnapshot && versionSnapshot.session;
+        var versionFiles = versionSnapshot && versionSnapshot.files;
         if (!versionSession || !versionFiles) throw new Error('缺少可归档的正式历史终态');
-        var savedVersion = await idbCreateSessionVersionSnapshot(versionSession, versionFiles);
-        opts.resumeVersionId = savedVersion.versionId;
+        var versionHistoryRevision = normalizedHistoryRevision(versionSession);
+        var versionHistoryInstanceId = normalizedHistoryInstanceId(versionSession, versionSession.dir);
+        if (versionHistoryRevision === null || versionHistoryRevision !== persistHistoryRevision ||
+            !versionHistoryInstanceId || versionHistoryInstanceId !== persistHistoryInstanceId) {
+          throw new Error('历史会话已被另一页面推进或重建；拒绝把跨 generation/incarnation 状态归档为定点续跑前版本，请重新载入历史。');
+        }
+        // Build/verify the old terminal evidence now, but do not persist it yet. The @VERSION row must be added
+        // in the same transaction that successfully advances the resume BASE from this exact source generation.
+        resumeVersionRecord = idbCreateSessionVersionSnapshot(versionSession, versionFiles);
+        opts.resumeVersionId = resumeVersionRecord.versionId;
       } catch (versionErr) {
         alert('定点续跑未启动：旧版本归档失败。' + (versionErr && versionErr.message ? versionErr.message : versionErr));
         return;
@@ -3483,6 +3917,8 @@
     $('run-status').textContent = TXT.run.statusRunning;
     // 活性指示：1s 心跳计时器（字数/耗时实时跳动，证明没卡死）
     liveProgress = null;
+    liveStage = null;
+    semanticReturnRound = null;
     liveLastAt = Date.now();
     runStartAt = Date.now();
     runEstimatedTokensCommitted = 0;
@@ -3514,6 +3950,7 @@
         onRound: function (r) {
           commitLiveEstimate();
           liveProgress = null;   // 每轮结束先结算当前 API attempt，再重置为下一轮自己的遥测
+          liveStage = null;
           liveLastAt = Date.now();
           if (r.gate) { retryCount++; }
           if (r.ok && r.skipped) { markRound(r.round, 'skipped'); activateNextTribunalRound(r.round); logLine(TXT.run.logSkip + r.round + TXT.run.logSkipTail); }
@@ -3528,14 +3965,44 @@
         },
         onStage: function (s) {
           if (!s || !s.stage) return;
-          if (s.state === 'active') {
+          var state = s.state === 'complete' ? 'done' : s.state === 'failed' ? 'fail' : s.state;
+          if (isSemanticFirstStage(s.stage) || s.semanticFirst) {
+            if (state === 'active') {
+              if (!liveStage) {
+                var formalSteps = roundSteps();
+                semanticReturnRound = formalSteps.find(function (name) { return roundState[name] === 'active'; }) || semanticReturnRound;
+              }
+              liveStage = s.stage;
+              liveLastAt = Date.now();
+              setTribunalTransientStage(s.stage, '处理中');
+              logLine('[SemanticFirst] 开始：' + roundLabel(s.stage));
+            } else if (state === 'done') {
+              commitLiveEstimate();
+              liveProgress = null;
+              liveStage = null;
+              liveLastAt = Date.now();
+              logLine('[SemanticFirst] 完成：' + roundLabel(s.stage));
+              if (semanticReturnRound) setTribunalCurrentRound(semanticReturnRound, '等待下一步');
+              else setTribunalTransientStage(s.stage, '完成');
+            } else if (state === 'fail') {
+              commitLiveEstimate();
+              liveProgress = null;
+              liveStage = null;
+              liveLastAt = Date.now();
+              setTribunalTransientStage(s.stage, '失败');
+              logLine('[SemanticFirst] 失败：' + roundLabel(s.stage) + (s.errors && s.errors.length ? '：' + s.errors.join('; ') : ''));
+            }
+            updateLiveIndicator();
+            return;
+          }
+          if (state === 'active') {
             roundState[s.stage] = 'active';
             setTribunalCurrentRound(s.stage, '处理中');
-          } else if (s.state === 'done') {
+          } else if (state === 'done') {
             markRound(s.stage, 'done');
             activateNextTribunalRound(s.stage);
             logLine(TXT.run.logDone + s.stage + TXT.run.logDoneTail);
-          } else if (s.state === 'fail') {
+          } else if (state === 'fail') {
             markRound(s.stage, 'fail');
             setTribunalCurrentRound(s.stage, '处理失败');
             logLine(TXT.run.logFail + s.stage + TXT.run.logPostFailTail + (s.errors && s.errors.length ? '：' + s.errors.join('; ') : ''));
@@ -3548,12 +4015,23 @@
           // engine L313-315 在 !res.ok 时也调 persist('pipeline-done')，无 L1188-1190 分支补写）；round-done/start 不带 patch（不写 rec.run）
           // C5：filesOp 三态——base（起始基线）/ round（轮级增量）/ final（终态全量 + 清轮级）
           if (step === 'pipeline-start') {
-            // Flight Recorder 只在正式真实 API run 绑定；同步旁路，不 await、不进入 Judge persist 结果。
-            if (flightRecorder && settings.provider !== 'mock') {
-              try { flightRecorder.bindRun({ workDir: dir, provider: settings.provider, baseUrl: settings.baseUrl, model: settings.model }); } catch (e) { noteFlightRecorderWarning(e.message || e); }
-            }
-            return persistSession(dir, { filesOp: 'base', resumeEpoch: !!opts.resumeDir }).then(function (ok) {
-              if (ok) scheduleHistoryLimit(dir);   // BASE 成功后才旁路治理；不 await 淘汰，不阻塞 Judge 分析。
+            // A89：Recorder 必须在 BASE CAS 成功、historyInstanceId 已确定之后再绑定。
+            // 否则同 workDir 删除重建后，旧/新 incarnation 的 Flight runs 无法可靠区分。
+            return persistSession(dir, {
+              filesOp: 'base', resumeEpoch: !!opts.resumeDir,
+              resumeVersionRecord: resumeVersionRecord
+            }).then(function (ok) {
+              if (ok) {
+                if (flightRecorder && settings.provider !== 'mock') {
+                  try {
+                    flightRecorder.bindRun({
+                      workDir: dir, historyInstanceId: persistHistoryInstanceId,
+                      provider: settings.provider, baseUrl: settings.baseUrl, model: settings.model
+                    });
+                  } catch (e) { noteFlightRecorderWarning(e.message || e); }
+                }
+                scheduleHistoryLimit(dir);   // BASE 成功后才旁路治理；不 await 淘汰，不阻塞 Judge 分析。
+              }
               return ok;
             });
           }
@@ -3569,6 +4047,17 @@
               return persistSession(dir, { filesOp: 'r8-checkpoint', phase: checkpointPhase });
             }
             return persistSession(dir, { filesOp: 'plain-batch', batchIndex: payload && payload.index });
+          }
+          if (step === 'semantic-epoch-checkpoint') {
+            return persistSession(dir, {
+              filesOp: 'semantic-epoch-base',
+              reason: payload && payload.reason,
+              oldRevision: payload && payload.oldRevision,
+              newRevision: payload && payload.newRevision
+            });
+          }
+          if (step === 'semantic-checkpoint') {
+            return persistSession(dir, { filesOp: 'semantic-checkpoint', phase: payload && payload.phase });
           }
           if (step === 'round-done') return persistSession(dir, { filesOp: 'round', roundName: payload && payload.round ? payload.round.round : null });
           if (step === 'pipeline-done' || step === 'pipeline-error') {
@@ -3596,7 +4085,7 @@
         // terminal FINAL 已由 engine 的必达 persist hook 原子提交；UI 只投影结果，禁止第二次独立写盘制造新的半提交窗口。
         refreshSessionList();
         if (res.reportHtml) {
-          showReport(res.reportHtml, res.workDir);
+          showReport(res.reportHtml, res.workDir, 'internal', 'PRODUCTION_ACTIVE run report.html');
           logLine(TXT.run.logReportDone + res.reportFile + '（' + fmtBytes(res.reportHtml.length) + '）');
         } else {
           logLine(TXT.run.logReportMissing);
@@ -3629,8 +4118,14 @@
   }
   function startPreparedResume() {
     if (!pendingResume || running) return;
-    var pending = { dir: pendingResume.dir, startNode: pendingResume.startNode || 'auto' };
-    startRun({ resumeDir: pending.dir, force: false, resumeStartNode: pending.startNode || 'auto' });
+    var pending = {
+      dir: pendingResume.dir, startNode: pendingResume.startNode || 'auto', historyRevision: pendingResume.historyRevision,
+      historyInstanceId: pendingResume.historyInstanceId
+    };
+    startRun({
+      resumeDir: pending.dir, force: false, resumeStartNode: pending.startNode || 'auto',
+      expectedHistoryRevision: pending.historyRevision, expectedHistoryInstanceId: pending.historyInstanceId
+    });
   }
 
   // ================= 上传 / 文件 =================
@@ -3829,27 +4324,71 @@
       var f = e.target.files[0];
       if (!f) return;
       var r = new FileReader();
-      r.onload = function (ev) {
+      r.onload = async function (ev) {
+        var payload = null;
+        var priorTargetFiles = null;
+        var priorSettings = settings;
+        var priorCurrentSession = currentSession;
+        var installed = false;
+        var durable = false;
         try {
-          var payload = JSON.parse(ev.target.result);
+          payload = JSON.parse(ev.target.result);
           if (payload.kind !== 'judge-web-session-v1' || !payload.workDir || !payload.files) { alert(TXT.sess.notValid); return; }
+          assertSemanticTestMetadata(payload.semanticTest);
           if (!engine) initEngine();
-          engine.restoreSession(payload.files);
-          settings = normalizeSettingsKeys(payload.settings) || settings;
-          syncSettingsToForm();
+          // Import is create-only. A previously exported but still-valid package must never roll an existing local
+          // session back merely by reusing its workDir. Treat every durable ownership footprint and live VFS state
+          // as a collision; intentional replacement requires the user to explicitly delete the local session first.
+          var existingRec = await idbGet(payload.workDir);
+          var existingFileRows = await idbAllFiles(payload.workDir);
+          var existingVersions = await idbListSessionVersions(payload.workDir);
+          var existingLiveFiles = engine.snapshotSession(payload.workDir);
+          if (existingRec || (existingFileRows && existingFileRows.length) ||
+              (existingVersions && existingVersions.length) || Object.keys(existingLiveFiles || {}).length) {
+            throw new Error('导入会话 workDir 已存在本地 authority/history；拒绝静默覆盖或回滚。请先显式删除该本地会话后再导入。');
+          }
+          // Import is a two-boundary transaction: verified VFS install first, durable TEST history commit second.
+          // If the durable commit fails, restore the exact pre-import VFS/UI state rather than leaving a ghost imported authority live.
+          priorTargetFiles = existingLiveFiles;
+          // Import may carry a valid intermediate semantic state without report.html. If it does carry the canonical
+          // report, prove that concrete presentation view before installing/persisting the archive.
+          engine.verifyTestSessionFiles(payload.files, payload.workDir,
+            sessionEvidenceRequiredViews(payload.files, payload.workDir));
+          engine.restoreVerifiedTestSession(payload.files, payload.workDir);
+          installed = true;
+          // The imported envelope may preserve analysis/presentation preferences, but it cannot choose the receiver's
+          // provider endpoint/model transport or skipRosterConfirm. Those remain the explicit local configuration.
+          settings = sanitizeImportedSessionSettings(payload.settings, priorSettings);
           currentSession = { dir: payload.workDir, title: payload.workDir.split('/').pop(), createdAt: payload.exportedAt };
-          persistSession(payload.workDir, { filesOp: 'final' }).then(function (ok) {
-            if (!ok) throw new Error('导入会话持久化失败');
-            return idbGet(payload.workDir).then(function (rec) {
-              if (rec && !rec.run) return migrateSession(rec);
-              return null;
-            });
-          }).then(function () {
-            scheduleHistoryLimit();
-            refreshHistoryManager();
-            alert(TXT.sess.imported + payload.workDir + TXT.sess.importedTail);
-          }).catch(function (err) { alert(TXT.sess.importFailed + (err && err.message ? err.message : err)); });
-        } catch (err) { alert(TXT.sess.importFailed + err.message); }
+          syncSettingsToForm();
+          var ok = await persistSession(payload.workDir, { filesOp: 'final', importCreateOnly: true });
+          if (!ok) throw new Error('导入会话持久化失败');
+          durable = true;
+          // Migration is presentation/history metadata enrichment after the durable authority commit. It is not allowed
+          // to roll back an already committed import if metadata refresh itself is unavailable.
+          try {
+            var rec = await idbGet(payload.workDir);
+            if (rec && !rec.run) await migrateSession(rec);
+          } catch (migrationError) {
+            console.warn('[judge-web TEST] 导入会话 metadata 迁移失败（authority 已 durable）:', migrationError);
+          }
+          scheduleHistoryLimit();
+          refreshHistoryManager();
+          alert(TXT.sess.imported + payload.workDir + TXT.sess.importedTail);
+        } catch (err) {
+          if (installed && !durable && payload && payload.workDir) {
+            try {
+              engine.removeSession(payload.workDir);
+              engine.restoreSession(priorTargetFiles || {});
+              settings = priorSettings;
+              currentSession = priorCurrentSession;
+              syncSettingsToForm();
+            } catch (rollbackError) {
+              console.error('[judge-web TEST] 导入失败且 VFS/UI rollback 失败:', rollbackError);
+            }
+          }
+          alert(TXT.sess.importFailed + (err && err.message ? err.message : err));
+        }
       };
       r.readAsText(f, 'UTF-8');
     };
@@ -4131,8 +4670,10 @@
     $('btn-export-session').onclick = function () {
       var workDir = reportState.workDir;
       if (!workDir || !engine) { alert(TXT.sess.noSession); return; }
-      var files = engine.snapshotSession(workDir, ['/input']);
-      var payload = { kind: 'judge-web-session-v1', exportedAt: new Date().toISOString(), workDir: workDir, files: files, settings: settings };
+      var files = engine.snapshotSession(workDir);
+      try { engine.verifyTestSessionFiles(files, workDir, ['report']); }
+      catch (e) { alert('当前报告会话无法证明 TEST authority/report binding，拒绝导出为 TEST session：' + (e && e.message ? e.message : e)); return; }
+      var payload = { kind: 'judge-web-session-v1', exportedAt: new Date().toISOString(), workDir: workDir, files: files, settings: applySemanticTestRoute(Object.assign({}, settings)), semanticTest: semanticTestMetadata() };
       exportFile(TXT.sess.sessionFile + tsName() + '.json', JSON.stringify(payload, null, 2), 'application/json', { kind: 'report-session' });
     };
     $('btn-import-report').onclick = function () {

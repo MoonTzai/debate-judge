@@ -17,9 +17,9 @@ The browser background is generated with project-authored CSS rather than the qu
 
 ## License
 
-Project-owned code, rule text, tests, documentation, and generated artifacts are released under the repository MIT License.
+Project-owned code, schemas, tests, engineering documentation, and code-only assets are released under the repository MIT License. The frozen `Skill-Judge.md` rule/runtime text and its byte-identical `Debate-Judge.md` mirror retain the `CC BY-NC-SA 4.0` notice embedded in that frozen source. Generated browser/single-file artifacts that embed the Skill text therefore have a mixed-license boundary.
 
-`THIRD_PARTY_NOTICES.md` records scholarly attribution and makes clear that the license covers Debate-Judge's own implementation and expression, not independently owned theories or publications.
+`THIRD_PARTY_NOTICES.md` records this boundary, scholarly attribution, and the rule that no repository license purports to license independently owned theories or publications.
 
 A release-rights scan found no bundled long-form third-party book/article/competition-handbook/course excerpt in the public Skill. Future copied/adapted text, datasets, fixtures, media, fonts, vendor code, or artwork require their own provenance and license review.
 

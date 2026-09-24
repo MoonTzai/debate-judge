@@ -22,6 +22,7 @@ function walk(dir, out) {
       walk(abs, out);
     } else if (ent.isFile()) {
       if (rel === 'MANIFEST.sha256') continue;
+      if (rel === 'web/assets/sanctum-dark.webp' || rel === 'web/assets/sanctum-light.webp') continue;
       out.push(rel);
     }
   }

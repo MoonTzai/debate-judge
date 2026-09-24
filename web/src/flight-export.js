@@ -101,8 +101,17 @@ function sessionMeta(record) {
     createdAt: record.createdAt || null,
     updatedAt: record.updatedAt || null,
     status: record.status || null,
-    reportReady: !!record.reportReady
+    reportReady: !!record.reportReady,
+    historyRevision: record.historyRevision == null ? null : Number(record.historyRevision),
+    historyInstanceId: record.historyInstanceId == null ? null : String(record.historyInstanceId)
   };
+}
+function historyInstanceMatches(expectedValue, actualValue) {
+  var expected = String(expectedValue || '');
+  var actual = String(actualValue || '');
+  if (!expected) return !actual;
+  if (expected.indexOf('legacy-v0:') === 0) return !actual || actual === expected;
+  return actual === expected;
 }
 function requestSummary(record) {
   var out = clonePlain(record || {});
@@ -162,6 +171,7 @@ function buildFlightExportArchive(input) {
       var runManifest = {
         path: runPath,
         runId: runRecord.id || null,
+        historyInstanceId: runRecord.historyInstanceId == null ? null : String(runRecord.historyInstanceId),
         provider: runRecord.provider || null,
         model: runRecord.model || null,
         startedAt: runRecord.startedAt || null,
@@ -170,8 +180,12 @@ function buildFlightExportArchive(input) {
         requestCount: Number(runRecord.requestCount || 0),
         capture_truncated: !!runRecord.captureTruncated,
         missing: [],
+        mismatch: [],
         requests: []
       };
+      if (!historyInstanceMatches(meta.historyInstanceId, runManifest.historyInstanceId)) {
+        runManifest.mismatch.push('history_instance');
+      }
       sessionManifest.flightRuns.push(runManifest);
 
       var actualIndexes = Object.create(null);
@@ -191,11 +205,16 @@ function buildFlightExportArchive(input) {
         var missing = [];
         if (!recordReq) missing.push('request_record');
         if (reqSource.readError) missing.push('artifact_read_error');
+        if (recordReq && String(recordReq.runId || '') !== String(runRecord.id || '')) {
+          mismatch.push('request_run');
+          if (runManifest.mismatch.indexOf('request_run') < 0) runManifest.mismatch.push('request_run');
+        }
         if (recordReq && actualBytes !== expectedBytes) mismatch.push('raw_bytes');
         if (recordReq && actualChunks != null && actualChunks !== expectedChunks) mismatch.push('chunk_count');
         var reqManifest = {
           path: reqPath,
           requestId: recordReq && recordReq.id || null,
+          runId: recordReq && recordReq.runId || null,
           index: actualIndex,
           startedAt: recordReq && recordReq.startedAt || null,
           endedAt: recordReq && recordReq.endedAt || null,

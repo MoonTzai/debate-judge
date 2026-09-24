@@ -1,3 +1,7 @@
+> **Branch: Debate-Judge · Deliberative Edition (审议版)**  
+> Research line: V10-R2.1 optimized final. This branch focuses on provenance-bound semantic authority, higher-order SC relations, dependency-aware adjudication, and reproducible final-decision formation.  
+> See [Deliberative Edition architecture](docs/deliberative-edition.md) and [reproducibility](docs/deliberative-reproducibility.md).
+
 # Debate-Judge
 
 ### Structure-aware analysis and adjudication for competitive Chinese debate
@@ -6,13 +10,14 @@
 
 Debate-Judge is a research-software prototype for tracing how case structure, clash development, and adjudication interact across a debate. It combines staged LLM analysis, explicit intermediate representations, contract checks, recovery support, and a generated browser report.
 
-**Current public status:** v0.1.2 Research Preview. The repository is MIT licensed and publicly reproducible at the software level. No claim is made that the system is state of the art, human-equivalent, universally valid, or independently validated for adjudication quality.
+**Current public status:** v0.1.2 Research Preview. Project code and engineering documentation use the repository MIT License; the frozen `Skill-Judge.md` rule/runtime text and its exact `Debate-Judge.md` mirror retain the `CC BY-NC-SA 4.0` notice embedded in that frozen source. The branch is publicly reproducible at the software level. No claim is made that the system is state of the art, human-equivalent, universally valid, or independently validated for adjudication quality.
 
 ## What is in this repository
 
 There is one canonical rule/runtime source:
 
-- `Skill-Judge.md` — the only maintained Skill source and the single-file self-contained distribution.
+- `Skill-Judge.md` — the maintained canonical Skill and the single-file self-contained distribution.
+- `Debate-Judge.md` — a byte-identical generated mirror retained in Deliberative Edition only because the frozen V10 bundle/runtime-identity contract consumes both names. Do not edit it directly.
 
 The rest of the repository is implementation around that source:
 
@@ -26,7 +31,7 @@ The rest of the repository is implementation around that source:
 - `tests/` — rights/privacy-cleared public deterministic test suite.
 - `MANIFEST.sha256` — checksums for the publishable source tree.
 
-The repository deliberately does **not** keep byte-for-byte copies such as `Debate-Judge.md` or `.claude/skills/.../SKILL.md`. Install targets are generated when needed instead of being versioned as duplicate sources.
+The branch does **not** version the `.claude/skills/.../SKILL.md` install target. The sole exception to the no-duplicate rule is the checked-in `Debate-Judge.md` mirror described above, retained for exact frozen-artifact reproducibility.
 
 ## Execution model
 
@@ -41,18 +46,12 @@ R7 plain-language output and R8 reader guide are optional post-processing stages
 No npm install or third-party Node package is required for the current source tree.
 
 ```sh
-node install-skill.js --verify-only
-node pipeline-controller.js self-check
-node tests/run-public.js
+node tests/run-deliberative-public.js
+node scripts/secret-scan.js
+node scripts/generate-manifest.js
 ```
 
-To regenerate the browser artifact:
-
-```sh
-node web/build-judge-web.js
-```
-
-Do not hand-edit `web/judge.html`; fix the source and rebuild it.
+`web/judge.html` is the exact frozen Deliberative browser artifact and is verified by SHA. The historical browser builder is retained for source lineage, but exact visual regeneration is not part of the public reproducibility claim because two quarantined Sanctum image inputs are intentionally excluded. Do not hand-edit the frozen artifact.
 
 ## Real adjudication
 
@@ -98,7 +97,7 @@ Relevant neighboring work includes chronological and multidimensional LLM debate
 
 ## License and data boundary
 
-Project-owned code, rule text, tests, documentation, and generated artifacts in this repository are released under the [MIT License](LICENSE). [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) records scholarly attribution and third-party boundaries.
+Project-owned code, schemas, tests, engineering documentation, and code-only assets are released under the [MIT License](LICENSE). The frozen `Skill-Judge.md` rule/runtime text and its exact `Debate-Judge.md` mirror retain their embedded `CC BY-NC-SA 4.0` notice; generated single-file artifacts that embed that text therefore carry a mixed-license boundary. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) records the boundary and scholarly attributions.
 
 The repository does not distribute real competition transcript corpora, course media, model weights, provider credentials, private adjudication outputs, or the earlier quarantined Sanctum artwork.
 

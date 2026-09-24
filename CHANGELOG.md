@@ -1,3 +1,10 @@
+## Deliberative Edition — 2026-09-24
+
+- Established the public `deliberative-edition` branch from the frozen V10-R2.1 optimized final.
+- Added semantic authority, SC composition, final consequence reconciliation, runtime identity and ReportHost stability work.
+- Added public zero-model/synthetic reproducibility tests.
+- Excluded private debate transcripts, raw provider evidence and lifecycle credentials from the public branch.
+
 # Changelog
 
 ## [Unreleased]

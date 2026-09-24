@@ -1,0 +1,23 @@
+{
+  "schema": "debate-judge-deliberative-edition-attestation-v1",
+  "edition": "Debate-Judge Deliberative Edition",
+  "branch": "deliberative-edition",
+  "lineage": "V10-R2.1 optimized final",
+  "frozen_date": "2026-09-24",
+  "source_final": {
+    "backup_tree_sha256": "cc4a310675e82e1efcfb77a2e49c31f6dcf4d060c7c7fc296b65433ebf25a348",
+    "judge_html_sha256": "e392b5af98ecefefb70a3e8260d1376603bbb9e0d2b5e674647d2a2826eeba58",
+    "runtime_manifest_sha256": "9f4a55d60a18b9a3af7510659b1b3a73e46d8fc235f655e3afaef674e34925ea",
+    "report_host_sha256": "5e13366712ab362355280ed557877e9378602568e1a189b9a05bc652187b8edd"
+  },
+  "semantic_profile": {
+    "profile_id": "semantic-first-e2e-r2-role-state-mechanism-calibration-v9-nonlive-20260916",
+    "prompt_bundle_sha256": "ca8deccba46ef66f2245c7d34348544163ba563d02d1ab7172f03bd8e5a39856"
+  },
+  "public_boundary": {
+    "production_cutover_credential_included": false,
+    "private_real_debate_fixtures_included": false,
+    "flight_raw_evidence_included": false,
+    "purpose": "open-source engineering and academic reproducibility"
+  }
+}

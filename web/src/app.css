@@ -78,10 +78,10 @@ body{
   background:
     linear-gradient(var(--world-veil),var(--world-veil)),
     radial-gradient(ellipse 120% 90% at 50% 42%,rgba(7,10,16,0) 30%,rgba(7,10,16,.46) 88%),
-    radial-gradient(ellipse 78% 54% at 50% 18%,rgba(167,124,198,.13),transparent 72%),
+    url("__JUDGE_ASSET_DARK__"),
     radial-gradient(1200px 760px at 50% -12%,rgba(126,155,195,.10),transparent 62%),
     linear-gradient(180deg,var(--canvas),var(--surface-0));
-  background-size:auto,auto,auto,auto,auto;
+  background-size:auto,auto,cover,auto,auto;
   background-position:center,center,center,center,center;
   background-attachment:scroll,scroll,fixed,scroll,scroll;
   background-repeat:no-repeat,no-repeat,no-repeat,repeat,repeat;
@@ -92,10 +92,10 @@ body.sanctum-light{
   background:
     linear-gradient(var(--world-veil),var(--world-veil)),
     radial-gradient(ellipse 120% 90% at 50% 42%,rgba(255,253,248,0) 30%,rgba(87,65,24,.26) 88%),
-    radial-gradient(ellipse 78% 54% at 50% 18%,rgba(177,130,45,.15),transparent 72%),
+    url("__JUDGE_ASSET_LIGHT__"),
     radial-gradient(1200px 760px at 50% -12%,rgba(177,130,45,.14),transparent 62%),
     linear-gradient(180deg,var(--canvas),var(--surface-0));
-  background-size:auto,auto,auto,auto,auto;
+  background-size:auto,auto,cover,auto,auto;
   background-position:center,center,center,center,center;
   background-attachment:scroll,scroll,fixed,scroll,scroll;
   background-repeat:no-repeat,no-repeat,no-repeat,repeat,repeat;
