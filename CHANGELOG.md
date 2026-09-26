@@ -1,3 +1,11 @@
+## Deliberative Edition — 2026-09-27
+
+- Promoted the converged R0 pre-current recovery / semantic structured-recovery candidate to the `deliberative-edition` baseline.
+- Hardened SC semantic-vs-representation separation, staged/pre-core recovery, source-evidence ambiguity handling, and structural JSON equality so object key order cannot cause false semantic self-proof failures.
+- Repaired R8 review-contract recovery, postprocess-only report return/readback, resume diagnostics, and UI event-binding resilience.
+- Added bilingual display-only UI modules and zero-model regressions for the real 2026-09-26/27 debug-bundle failure shapes.
+- Preserved deterministic byte-binding gates only where byte identity is part of the authority/receipt contract.
+
 ## Deliberative Edition — 2026-09-24
 
 - Established the public `deliberative-edition` branch from the frozen V10-R2.1 optimized final.

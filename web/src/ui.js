@@ -68,8 +68,8 @@
   // settings 值语义（value 键）、HTML 结构串（'block'/'none' 等）。
   var TXT = {
     brand: {
-      title: '辩论筑基 · Debate-Judge · Semantic-First',
-      ver: 'PRODUCTION_ACTIVE · 独立测试版 · Semantic-First 全流程验证'
+      title: '辩论筑基 · Debate-Judge · Deliberative Edition',
+      ver: '深度评审·完整剖析·AI评委斩杀线'
     },
     top: {
       sessions: '🗂 历史记录',
@@ -96,14 +96,16 @@
       summary: 'summary.json',
       clearConfirm: '确定清空全部 Web Flight Recorder 记录？此操作不会删除 Judge 正式会话产物。',
       persistGranted: '浏览器已允许持久化存储。',
-      persistDenied: '浏览器未授予持久化存储；Recorder 仍可使用，但可能受存储回收策略影响。'
+      persistDenied: '浏览器未授予持久化存储；Recorder 仍可使用，但可能受存储回收策略影响。',
+      selectAll: '全选',
+      selectNone: '全不选'
     },
     gate: {
       line: '你确定向圣堂申请裁决，并承受相应的代价吗？',
-      fee: '<b>费用</b>：建议按约<strong class="gate-risk-emphasis">120–180万 Token</strong>预留；最近一次全链路实测累计约161.6万 Token（含 R8 多次尝试/续跑成本）。比赛长度、模型与重试次数会影响消耗，复杂场次可能更高。',
-      time: '<b>耗时</b>：建议按约<strong class="gate-risk-emphasis">120–180分钟</strong>预留；最近一次全链路实测累计约142分钟（含 R8 多次尝试/续跑耗时）。可中途中止，已完成轮次的产物保存在本地缓存，但断点续跑仍不应视为绝对可靠。',
+      fee: '<b>费用</b>：近期完整全链路实测 Token 消耗约<strong class="gate-risk-emphasis">35–50万 Token</strong>。实际消耗会受比赛长度、所用模型、模型行为、重试次数及 R7/R8 后处理影响，不同 LLM 可能明显更高；上述数据仅供参考，不代表固定范围或上限。',
+      time: '<b>耗时</b>：近期完整全链路实测约<strong class="gate-risk-emphasis">45–90分钟</strong>。实际耗时会受模型响应速度、比赛长度、模型行为、重试次数及 R7/R8 后处理影响，不同 LLM 可能需要更长时间；上述数据仅供参考。可中途中止，已完成轮次的产物保存在本地缓存，但断点续跑仍不应视为绝对可靠。',
       accuracy: '<b>AI 误差</b>：裁决由 AI 生成，可能存在错漏、误判或争议；结果仅供技术学习与辩论训练参考，不构成任何专业意见；使用须遵守相关法律法规。',
-      key: '<b>密钥</b>：API Key 仅保存在你的浏览器本地，但仍须提高安全意识，泄漏风险自负，请勿在公共机器使用。',
+      key: '<b>密钥</b>：API Key 仅保存在你的浏览器本地，但仍须提高安全意识，泄漏风险自负，请勿在公共机器使用。建议优先使用模型厂商原厂 API；第三方中转可能附加未知参数或流量限制，导致运行异常或失败。建议使用上下文长度不少于 1M tokens 的模型，否则长辩词或后续阶段可能因上下文不足而失败。',
       enter: '🔱 进入圣堂',
       leave: '离开',
       leftNote: '圣堂之门已闭……愿你在门外想清楚再来。',
@@ -158,7 +160,7 @@
       thinkingHint: '思维链流程故障时可关闭，开启后模型先「思考」再作答（reasoning 内容不计入报告，只取最终回答，但会占用模型生成预算）。',
       thinkingJsonLabel: '思考参数 JSON（原样并入请求体，高级自定义）',
       thinkingJsonHint: '示例：DeepSeek 系 {"thinking":{"type":"enabled"},"thinking_budget":4096}；OpenAI 系 {"reasoning_effort":"medium"}。端点不支持时会自动降级为不附加（自适应保险）。',
-      costHint: '费用提示：完整全链路实际消耗可能达到百万级 Token，请以风险提示页的实测区间为参考并留意账户余额。默认单请求输出上限 384K；Judge 核心上下文硬门为 1M tokens（超限即停止，不裁剪降级）。「本地冒烟」= 不联网、用假数据跑通全流程。',
+      costHint: '费用提示：近期完整全链路实测约 35–50万 Token；不同 LLM、比赛长度、重试次数及后处理可能带来明显不同的实际消耗，数据仅供参考。默认单请求输出上限 384K；Judge 核心上下文硬门为 1M tokens（超限即停止，不裁剪降级）。「本地冒烟」= 不联网、用假数据跑通全流程。',
       testApi: '🔌 连通性测试',
       tendTitle: '⚖️ 裁判倾向（三维度六向度权重调节）',
       tendH4a: '① 三维整体权重（评委大倾向）+ 随机性（第四轴）',
@@ -297,7 +299,9 @@
       anchorWait: ' 人 ⏸ 等待确认',
       adaptive: '⚠ 自适应保险：max_tokens 已自动调整为 ',
       adaptiveTail: '（青春版同款机制：截断→提高 / 拒绝→减半）',
-      notePrefix: 'ℹ '
+      notePrefix: 'ℹ ',
+      logEvidence: '运行日志 / 证据',
+      exportLog: '导出日志'
     },
     roster: {
       title: '👥 名册确认（圣堂名录核查）',
@@ -457,7 +461,7 @@
       autoPreview: '当前 = 内容驱动（auto）',
       relativePreview: '六向度相对占比预览',
       helpTitle: '📖 裁判倾向说明（三维度六向度权重调节）',
-      helpP1: '<p><b>① 三维整体权重（评委大倾向）+ 随机性（第四轴）</b>：说服 / 证明 / 第三方，各 0–100。决定你作为裁判的整体侧重（比如「我主要看论证严谨性，说服力次之」）。<b>全部为 0 = 中立（自动）</b>——由比赛内容驱动，LLM 根据辩词自行选择匹配的判准框架；同一场多次运行结果基本一致。第四轴<b>随机性</b>与三维并列：模型采样随机性 0.00–1.00（轴值 ÷100），默认推荐 30（=0.30）。</p>',
+      helpP1: '<p><b>① 三维整体权重（评委大倾向）+ 随机性（第四轴）</b>：说服 / 证明 / 第三方，各 0–100。决定你作为裁判的整体侧重（比如「我主要看论证严谨性，说服力次之」）。<b>全部为 0 = 中立（自动）</b>——由比赛内容驱动，LLM 根据辩词自行选择匹配的判准框架；同一场多次运行仍可能产生差异。第四轴<b>随机性</b>与三维并列：模型采样随机性 0.00–1.00（轴值 ÷100），默认推荐 30（=0.30）。</p>',
       helpP2: '<p><b>② 六向度看重程度</b>：证伪 / 证成 / 理性 / 感性 / 场面感 / 意义感，各 0–100。<b>单向语义</b>：100 = 极高，0 = 不在意，50 = 常规。六个向度始终全部参与评判，只是看重程度不同。</p>',
       helpP3: '<p><b>③ 维内倾向（派生，不单独调节）</b>：每个轴的人格倾向不是独立滑杆，而是由同轴一对向度的对比<b>自动派生</b>——证明轴：证伪 vs 证成（证伪高 → 偏批判者·证伪导向；证成高 → 偏审判者·自证导向）；说服轴：理性 vs 感性（理性高 → 偏卫道者·常识侧；感性高 → 偏问道者·新视角侧）；第三方轴：场面感 vs 意义感（场面感高 → 偏技术者·操作流畅；意义感高 → 偏艺术者·深度审美）；相等 = 该轴中立。</p>',
       helpP4: '<p><b>生效方式</b>：全部滑块 → 自然语言注意力引导文本 → 注入每一轮提示词头（与 CLI <code>--tendency</code> 同通道）。是注意力倾向性引导，不是数学公式。</p>',
@@ -488,6 +492,13 @@
     }
   };
 
+  // UI language is presentation-only; keep TXT and all pipeline values canonical.
+  var uiLocale = BUNDLE.modules.uiI18n().create({document: document, source: TXT});
+  function uiAlert(s) { return window.alert(uiLocale.message(s)); }
+  function uiConfirm(s) { return window.confirm(uiLocale.message(s)); }
+  function uiPrompt(s, value) { return window.prompt(uiLocale.message(s), value); }
+  function uiContent(s) { return '<span data-ui-content translate="no">' + esc(s) + '</span>'; }
+
   // ================= 状态 =================
   // 设置存储键带版本号：默认值修订时升版本，旧缓存自动弃用（API Key 另存，不受影响）
   var LS_KEY = 'judge_web_settings_v9';
@@ -506,9 +517,10 @@
   var reportNavHistory = [];
   var reportCurrentSection = null;
   var running = false;
+  var resumePreparing = false; // 点击“续跑”后、本地 history/Flight/authority 校验完成前的互斥锁；此阶段尚未调用 API
   var abortController = null;
   var currentSession = null;   // {dir, title}
-  var pendingResume = null;    // {dir}：历史断点已恢复到 VFS，但尚未开始任何 API
+  var pendingResume = null;    // {dir,startNode,requestedNode,...}：历史断点已恢复到 VFS，但尚未开始任何 API
   var fetchManager = null;
   var modelListItems = [];
   var historyOverlay = null;
@@ -518,6 +530,7 @@
   var archiveFlightRefreshGeneration = 0;
   var archiveFlightSelectedSessionIds = Object.create(null);
   var archiveFlightSelectionInitialized = false;
+  var runLogLines = [];
   var currentScene = 'gate';
   var transientLayers = [];
 
@@ -1350,6 +1363,10 @@
       '    <div class="brand shell-brand"><div><h1>' + TXT.brand.title + '</h1><div class="ver">' + TXT.brand.ver + '</div></div></div>' +
       '    <div class="quest-tracker shell-stage" id="quest-tracker"><span class="qt-step" id="qt-step">' + TXT.top.questSteps[0] + '</span><span class="qt-name" id="qt-name">' + TXT.top.questNames[0] + '</span><span class="qt-dots" id="qt-dots"></span></div>' +
       '    <div class="topbtns shell-utilities">' +
+      '      <div class="ui-language-switch" role="group" aria-label="界面语言" title="切换界面语言；辩词、原始记录和报告正文保持原文">' +
+      '        <button class="btn" id="ui-lang-zh" type="button" lang="zh-CN" translate="no" aria-pressed="true">中文</button>' +
+      '        <button class="btn" id="ui-lang-en" type="button" lang="en" translate="no" aria-pressed="false">English</button>' +
+      '      </div>' +
       '      <button class="btn" id="btn-sessions">' + TXT.top.sessions + '</button>' +
       '      <button class="btn" id="btn-theme">' + TXT.top.themeDark + '</button>' +
       '      <button class="btn" id="btn-clear-cache">' + TXT.top.clearCache + '</button>' +
@@ -1558,7 +1575,7 @@
       '        <div class="timeline" id="timeline"></div>' +
       '      </section>' +
       '      <section class="work-surface tribunal-current" id="run-current-status" aria-live="polite">' +
-      '        <div class="surface-title">Current Status · 当前裁决</div>' +
+      '        <div class="surface-title">运行状态</div>' +
       '        <div class="tribunal-current-round" id="run-current-round">—</div>' +
       '        <div class="run-status-line" id="run-status"></div>' +
       '        <div class="tribunal-actions">' +
@@ -1568,12 +1585,12 @@
       '          <button class="btn" id="btn-back-run">' + TXT.run.backRun + '</button>' +
       '        </div>' +
       '        <div class="tribunal-evidence">' +
-      '          <div class="surface-subtitle">Log / Evidence</div>' +
+      '          <div class="surface-subtitle" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span>' + TXT.run.logEvidence + '</span><span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn small" id="btn-export-run-log" type="button">' + TXT.run.exportLog + '</button><button class="btn small" id="btn-export-debug" type="button">📦 导出 Debug</button></span></div>' +
       '          <div class="logbox" id="logbox"></div>' +
       '        </div>' +
       '      </section>' +
       '      <aside class="work-surface tribunal-telemetry" id="run-telemetry" aria-label="运行遥测">' +
-      '        <div class="surface-title">Telemetry</div>' +
+      '        <div class="surface-title">运行统计</div>' +
       '        <div class="progress-note tribunal-telemetry-list"><span id="pn-live"></span><span id="pn-rounds"></span><span id="pn-retries"></span><span id="pn-anchor"></span></div>' +
       '      </aside>' +
       '    </div>' +
@@ -1817,7 +1834,7 @@
       refreshJudgeContextSummary();
       return true;
     } catch (e) {
-      if (showError) alert(TXT.ctx.invalid + e.message);
+      if (showError) uiAlert(TXT.ctx.invalid + e.message);
       return false;
     }
   }
@@ -1833,9 +1850,9 @@
   function applyTendencyProfilePayload(payload) {
     var profile;
     try { profile = tendencyMod.normalizeTendencyProfile(payload); }
-    catch (e) { alert(TXT.setup.tendProfileInvalid + e.message); return false; }
+    catch (e) { uiAlert(TXT.setup.tendProfileInvalid + e.message); return false; }
     var confirmTail = profile.dimWeights ? TXT.setup.tendProfileConfirmV2Tail : TXT.setup.tendProfileConfirmV1Tail;
-    if (!confirm(TXT.setup.tendProfileConfirmPre + tendencyProfileLabel(profile) + confirmTail)) return false;
+    if (!uiConfirm(TXT.setup.tendProfileConfirmPre + tendencyProfileLabel(profile) + confirmTail)) return false;
     var next = {};
     for (var i = 0; i < TEND_DIMS.length; i++) next[TEND_DIMS[i]] = profile.vectorWeights[TEND_DIMS[i]];
     settings.tendencyWeights = next;
@@ -1845,26 +1862,28 @@
     }
     saveSettings();
     renderTendency();
-    alert(profile.dimWeights ? TXT.setup.tendProfileAppliedV2 : TXT.setup.tendProfileAppliedV1);
+    uiAlert(profile.dimWeights ? TXT.setup.tendProfileAppliedV2 : TXT.setup.tendProfileAppliedV1);
     return true;
   }
   function applyLocalTendencyProfile() {
     var raw = null;
     try { raw = localStorage.getItem(TENDENCY_PROFILE_V2_LS_KEY) || localStorage.getItem(TENDENCY_PROFILE_LS_KEY); } catch (e) {}
-    if (!raw) { alert(TXT.setup.tendProfileNone); return; }
+    if (!raw) { uiAlert(TXT.setup.tendProfileNone); return; }
     try { applyTendencyProfilePayload(JSON.parse(raw)); }
-    catch (e) { alert(TXT.setup.tendProfileInvalid + e.message); }
+    catch (e) { uiAlert(TXT.setup.tendProfileInvalid + e.message); }
   }
 
   // ================= 轮次时间线 / 日志 =================
   // W-RS（260814）：轮次表单一事实源收敛——惰性派生自 core.ROUNDS（内核权威），
   // 回退数组仅 core 模块不可用/加载异常时兜底（与 REGISTRY 缺省回退同构；回退态观察登记 TODO.md）
+  var PRECORE_STEP = 'R0';
   var POSTPROCESS_STEPS = ['R7', 'R8'];
   var ROUND_LABELS = {
-    R1: '架构提取', R2: '交锋追迹', 'R2.5': '修辞合成', R3: '终判合成', R4: '结构归约', 'R4.5': '裁决仲裁',
+    R0: '语义权威建立', R1: '架构提取', R2: '交锋追迹', 'R2.5': '修辞合成', R3: '终判合成', R4: '结构归约', 'R4.5': '裁决仲裁',
     R5A: '前半叙事', R5B: '后半叙事', R6a: '结构图表', R6b: '报告组装', R7: '白话报告', R8: '章节导览',
     'semantic-analyze': '全局语义·独立发现', 'semantic-review': '全局语义·独立复核',
     'semantic-project': '全局语义·权威投影', 'semantic-fidelity': '全局语义·忠实度复核',
+    'semantic-recovery': '全局语义·断点恢复',
     'sc-inventory-discover': 'SC语义·候选发现', 'sc-inventory-review': 'SC语义·候选独立复核并冻结',
     'sc-analyze': 'SC语义·冻结候选成文', 'sc-review': 'SC语义·独立复核',
     'sc-project': 'SC语义·标准投影', 'sc-fidelity': 'SC语义·忠实度复核'
@@ -1881,7 +1900,7 @@
         names = core.ROUNDS.map(function (r) { return r.name; });
       }
     } catch (e) {}
-    ROUND_STEPS = (names || ['R1', 'R2', 'R2.5', 'R3', 'R4', 'R4.5', 'R5A', 'R5B', 'R6a', 'R6b']).concat(POSTPROCESS_STEPS);
+    ROUND_STEPS = [PRECORE_STEP].concat(names || ['R1', 'R2', 'R2.5', 'R3', 'R4', 'R4.5', 'R5A', 'R5B', 'R6a', 'R6b']).concat(POSTPROCESS_STEPS);
     return ROUND_STEPS;
   }
   var roundState = {};
@@ -1889,7 +1908,8 @@
   var anchorLabel = '';
   // 活性指示状态（SSE 进度遥测）
   var liveProgress = null;
-  var liveStage = null;   // SemanticFirst 前置阶段只做实时活动投影，不计入 R1-R8 正式 round authority
+  var liveStage = null;   // SemanticFirst 前置 authority 在 UI 聚合为 R0；R0 不进入 core.ROUNDS / R1-R8 authority 图
+  var r0Substage = null;
   var semanticReturnRound = null;
   var liveLastAt = 0;
   var runTimer = null;
@@ -2004,7 +2024,8 @@
       if (st === 'active') cls += ' active';
       if (st === 'fail') cls += ' fail';
       var label = st === 'skipped' ? TXT.run.tlSkipped : st === 'done' ? TXT.run.tlDone : st === 'fail' ? TXT.run.tlFail : st === 'active' ? TXT.run.tlActive : TXT.run.tlPending;
-      el.innerHTML += '<div class="' + cls + '" id="tl-' + r + '"><span class="tl-dot"></span><span class="tl-name"><span class="tl-code">' + r + '</span><span class="tl-desc">' + esc(roundLabel(r)) + '</span></span><span class="tl-status">' + label + '</span></div>'; 
+      var desc = r === PRECORE_STEP && r0Substage ? (roundLabel(r) + ' · ' + roundLabel(r0Substage)) : roundLabel(r);
+      el.innerHTML += '<div class="' + cls + '" id="tl-' + r + '"><span class="tl-dot"></span><span class="tl-name"><span class="tl-code">' + r + '</span><span class="tl-desc">' + esc(desc) + '</span></span><span class="tl-status">' + label + '</span></div>'; 
     }
     updateProgressNote();
   }
@@ -2032,12 +2053,27 @@
     if (/错误|失败/.test(s)) return 'error';
     return 'neutral';
   }
+  function exportRunLog() {
+    var lines = runLogLines.slice();
+    if (!lines.length) {
+      var box = $('logbox');
+      if (box) lines = Array.prototype.map.call(box.childNodes, function (node) { return String(node.textContent || ''); });
+    }
+    var workDir = currentSession && currentSession.dir ? currentSession.dir : (pendingResume && pendingResume.dir ? pendingResume.dir : '');
+    var payload = [TXT.run.logEvidence, '导出时间：' + new Date().toISOString()];
+    if (workDir) payload.push('workDir：' + workDir);
+    payload.push('');
+    payload = payload.concat(lines);
+    return exportFile('Judge运行日志-' + tsName() + '.txt', '\ufeff' + payload.join('\n') + '\n', 'text/plain;charset=utf-8', { kind: 'run-log', workDir: workDir, lines: lines.length });
+  }
   function logLine(text) {
+    var value = String(text == null ? '' : text);
+    runLogLines.push(value);
     var box = $('logbox');
     if (!box) return;
     var line = document.createElement('div');
-    line.textContent = text;
-    var severity = classifyLogSeverity(text);
+    line.textContent = value;
+    var severity = classifyLogSeverity(value);
     if (severity === 'error') line.className = 'l-error';
     else if (severity === 'warning') line.className = 'l-warn';
     box.appendChild(line);
@@ -2053,14 +2089,17 @@
     renderTimeline(round);
   }
   function isSemanticFirstStage(stage) {
-    return /^semantic-(?:analyze|review|project|fidelity)$/.test(String(stage || '')) ||
-      /^sc-(?:analyze|review|project|fidelity)$/.test(String(stage || ''));
+    return /^semantic-(?:analyze|review|project|fidelity|recovery)$/.test(String(stage || '')) ||
+      /^sc-(?:inventory-discover|inventory-review|analyze|review|project|fidelity)$/.test(String(stage || ''));
   }
   function setTribunalTransientStage(stage, note) {
     var el = $('run-current-round');
     if (!el) return;
-    el.textContent = 'SF · ' + roundLabel(stage) + (note ? ' · ' + note : '');
-    renderTimeline(null); // 不把前置 authority 阶段写进正式 roundState / 轮次计数
+    r0Substage = stage;
+    if (/失败/.test(String(note || ''))) roundState.R0 = 'fail';
+    else if (roundState.R0 !== 'fail') roundState.R0 = 'active';
+    el.textContent = 'R0 · ' + roundLabel(stage) + (note ? ' · ' + note : '');
+    renderTimeline(PRECORE_STEP);
   }
   function activateNextTribunalRound(completedRound) {
     var steps = roundSteps();
@@ -2083,17 +2122,17 @@
     ov.className = 'overlay';
     var sideHtml = function (side, team) {
       var rows = anchor.roster.filter(function (r) { return r.side === side; })
-        .map(function (r) { return '<li>' + esc(r.role) + '　' + esc(r.name || TXT.roster.roleLabel) + '</li>'; }).join('');
-      return '<div class="roster-side"><h4>' + esc(side) + '　' + esc(team || '') + '</h4><ul>' + (rows || '<li>' + TXT.roster.emptySide + '</li>') + '</ul></div>';
+        .map(function (r) { return '<li>' + '<span>' + esc(r.role) + '</span>　' + uiContent(r.name || TXT.roster.roleLabel) + '</li>'; }).join('');
+      return '<div class="roster-side"><h4>' + '<span>' + esc(side) + '</span>　' + uiContent(team || '') + '</h4><ul>' + (rows || '<li>' + TXT.roster.emptySide + '</li>') + '</ul></div>';
     };
     ov.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="roster-modal-title">' +
       '<h2 id="roster-modal-title">' + TXT.roster.title + '</h2>' +
-      '<div class="msub">' + TXT.roster.topic + esc(anchor.title || TXT.roster.unknown) + TXT.roster.integrity + esc(anchor.integrity || '') + '</div>' +
-      ((anchor.typeA || anchor.typeB) ? '<div class="roster-alert">' + TXT.roster.alert + (anchor.typeA ? TXT.roster.typeA : '') + (anchor.typeB ? TXT.roster.typeB : '') + TXT.roster.alertTail + '</div>' : '') +
+      '<div data-ui-summary class="msub">' + TXT.roster.topic + uiContent(anchor.title || TXT.roster.unknown) + TXT.roster.integrity + uiContent(anchor.integrity || '') + '</div>' +
+      ((anchor.typeA || anchor.typeB) ? '<div data-ui-summary class="roster-alert">' + TXT.roster.alert + (anchor.typeA ? TXT.roster.typeA : '') + (anchor.typeB ? TXT.roster.typeB : '') + TXT.roster.alertTail + '</div>' : '') +
       '<div class="roster-grid">' + sideHtml('正方', anchor.proTeam) + sideHtml('反方', anchor.conTeam) + '</div>' +
-      '<div class="msub">' + TXT.roster.bench + (anchor.bench && anchor.bench.length ? anchor.bench.map(function (b) { return esc(b.name); }).join('、') : TXT.roster.none) +
-      TXT.roster.otherSpeakers + (anchor.other_speakers && anchor.other_speakers.length ? anchor.other_speakers.map(function (o) { return esc(o.name) + '（' + esc(o.category) + '）'; }).join('、') : TXT.roster.none) + '</div>' +
-      (anchor.warnings && anchor.warnings.length ? '<div class="msub" style="color:var(--gold)">' + TXT.roster.warn + esc(anchor.warnings.join('；')) + '</div>' : '') +
+      '<div data-ui-summary class="msub">' + TXT.roster.bench + (anchor.bench && anchor.bench.length ? anchor.bench.map(function (b) { return uiContent(b.name); }).join('、') : TXT.roster.none) +
+      TXT.roster.otherSpeakers + (anchor.other_speakers && anchor.other_speakers.length ? anchor.other_speakers.map(function (o) { return uiContent(o.name) + '（' + uiContent(o.category) + '）'; }).join('、') : TXT.roster.none) + '</div>' +
+      (anchor.warnings && anchor.warnings.length ? '<div data-ui-summary class="msub" style="color:var(--gold)">' + TXT.roster.warn + uiContent(anchor.warnings.join('；')) + '</div>' : '') +
       '<div class="modal-btns">' +
       '<button class="btn" id="roster-edit">' + TXT.roster.edit + '</button>' +
       '<button class="btn" id="roster-abort">' + TXT.roster.abort + '</button>' +
@@ -2114,7 +2153,7 @@
         removeTransientLayer(ov);
         resolve({ action: 'edit', editedAnchor: edited });
       } catch (e) {
-        alert(TXT.roster.jsonInvalid + e.message);
+        uiAlert(TXT.roster.jsonInvalid + e.message);
       }
     };
   }
@@ -2235,7 +2274,7 @@
       // W-T1/R8：把当前三件私有 R8 状态作为一个整体覆盖记录持久化；缺失项写 null 墓碑，
       // 防止 guide draft → core cache → plain draft 演进时旧私有文件在恢复合并后被“复活”。
       var r8Snapshot = engine.snapshotSession(workDir);
-      var r8Names = ['.tmp-reader-guide-draft.json', '.tmp-reader-guide-cache.json', '.tmp-reader-guide-plain-draft.json'];
+      var r8Names = ['.tmp-reader-guide-draft.json', '.tmp-reader-guide-cache.json', '.tmp-reader-guide-plain-draft.json', '.tmp-reader-guide-review.json'];
       var r8Files = {};
       for (var r8i = 0; r8i < r8Names.length; r8i++) {
         var r8Path = workDir + '/' + r8Names[r8i];
@@ -2273,6 +2312,12 @@
     } else if (patch.filesOp === 'final') {
       nextBase = engine.snapshotSession(workDir);
       rec.reportReady = !!(nextBase[workDir + '/report.html']);
+      if (patch.importCreateOnly !== true) {
+        var durableLogLines = runLogLines.slice();
+        var terminalError = patch.runModel && patch.runModel.error && patch.runModel.error.message ? String(patch.runModel.error.message) : '';
+        if (terminalError && !durableLogLines.some(function (line) { return String(line).indexOf(terminalError) >= 0; })) durableLogLines.push('✗ 管道失败：' + terminalError);
+        nextBase[workDir + '/.tmp-ui-run-log.txt'] = durableLogLines.join('\n') + (durableLogLines.length ? '\n' : '');
+      }
       fileRecord = makeSessionFileRecord(workDir + '#FINAL', nextBase);
       clearRoundDir = workDir;                                                       // 与 FINAL put 同一事务清普通/PLAIN #R* 增量；BASE/FINAL 不匹配该前缀
     }
@@ -2555,7 +2600,7 @@
       '  <div class="archive-flight-head"><div><b>' + TXT.flight.title + '</b><div class="hint">' + TXT.flight.intro + '</div></div><button class="btn small" id="btn-flight-refresh" type="button">刷新</button></div>' +
       '  <div class="hint archive-hint" style="color:var(--gold)">' + TXT.flight.privacy + '</div>' +
       '  <div class="hint archive-hint">' + TXT.flight.partial + '</div>' +
-      '  <div class="archive-flight-export"><div class="archive-flight-export-head"><b>选择历史会话</b><button class="btn small" id="fr-select-all" type="button">全选</button></div><div id="fr-session-select" class="archive-flight-session-select"><span class="hint">正在读取历史会话…</span></div><div class="archive-flight-export-actions"><button class="btn small primary" id="fr-export-all" type="button" disabled>导出所有运行记录</button><span class="hint" id="fr-export-status"></span></div></div>' +
+      '  <div class="archive-flight-export"><div class="archive-flight-export-head"><b>选择历史会话</b><button class="btn small" id="fr-select-all" type="button">' + TXT.flight.selectAll + '</button></div><div id="fr-session-select" class="archive-flight-session-select"><span class="hint">正在读取历史会话…</span></div><div class="archive-flight-export-actions"><button class="btn small primary" id="fr-export-all" type="button" disabled>导出所有运行记录</button><span class="hint" id="fr-export-status"></span></div></div>' +
       '  <div class="archive-flight-controls"><span class="hint" id="fr-storage">' + TXT.flight.storage + '…</span><button class="btn small" id="fr-persist">' + TXT.flight.persist + '</button><button class="btn small" id="fr-clear">' + TXT.flight.clear + '</button></div>' +
       '  <div id="fr-warning" class="hint" style="color:var(--red);margin-bottom:8px"></div>' +
       '  <div id="fr-list"><div class="hint">进入本页后将刷新飞行记录。</div></div>' +
@@ -2627,23 +2672,24 @@
     $('btn-flight-refresh').onclick = function () { refreshArchiveFlight(); };
     $('fr-select-all').onclick = function () {
       var boxes = historyOverlay ? historyOverlay.querySelectorAll('#fr-session-select input[type=checkbox]') : [];
-      Array.prototype.forEach.call(boxes, function (box) { box.checked = true; archiveFlightSelectedSessionIds[box.value] = true; });
+      var shouldSelect = Array.prototype.some.call(boxes, function (box) { return !box.checked; });
+      Array.prototype.forEach.call(boxes, function (box) { box.checked = shouldSelect; archiveFlightSelectedSessionIds[box.value] = shouldSelect; });
       updateFlightExportSelectionState();
     };
     $('fr-export-all').onclick = exportSelectedFlightRecords;
     $('fr-persist').onclick = function () {
       if (!flightRecorder) return;
-      flightRecorder.requestPersistence().then(function (ok) { alert(ok ? TXT.flight.persistGranted : TXT.flight.persistDenied); });
+      flightRecorder.requestPersistence().then(function (ok) { uiAlert(ok ? TXT.flight.persistGranted : TXT.flight.persistDenied); });
     };
     $('fr-clear').onclick = function () {
-      if (!flightRecorder || !confirm(TXT.flight.clearConfirm)) return;
+      if (!flightRecorder || !uiConfirm(TXT.flight.clearConfirm)) return;
       flightRecorder.clearAll().then(function () { refreshArchiveFlight(); });
     };
     $('btn-history-limit').onclick = function () {
       var next = historyGovernance.normalizeRetentionLimit(number.value);
       idbAll().then(function (list) {
         var victims = historyGovernance.selectEvictionVictims(list, next, {});
-        if (victims.length && !confirm(TXT.sess.retentionConfirmPre + list.length + TXT.sess.retentionConfirmMid + victims.length + TXT.sess.retentionConfirmTail)) return;
+        if (victims.length && !uiConfirm(TXT.sess.retentionConfirmPre + list.length + TXT.sess.retentionConfirmMid + victims.length + TXT.sess.retentionConfirmTail)) return;
         historyPolicy.maxSessions = next;
         saveHistoryPolicy();
         range.value = number.value = next;
@@ -2655,20 +2701,20 @@
     };
     $('btn-history-orphans').onclick = function () {
       idbScanOrphans().then(function (orphans) {
-        if (!orphans.length) { alert(TXT.sess.orphanNone); return; }
-        if (!confirm(TXT.sess.orphanConfirmPre + orphans.length + TXT.sess.orphanConfirmTail)) return;
-        return idbCleanupOrphans(orphans).then(function (n) { alert(TXT.sess.orphanDone + n); refreshHistoryManager(); });
-      }).catch(function (e) { alert(String(e && e.message || e)); });
+        if (!orphans.length) { uiAlert(TXT.sess.orphanNone); return; }
+        if (!uiConfirm(TXT.sess.orphanConfirmPre + orphans.length + TXT.sess.orphanConfirmTail)) return;
+        return idbCleanupOrphans(orphans).then(function (n) { uiAlert(TXT.sess.orphanDone + n); refreshHistoryManager(); });
+      }).catch(function (e) { uiAlert(String(e && e.message || e)); });
     };
     $('btn-history-clear').onclick = function () {
-      if (!confirm(TXT.sess.clearJudgeConfirm)) return;
+      if (!uiConfirm(TXT.sess.clearJudgeConfirm)) return;
       idbAll().then(function (list) {
         return idbClearAllHistory().then(function () {
           if (engine) list.forEach(function (s) { engine.removeSession(s.dir || s.id); });
           currentSession = null;
           refreshHistoryManager();
         });
-      }).catch(function (e) { alert(String(e && e.message || e)); });
+      }).catch(function (e) { uiAlert(String(e && e.message || e)); });
     };
     selectArchiveTab(initialTab);
     refreshHistoryManager();
@@ -2736,15 +2782,15 @@
       };
       await exportFile('Judge历史版本-v' + String(displayIndex || 1) + '-' + tsName() + '.json', JSON.stringify(payload, null, 2), 'application/json', { kind: 'history-version' });
     } catch (e) {
-      alert('只读历史版本 TEST authority 验证失败，拒绝导出：' + (e && e.message ? e.message : e));
+      uiAlert('只读历史版本 TEST authority 验证失败，拒绝导出：' + (e && e.message ? e.message : e));
     }
   }
   function viewSessionVersion(version, displayIndex) {
     var html = versionReportHtml(version);
-    if (!html) { alert('该只读版本没有 report.html。'); return; }
+    if (!html) { uiAlert('该只读版本没有 report.html。'); return; }
     if (!engine) initEngine();
     try { engine.verifyTestSessionFiles(version.files || {}, version.sessionId, ['report']); }
-    catch (e) { alert('该只读版本无法证明当前 TEST authority/report binding，拒绝按内部报告展示：' + (e && e.message ? e.message : e)); return; }
+    catch (e) { uiAlert('该只读版本无法证明当前 TEST authority/report binding，拒绝按内部报告展示：' + (e && e.message ? e.message : e)); return; }
     closeHistoryManager();
     // 只有自包含 TEST authority/provenance 验真通过的版本才可获得 internal trust。
     showReport(html, null, 'internal', '只读历史版本 v' + String(displayIndex || 1));
@@ -2813,8 +2859,10 @@
       if (!plan || !plan.allowed) return;
       var node = plan.requestedNode;
       removeTransientLayer(ov);
-      closeHistoryManager();
-      resumeSession(s, node);
+      resumeSession(s, node).then(function () { closeHistoryManager(); }).catch(function (e) {
+        console.error('[judge-web TEST] 定点续跑载入失败:', e);
+        uiAlert('定点续跑载入失败：' + (e && e.message ? e.message : e));
+      });
     };
     refreshPlan();
   }
@@ -2837,13 +2885,19 @@
       '<button class="btn" data-archive-act="view-report" disabled title="正在核验已有 report.html">查看报告</button>' +
       '<button class="btn" data-archive-act="reissue">' + TXT.sess.reissue + '</button>' +
       '<button class="btn" data-archive-act="export">' + TXT.sess.export + '</button>' +
+      '<button class="btn primary" data-archive-act="debug-export">📦 导出所有 Debug 数据</button>' +
       '<button class="btn" data-archive-act="rename">' + TXT.sess.rename + '</button>' +
       '<button class="btn" data-archive-act="meta">' + TXT.sess.meta + '</button>' +
       '<button class="btn danger" data-archive-act="delete">' + TXT.sess.del + '</button>' +
       '</div>' +
       '<div class="archive-version-section"><div class="surface-title" style="margin-top:14px">定点续跑前版本</div><div data-archive-versions></div></div>';
     el.setAttribute('data-session-owner', s.id);
-    el.querySelector('[data-archive-act=resume-auto]').onclick = function () { closeHistoryManager(); resumeSession(s, 'auto'); };
+    el.querySelector('[data-archive-act=resume-auto]').onclick = function () {
+      resumeSession(s, 'auto').then(function () { closeHistoryManager(); }).catch(function (e) {
+        console.error('[judge-web TEST] 历史续跑载入失败:', e);
+        uiAlert('续跑载入失败：' + (e && e.message ? e.message : e));
+      });
+    };
     el.querySelector('[data-archive-act=resume-target]').onclick = function () { showTargetedResumeDialog(s, runModel); };
     var viewReportBtn = el.querySelector('[data-archive-act=view-report]');
     viewReportBtn.onclick = function () { viewSavedSessionReport(s); };
@@ -2865,9 +2919,10 @@
     });
     el.querySelector('[data-archive-act=reissue]').onclick = function () { closeHistoryManager(); reissueSessionReport(s); };
     el.querySelector('[data-archive-act=export]').onclick = function () { exportSessionRecord(s); };
+    el.querySelector('[data-archive-act=debug-export]').onclick = function () { exportSessionDebugBundle(s, false); };
     el.querySelector('[data-archive-act=meta]').onclick = function () { exportSessionRunMeta(s); };
     el.querySelector('[data-archive-act=rename]').onclick = function () {
-      var nt = prompt(TXT.sess.renamePrompt, s.title);
+      var nt = uiPrompt(TXT.sess.renamePrompt, s.title);
       if (nt && nt !== s.title) {
         var renameExpectedRevision = normalizedHistoryRevision(s);
         var renameExpectedInstanceId = normalizedHistoryInstanceId(s, s.dir);
@@ -2881,13 +2936,13 @@
     };
     renderSessionVersions(s, el.querySelector('[data-archive-versions]'));
     el.querySelector('[data-archive-act=delete]').onclick = function () {
-      if (!confirm(TXT.sess.delConfirm + s.title + TXT.sess.delConfirmTail)) return;
+      if (!uiConfirm(TXT.sess.delConfirm + s.title + TXT.sess.delConfirmTail)) return;
       var deleteExpectedRevision = normalizedHistoryRevision(s);
       var deleteExpectedInstanceId = normalizedHistoryInstanceId(s, s.dir || s.id);
-      if (deleteExpectedRevision === null || !deleteExpectedInstanceId) { alert('该历史会话 generation/incarnation 非法，拒绝删除。'); return; }
+      if (deleteExpectedRevision === null || !deleteExpectedInstanceId) { uiAlert('该历史会话 generation/incarnation 非法，拒绝删除。'); return; }
       idbDeleteSessionComplete(s.id, deleteExpectedRevision, deleteExpectedInstanceId).then(function (deleted) {
         if (!deleted) {
-          alert('该会话已被另一页面推进或正在运行，当前删除确认已过期。请刷新历史记录后重新确认。');
+          uiAlert('该会话已被另一页面推进或正在运行，当前删除确认已过期。请刷新历史记录后重新确认。');
           refreshHistoryManager();
           return;
         }
@@ -2895,7 +2950,7 @@
         if (currentSession && currentSession.dir === s.dir) currentSession = null;
         archiveSelectedSessionId = null;
         refreshHistoryManager();
-      }).catch(function (e) { alert(String(e && e.message || e)); });
+      }).catch(function (e) { uiAlert(String(e && e.message || e)); });
     };
   }
   function refreshSessionList() {
@@ -2905,7 +2960,7 @@
       list.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
       var visible = list.filter(function (s) {
         if (!archiveSearchQuery) return true;
-        var haystack = [s.title, statusWord(s.status), s.status, s.updatedAt].join(' ').toLowerCase();
+        var haystack = [s.title, statusWord(s.status), uiLocale.translate(statusWord(s.status), false), s.status, s.updatedAt].join(' ').toLowerCase();
         return haystack.indexOf(archiveSearchQuery) >= 0;
       });
       archiveVisibleCount = visible.length;
@@ -2970,9 +3025,11 @@
       if (ready) stopBtn.disabled = true;
     }
   }
-  function prepareResumeSession(s, runModel, requestedNode, historyRevision, historyInstanceId) {
+  function prepareResumeSession(s, runModel, requestedNode, historyRevision, historyInstanceId, resumePlan) {
     var startNode = requestedNode || 'auto';
-    pendingResume = { dir: s.dir, startNode: startNode, historyRevision: historyRevision, historyInstanceId: historyInstanceId };
+    var requestedNode = resumePlan && resumePlan.requestedNode ? resumePlan.requestedNode : startNode;
+    pendingResume = { dir: s.dir, startNode: startNode, requestedNode: requestedNode, historyRevision: historyRevision, historyInstanceId: historyInstanceId, runModel: runModel || null, resumePlan: resumePlan || null };
+    runLogLines = [];
     var resumeText = engine ? engine.readDebateCopy(s.dir) : null;
     if (resumeText !== null) $('transcript').value = resumeText;
     roundState = {};
@@ -3008,53 +3065,67 @@
     var durableSnapshot = await idbReadSessionSnapshot(s.dir);
     var durableSession = durableSnapshot && durableSnapshot.session;
     var files = durableSnapshot && durableSnapshot.files;
-    if (!durableSession || !files) { alert(TXT.sess.noReport); return; }
+    if (!durableSession || !files) { uiAlert(TXT.sess.noReport); return; }
     var historyRevision = normalizedHistoryRevision(durableSession);
     var historyInstanceId = normalizedHistoryInstanceId(durableSession, durableSession.dir);
-    if (historyRevision === null || !historyInstanceId) { alert('历史会话 history generation/incarnation 非法，拒绝续跑。'); return; }
+    if (historyRevision === null || !historyInstanceId) { uiAlert('历史会话 history generation/incarnation 非法，拒绝续跑。'); return; }
     // 历史 session 只有在 current + immutable receipt chain + provenance + bound views 全部自证后才是续跑 authority。
-    engine.restoreVerifiedTestSession(files, durableSession.dir);
+    var recoveryState = engine.restoreRecoverableTestSession(files, durableSession.dir);
+    if (recoveryState && recoveryState.authorityState !== 'published') logLine('[SemanticFirst] 历史会话按 recovery-only 载入：' + recoveryState.authorityState + ' / ' + recoveryState.resumeClass);
     currentSession = { dir: durableSession.dir, title: durableSession.title, createdAt: durableSession.createdAt };
     settings = applySemanticTestRoute(normalizeSettingsKeys(durableSession.settings) || settings);
     syncSettingsToForm();
     if (settings.baseUrl) $('cfg-base').value = settings.baseUrl;   // Resume 必须沿用该 session 保存的 transport endpoint；preset 只负责 UI 默认值。
-    var runModel = durableSession.run || engine.buildRunModelFromFiles(durableSession.dir, files || {});
-    prepareResumeSession(durableSession, runModel, requestedNode || 'auto', historyRevision, historyInstanceId);
+    var inferredRun = engine.buildRunModelFromFiles(durableSession.dir, files || {}, { error: durableSession.run && durableSession.run.error ? durableSession.run.error : null, plain: settings.plain === true });
+    var runModel = durableSession.run ? Object.assign({}, inferredRun, durableSession.run) : inferredRun;
+    if (inferredRun && inferredRun.postprocess) runModel.postprocess = inferredRun.postprocess;
+    var recoveryOnly = recoveryState && recoveryState.authorityState !== 'published';
+    if (recoveryOnly && (requestedNode || 'auto') !== 'auto') { uiAlert('该会话仍处于 R0 pre-current recovery；请先使用“继续最后断点”完成语义权威建立，不能跨过 R0 直接定点重算 core。'); return; }
+    var resumePlan = recoveryOnly && (requestedNode || 'auto') === 'auto'
+      ? { allowed: true, requestedNode: 'auto', effectiveStartNode: 'auto', invalidatedNodes: [], preservedNodes: [], staleExpansion: [], reasons: ['R0 pre-current semantic recovery'], taskClass: 'precurrent_semantic_recovery' }
+      : engine.planResumeStart({ requestedNode: requestedNode || 'auto', runModel: runModel, settings: settings });
+    if (!resumePlan || !resumePlan.allowed) { uiAlert('续跑规划被拒绝：' + (resumePlan && resumePlan.blockingReason || 'unknown resume plan')); return; }
+    if (resumePlan.noOp) { uiAlert('该历史场次的 core 与所需后处理均已完成，无需续跑。'); return; }
+    var resolvedNode = recoveryOnly ? 'auto' : (resumePlan.effectiveStartNode || requestedNode || 'auto');
+    prepareResumeSession(durableSession, runModel, resolvedNode, historyRevision, historyInstanceId, resumePlan);
   }
   async function exportSessionRecord(s) {
     try {
       var snapshot = await idbReadSessionSnapshot(s.dir);
       var durableSession = snapshot && snapshot.session;
       var files = snapshot && snapshot.files;
-      if (!durableSession || !files) { alert(TXT.sess.noSession); return; }
+      if (!durableSession || !files) { uiAlert(TXT.sess.noSession); return; }
       if (!engine) initEngine();
-      engine.verifyTestSessionFiles(files, durableSession.dir, sessionEvidenceRequiredViews(files, durableSession.dir));
+      var evidenceState = engine.inspectSessionFilesForEvidenceExport(files, durableSession.dir);
       var payload = {
         kind: 'judge-web-session-v1', exportedAt: new Date().toISOString(), workDir: durableSession.dir,
         historyRevision: normalizedHistoryRevision(durableSession),
-        historyInstanceId: normalizedHistoryInstanceId(durableSession, durableSession.dir), files: files,
-        settings: applySemanticTestRoute(Object.assign({}, durableSession.settings || settings)), semanticTest: semanticTestMetadata()
+        historyInstanceId: normalizedHistoryInstanceId(durableSession, durableSession.dir),
+        authorityState: evidenceState.authorityState, resumeClass: evidenceState.resumeClass, canResume: evidenceState.canResume,
+        authorityError: evidenceState.authorityError || null, files: files,
+        settings: applySemanticTestRoute(Object.assign({}, durableSession.settings || settings)), semanticTest: semanticTestMetadata(),
+        sessionRecord: JSON.parse(JSON.stringify(durableSession)), runModel: durableSession.run ? JSON.parse(JSON.stringify(durableSession.run)) : null
       };
       await exportFile(TXT.sess.sessionFile + tsName() + '.json', JSON.stringify(payload, null, 2), 'application/json', { kind: 'history-session' });
-    } catch (e) { alert(String(e && e.message || e)); }
+    } catch (e) { uiAlert(String(e && e.message || e)); }
   }
   async function viewSavedSessionReport(s) {
     if (!engine) initEngine();
     var snapshot = await idbReadSessionSnapshot(s.dir);   // 严格只读且 metadata/files 同一 durable generation。
     var durableSession = snapshot && snapshot.session;
     var files = snapshot && snapshot.files;
-    if (!durableSession || !files) { alert(TXT.sess.noSession); return; }
+    if (!durableSession || !files) { uiAlert(TXT.sess.noSession); return; }
     var workDir = durableSession.dir;
     var reportPath = String(workDir || '').replace(/\/+$/, '') + '/report.html';
     var html = files[reportPath];
     if (typeof html !== 'string' || !html.trim()) {
-      alert('该历史会话没有现成 report.html；“查看报告”不会自动重新生成。');
+      uiAlert('该历史会话没有现成 report.html；“查看报告”不会自动重新生成。');
       return;
     }
     // 只有完整 TEST authority/provenance 自证通过的历史快照才可获得 internal trust。
     // 查看是严格只读动作：只在临时 verification transaction 中安装/回滚，不把历史 authority 留在 live VFS。
     try { engine.verifyTestSessionFiles(files, workDir, ['report']); }
-    catch (e) { alert('历史会话 TEST authority/report binding 验证失败，拒绝展示：' + (e && e.message ? e.message : e)); return; }
+    catch (e) { uiAlert('历史会话 TEST authority/report binding 验证失败，拒绝展示：' + (e && e.message ? e.message : e)); return; }
     closeHistoryManager();
     // workDir=null 故报告页不会把 live VFS 误当作这个只读快照的 session-export authority；档案页仍提供已验真的 session export。
     showReport(html, null, 'internal', '已验真 TEST 历史 report.html');
@@ -3064,7 +3135,7 @@
     var snapshot = await idbReadSessionSnapshot(s.dir);   // 纯读取且 metadata/settings/files 同一 durable generation。
     var durableSession = snapshot && snapshot.session;
     var files = snapshot && snapshot.files;
-    if (!durableSession || !files) { alert(TXT.sess.noSession); return; }
+    if (!durableSession || !files) { uiAlert(TXT.sess.noSession); return; }
     var workDir = durableSession.dir;
     try {
       // 重新出报告只能从已自证 TEST session 开始；verified install + same-version rebuild 必须共享一个 outer rollback transaction，
@@ -3079,7 +3150,7 @@
       currentSession = { dir: workDir, title: durableSession.title, createdAt: durableSession.createdAt };
       showReport(html, workDir, 'internal', '已验真 TEST 历史重建 report.html');
     } catch (e) {
-      alert(TXT.sess.noReport + (e && e.message ? e.message : e));
+      uiAlert(TXT.sess.noReport + (e && e.message ? e.message : e));
     }
   }
 
@@ -3126,10 +3197,10 @@
     var winner = summary.winner || '裁决已生成';
     var why = summary.why || '';
     var clash = summary.keyClash || '';
-    el.innerHTML = '<div class="report-cover-kicker">Verdict</div><h2>' + esc(winner) + '</h2>' +
+    el.innerHTML = '<div class="report-cover-kicker">Verdict</div><h2>' + uiContent(winner) + '</h2>' +
       (summary.reportTitle ? '<div class="report-cover-title">' + esc(summary.reportTitle) + '</div>' : '') +
-      (why ? '<div class="report-cover-reason"><b>为什么：</b>' + esc(why) + '</div>' : '<div class="report-cover-reason"><button class="btn small" data-report-jump="C1">查看 C1</button></div>') +
-      (clash ? '<div class="report-cover-clash"><b>关键交锋：</b>' + esc(clash) + '</div>' : '<div class="report-cover-clash"><button class="btn small" data-report-jump="C6">查看 C6 关键交锋</button></div>');
+      (why ? '<div class="report-cover-reason"><b>为什么：</b>' + uiContent(why) + '</div>' : '<div class="report-cover-reason"><button class="btn small" data-report-jump="C1">查看 C1</button></div>') +
+      (clash ? '<div class="report-cover-clash"><b>关键交锋：</b>' + uiContent(clash) + '</div>' : '<div class="report-cover-clash"><button class="btn small" data-report-jump="C6">查看 C6 关键交锋</button></div>');
     Array.prototype.forEach.call(el.querySelectorAll('[data-report-jump]'), function (btn) {
       btn.onclick = function () { navigateReportSection(btn.getAttribute('data-report-jump'), true); };
     });
@@ -3201,7 +3272,7 @@
     if (!reportHost) reportHost = reportHostMod.createReportHost({
       frame: $('report-frame'),
       exportFile: function (blob, filename, meta) { return judgeHostIO.saveBlob(blob, filename, meta || { kind: 'hosted-report-download' }); },
-      onExportError: function (e) { alert('报告内部导出失败：' + (e && e.message ? e.message : e)); },
+      onExportError: function (e) { uiAlert('报告内部导出失败：' + (e && e.message ? e.message : e)); },
       onReady: function (doc) {
         if (doc && doc.trust === 'internal' && reportHost) {
           reportHost.setTheme(settings.theme);
@@ -3293,7 +3364,7 @@
   function exportFile(name, content, type, meta) {
     var blob = content instanceof Blob ? content : new Blob([content], { type: type || 'application/octet-stream' });
     return judgeHostIO.saveBlob(blob, name, meta || { mimeType: type || 'application/octet-stream' }).catch(function (e) {
-      alert('导出失败：' + (e && e.message ? e.message : e));
+      uiAlert('导出失败：' + (e && e.message ? e.message : e));
       return { ok: false, error: e };
     });
   }
@@ -3364,9 +3435,16 @@
   }
   function updateFlightExportSelectionState() {
     var btn = $('fr-export-all');
+    var toggle = $('fr-select-all');
+    var boxes = historyOverlay ? historyOverlay.querySelectorAll('#fr-session-select input[type=checkbox]') : [];
     if (!btn) return;
     var selected = Object.keys(archiveFlightSelectedSessionIds).filter(function (id) { return !!archiveFlightSelectedSessionIds[id]; });
     btn.disabled = !flightRecorder || !selected.length;
+    if (toggle) {
+      var allSelected = boxes.length > 0 && Array.prototype.every.call(boxes, function (box) { return !!box.checked; });
+      toggle.textContent = allSelected ? TXT.flight.selectNone : TXT.flight.selectAll;
+      toggle.disabled = !boxes.length;
+    }
   }
   function renderFlightSessionSelector() {
     var host = $('fr-session-select');
@@ -3390,7 +3468,7 @@
       host.innerHTML = list.map(function (s) {
         var checked = archiveFlightSelectedSessionIds[s.id] ? ' checked' : '';
         var workDir = s.dir || s.id || '';
-        return '<label class="archive-flight-session-option"><input type="checkbox" value="' + esc(s.id) + '"' + checked + '><span><b>' + esc(s.title || workDir) + '</b><small>' + esc(workDir) + ' · ' + esc(statusWord(s.status)) + '</small></span></label>';
+        return '<label class="archive-flight-session-option"><input type="checkbox" value="' + esc(s.id) + '"' + checked + '><span><b>' + esc(s.title || workDir) + '</b><small>' + uiContent(workDir) + ' · <span>' + esc(statusWord(s.status)) + '</span>' + '</small></span></label>';
       }).join('');
       Array.prototype.forEach.call(host.querySelectorAll('input[type=checkbox]'), function (box) {
         box.onchange = function () { archiveFlightSelectedSessionIds[box.value] = !!box.checked; updateFlightExportSelectionState(); };
@@ -3403,6 +3481,184 @@
       return [];
     });
   }
+  async function collectFlightSourceForSession(s) {
+    var workDir = s && (s.dir || s.id) || '';
+    var sessionHistoryInstanceId = normalizedHistoryInstanceId(s, workDir);
+    var flightRuns = [];
+    if (flightRecorder && workDir && sessionHistoryInstanceId) {
+      var allRuns = await flightRecorder.listRuns();
+      var matchedRuns = (allRuns || []).filter(function (r) {
+        return flightRunMatchesHistory(r, workDir, sessionHistoryInstanceId);
+      }).slice();
+      matchedRuns.sort(function (a, b) { return String(a.startedAt || '').localeCompare(String(b.startedAt || '')); });
+      for (var ri = 0; ri < matchedRuns.length; ri++) {
+        var run = matchedRuns[ri];
+        var reqs = await flightRecorder.listRequests(run.id);
+        var requestSources = [];
+        for (var qi = 0; qi < reqs.length; qi++) {
+          var req = reqs[qi];
+          var artifact = await flightRecorder.getRequestArtifact(req.id);
+          requestSources.push({
+            record: artifact && artifact.request ? artifact.request : req,
+            requestText: artifact && artifact.request ? artifact.requestText : String(req.requestBodyText || ''),
+            rawBytes: artifact && artifact.rawBytes ? artifact.rawBytes : new Uint8Array(0),
+            actualRawBytes: artifact && artifact.actualRawBytes != null ? artifact.actualRawBytes : 0,
+            actualChunkCount: artifact && artifact.actualChunkCount != null ? artifact.actualChunkCount : 0,
+            readError: artifact && artifact.readError ? artifact.readError : null
+          });
+        }
+        flightRuns.push({ run: JSON.parse(JSON.stringify(run)), requests: requestSources });
+      }
+    }
+    var flightSessionRecord = JSON.parse(JSON.stringify(s || {}));
+    flightSessionRecord.historyRevision = normalizedHistoryRevision(s, workDir);
+    flightSessionRecord.historyInstanceId = sessionHistoryInstanceId;
+    return {
+      sessionRecord: flightSessionRecord,
+      runModel: s && s.run == null ? null : JSON.parse(JSON.stringify(s && s.run || null)),
+      flightRuns: flightRuns
+    };
+  }
+
+  async function exportSessionDebugBundle(s, liveCapture) {
+    try {
+      if (!engine) initEngine();
+      var snapshot = s && s.dir ? await idbReadSessionSnapshot(s.dir) : null;
+      var durableSession = snapshot && snapshot.session;
+      var files = snapshot && snapshot.files;
+      var workDir = durableSession && durableSession.dir || (currentSession && currentSession.dir) || (pendingResume && pendingResume.dir) || '';
+      if (!workDir) { uiAlert('当前没有可导出的 Judge 会话。'); return; }
+
+      if (!durableSession) {
+        durableSession = {
+          id: workDir, dir: workDir, title: currentSession && currentSession.title || workDir.split('/').pop(),
+          createdAt: currentSession && currentSession.createdAt || null, updatedAt: new Date().toISOString(),
+          status: running ? 'running' : 'intermediate', reportReady: false,
+          settings: JSON.parse(JSON.stringify(settings)), run: null,
+          historyRevision: persistHistoryRevision, historyInstanceId: persistHistoryInstanceId
+        };
+      }
+      if (!files) files = engine.snapshotSession(workDir);
+      if (liveCapture) {
+        var liveFiles = engine.snapshotSession(workDir);
+        if (liveFiles && Object.keys(liveFiles).length) files = liveFiles;
+      }
+      var evidenceState = engine.inspectSessionFilesForEvidenceExport(files, workDir);
+      var exportedAt = new Date().toISOString();
+      var logPath = workDir.replace(/\/+$/, '') + '/.tmp-ui-run-log.txt';
+      var logText = (liveCapture || (running && currentSession && currentSession.dir === workDir))
+        ? runLogLines.join('\n') + (runLogLines.length ? '\n' : '')
+        : String(files[logPath] || '');
+      var sessionPayload = {
+        kind: 'judge-web-session-v1', exportedAt: exportedAt, workDir: workDir,
+        historyRevision: normalizedHistoryRevision(durableSession),
+        historyInstanceId: normalizedHistoryInstanceId(durableSession, workDir),
+        authorityState: evidenceState.authorityState, resumeClass: evidenceState.resumeClass,
+        canResume: evidenceState.canResume, authorityError: evidenceState.authorityError || null,
+        files: files,
+        settings: applySemanticTestRoute(Object.assign({}, durableSession.settings || settings)),
+        semanticTest: semanticTestMetadata(),
+        sessionRecord: JSON.parse(JSON.stringify(durableSession)),
+        runModel: durableSession.run ? JSON.parse(JSON.stringify(durableSession.run)) : null
+      };
+      var flightSource = await collectFlightSourceForSession(durableSession);
+      var flightArchive = flightExportMod && typeof flightExportMod.buildFlightExportArchive === 'function'
+        ? flightExportMod.buildFlightExportArchive({ sessions: [flightSource], exportedAt: exportedAt })
+        : null;
+      var flightManifest = flightArchive && flightArchive.manifest ? flightArchive.manifest : null;
+      var missingEvidence = flightManifest && Array.isArray(flightManifest.missing)
+        ? JSON.parse(JSON.stringify(flightManifest.missing)) : [];
+      var truncatedEvidence = [];
+      var mismatchEvidence = [];
+      if (flightManifest && Array.isArray(flightManifest.sessions)) {
+        flightManifest.sessions.forEach(function (fmSession) {
+          (fmSession.flightRuns || []).forEach(function (fmRun) {
+            var runId = fmRun.runId || null;
+            if (fmRun.capture_truncated) truncatedEvidence.push({ scope: 'run', runId: runId, reason: 'capture_truncated' });
+            (fmRun.missing || []).forEach(function (item) {
+              missingEvidence.push({ session: workDir, runId: runId, item: item });
+            });
+            (fmRun.mismatch || []).forEach(function (item) {
+              mismatchEvidence.push({ scope: 'run', runId: runId, item: item });
+            });
+            (fmRun.requests || []).forEach(function (fmReq) {
+              if (fmReq.capture_truncated) {
+                truncatedEvidence.push({
+                  scope: 'request', runId: runId, requestId: fmReq.requestId || null, index: fmReq.index || null,
+                  reason: fmReq.capture_truncated_reason || 'capture_truncated'
+                });
+              }
+              (fmReq.missing || []).forEach(function (item) {
+                missingEvidence.push({ session: workDir, runId: runId, requestId: fmReq.requestId || null, item: item });
+              });
+              (fmReq.mismatch || []).forEach(function (item) {
+                mismatchEvidence.push({ scope: 'request', runId: runId, requestId: fmReq.requestId || null, item: item });
+              });
+            });
+          });
+        });
+      } else {
+        missingEvidence.push({ session: workDir, item: 'flight_evidence_archive_unavailable' });
+      }
+      var manifest = {
+        kind: 'judge-web-debug-bundle-v1', version: 1, exportedAt: exportedAt,
+        captureState: liveCapture || (running && currentSession && currentSession.dir === workDir) ? 'live/intermediate' : 'durable-history',
+        workDir: workDir,
+        historyRevision: normalizedHistoryRevision(durableSession),
+        historyInstanceId: normalizedHistoryInstanceId(durableSession, workDir),
+        authorityState: evidenceState.authorityState,
+        resumeClass: evidenceState.resumeClass,
+        canResume: evidenceState.canResume,
+        authorityError: evidenceState.authorityError || null,
+        reportReady: !!durableSession.reportReady,
+        flightRunCount: flightSource.flightRuns.length,
+        missing: missingEvidence,
+        truncated: truncatedEvidence,
+        mismatch: mismatchEvidence,
+        exportStatus: {
+          sessionSnapshotPresent: !!snapshot,
+          sessionFilesPresent: !!files,
+          flightArchivePresent: !!flightArchive,
+          semanticAuthorityRequired: false
+        },
+        notes: [
+          'Debug bundle is evidence/export material; it does not upgrade staging data into Judge authority.',
+          'flight/flight-evidence.zip retains the existing Flight Recorder evidence manifest and raw SSE format.',
+          'Missing, truncated, and mismatched evidence is listed explicitly above and is never reconstructed.',
+          'No API key is included.'
+        ]
+      };
+      var entries = [
+        { path: 'manifest.json', data: JSON.stringify(manifest, null, 2) + '\n' },
+        { path: 'session/session-record.json', data: JSON.stringify(durableSession, null, 2) + '\n' },
+        { path: 'session/run-model.json', data: JSON.stringify(durableSession.run || null, null, 2) + '\n' },
+        { path: 'session/session-export.json', data: JSON.stringify(sessionPayload, null, 2) + '\n' },
+        { path: 'session/files.json', data: JSON.stringify(files, null, 2) + '\n' },
+        { path: 'session/metadata.json', data: JSON.stringify({ settings: durableSession.settings || {}, estimatedTokensTotal: durableSession.estimatedTokensTotal || null }, null, 2) + '\n' },
+        { path: 'logs/Judge-run-log.txt', data: '\ufeff' + logText },
+        { path: 'authority/status.json', data: JSON.stringify(evidenceState, null, 2) + '\n' },
+        { path: 'debug/environment.json', data: JSON.stringify({ semanticTest: semanticTestMetadata(), uiLocale: uiLocale && uiLocale.getLocale ? uiLocale.getLocale() : null, exportedAt: exportedAt }, null, 2) + '\n' },
+        { path: 'debug/export-status.json', data: JSON.stringify({ captureState: manifest.captureState, workDir: workDir, authorityState: manifest.authorityState, resumeClass: manifest.resumeClass, reportReady: manifest.reportReady, missing: manifest.missing, truncated: manifest.truncated, mismatch: manifest.mismatch, exportStatus: manifest.exportStatus }, null, 2) + '\n' }
+      ];
+      if (flightArchive) entries.push({ path: 'flight/flight-evidence.zip', data: flightArchive.bytes });
+      else entries.push({ path: 'flight/README.txt', data: 'Flight Recorder export module unavailable or Recorder not initialized.\n' });
+      if (!flightExportMod || typeof flightExportMod.makeZip !== 'function') throw new Error('Debug ZIP builder 当前不可用');
+      var bytes = flightExportMod.makeZip(entries);
+      await exportFile('Judge-Debug-Bundle-' + tsName() + '.zip', bytes, 'application/zip', { kind: 'judge-debug-bundle', workDir: workDir, captureState: manifest.captureState });
+    } catch (e) {
+      uiAlert('Debug 数据导出失败：' + (e && e.message ? e.message : e));
+    }
+  }
+
+  async function exportCurrentDebugBundle() {
+    var s = null;
+    var workDir = currentSession && currentSession.dir ? currentSession.dir : (pendingResume && pendingResume.dir ? pendingResume.dir : '');
+    if (workDir) {
+      try { s = await idbGet(workDir); } catch (_) {}
+    }
+    return exportSessionDebugBundle(s || (workDir ? { id: workDir, dir: workDir } : null), true);
+  }
+
   async function exportSelectedFlightRecords() {
     var status = $('fr-export-status');
     if (!flightRecorder || !flightExportMod || typeof flightExportMod.buildFlightExportArchive !== 'function') {
@@ -3505,7 +3761,7 @@
           var ordinal = ordinals[run.id] || '—';
           var shortRunId = String(run.id || '').slice(-12);
           html += '<div class="card archive-flight-run"><div class="card-b" style="display:block">' +
-            '<div class="archive-flight-run-title">本场运行 ' + esc(ordinal) + ' · ' + esc(formatFlightRunRange(run)) + ' · ' + esc(g.requests.length) + ' requests</div>' +
+            '<div data-ui-summary class="archive-flight-run-title">本场运行 ' + esc(ordinal) + ' · ' + esc(formatFlightRunRange(run)) + ' · ' + esc(g.requests.length) + ' requests</div>' +
             '<div class="hint" style="user-select:text">' + esc(run.provider || '') + ' · ' + esc(run.model || '') + ' · ' + esc(run.status || '') +
             (run.captureTruncated ? ' · ⚠ capture_truncated' : '') + '</div>' +
             '<div class="hint" style="user-select:text;margin-top:3px">workDir: ' + esc(run.workDir || '—') + ' · runId: ' + esc(shortRunId || '—') + '</div>';
@@ -3533,7 +3789,7 @@
             var requestId = btn.getAttribute('data-fr-id');
             var kind = btn.getAttribute('data-fr-export');
             flightRecorder.getRequestArtifact(requestId).then(function (a) {
-              if (!a || !a.request) { alert('飞行记录读取失败'); return; }
+              if (!a || !a.request) { uiAlert('飞行记录读取失败'); return; }
               var base = 'judge-web-flight-' + String(a.request.runId || 'run').replace(/[^A-Za-z0-9._-]/g, '_') + '-r' + a.request.index;
               if (kind === 'request') exportFile(base + '-request.json', a.requestText, 'application/json', { kind: 'flight-request' });
               else if (kind === 'raw') exportFile(base + '-response.sse.raw', a.rawBytes, 'application/octet-stream', { kind: 'flight-raw' });
@@ -3734,14 +3990,14 @@
         '<code style="font-size:13px;user-select:text;overflow-wrap:anywhere">' + esc(id) + '</code>' +
         '<span style="display:flex;gap:6px"><button class="btn small model-use" type="button" data-model="' + esc(id) + '">' + TXT.setup.modelUse + '</button>' +
         '<button class="btn small model-copy" type="button" data-model="' + esc(id) + '">' + TXT.setup.modelCopy + '</button></span></div>' +
-        (meta.length ? '<div class="hint" style="margin-top:5px">' + meta.map(esc).join(' · ') + '</div>' : '') +
+        (meta.length ? '<div class="hint" style="margin-top:5px">' + meta.map(function (part) { return part.indexOf('所属：') === 0 ? '<span>所属：</span>' + uiContent(part.slice(3)) : '<span data-ui-summary>' + esc(part) + '</span>'; }).join(' · ') + '</div>' : '') +
         '</div>';
     }).join('');
   }
   function copyModelText(text, button) {
     function done() {
       if (!button) return;
-      var old = button.textContent;
+      var old = uiLocale.originalText(button);
       button.textContent = TXT.setup.modelCopied;
       setTimeout(function () { button.textContent = old; }, 1200);
     }
@@ -3832,7 +4088,7 @@
       var expectedHistoryRevision = Number(opts.expectedHistoryRevision);
       var expectedHistoryInstanceId = String(opts.expectedHistoryInstanceId || '');
       if (!Number.isInteger(expectedHistoryRevision) || expectedHistoryRevision < 0 || !expectedHistoryInstanceId) {
-        alert('续跑缺少合法 history generation/incarnation；请重新从历史记录载入。');
+        uiAlert('续跑缺少合法 history generation/incarnation；请重新从历史记录载入。');
         return;
       }
       persistHistoryRevision = expectedHistoryRevision;
@@ -3847,10 +4103,15 @@
       transcript = resumeText;
       $('transcript').value = transcript;
     }
-    if (!transcript.trim()) { alert(TXT.alert.noTranscript); return; }
+    if (!transcript.trim()) { uiAlert(TXT.alert.noTranscript); return; }
     if (!commitJudgeContextFromForm(true)) return;
     readFormSettings();
-    if (settings.provider !== 'mock' && !API_KEY) { alert(TXT.alert.noKey); return; }
+    if (settings.provider !== 'mock' && !API_KEY) { uiAlert(TXT.alert.noKey); return; }
+
+    if (opts.resumeDir) {
+      $('run-status').textContent = '正在准备续跑：核验本地历史、断点与运行记录（尚未调用 API）';
+      setTribunalCurrentRound(null, '准备续跑 · 本地校验');
+    }
 
     // “本次累计”每次启动从 0 计；“本场累计”以同一 workDir 的历史持久值为基线。
     // 旧会话没有 estimatedTokensTotal 时，尝试用 Flight Recorder 同 workDir 的正文/思考字数按同一估算公式回填；
@@ -3871,8 +4132,11 @@
     // 非 auto 定点续跑：任何 rewind / 新 epoch 之前，先把当前正式终态固化为不可变只读版本。
     // snapshot 失败直接返回；此时 running=false、旧 FINAL/R* 未动、engine.runSession 尚未进入，因此 paid request=0。
     var resumeStartNode = opts.resumeStartNode || 'auto';
+    var resumeRequestedNode = opts.resumeRequestedNode || resumeStartNode;
+    var explicitTargetedResume = !!opts.resumeDir && resumeRequestedNode !== 'auto';
     var resumeVersionRecord = null;
-    if (opts.resumeDir && resumeStartNode !== 'auto') {
+    // “继续最后断点”即使 planner 的实际起点解析为 R8，也不是用户主动定点重算；只有显式指定节点才归档旧终态版本。
+    if (opts.resumeDir && explicitTargetedResume) {
       try {
         var versionSnapshot = await idbReadSessionSnapshot(opts.resumeDir);
         var versionSession = versionSnapshot && versionSnapshot.session;
@@ -3889,7 +4153,7 @@
         resumeVersionRecord = idbCreateSessionVersionSnapshot(versionSession, versionFiles);
         opts.resumeVersionId = resumeVersionRecord.versionId;
       } catch (versionErr) {
-        alert('定点续跑未启动：旧版本归档失败。' + (versionErr && versionErr.message ? versionErr.message : versionErr));
+        uiAlert('定点续跑未启动：旧版本归档失败。' + (versionErr && versionErr.message ? versionErr.message : versionErr));
         return;
       }
     }
@@ -3904,11 +4168,13 @@
     $('btn-run').disabled = true;
     $('btn-stop').disabled = false;
     $('btn-sessions').disabled = true;
+    runLogLines = [];
     $('logbox').innerHTML = '';
     roundState = {};
     if (!settings.plain) roundState.R7 = 'skipped';
     if (settings.readerGuide !== true) roundState.R8 = 'skipped';
-    setTribunalCurrentRound(roundSteps()[0], '准备裁决');
+    r0Substage = null;
+    setTribunalCurrentRound(PRECORE_STEP, '准备语义权威');
     retryCount = 0;
     anchorLabel = '';
     persistFileBase = null;   // C5：本 run 内存基线重置（BASE 首写时初始化）
@@ -3935,6 +4201,7 @@
         force: !!opts.force,
         resumeDir: opts.resumeDir || null,
         resumeStartNode: opts.resumeStartNode || 'auto',
+        resumeRunModel: opts.resumeRunModel || null,
         abortSignal: abortController.signal,   // W-T10：引擎层中止信号（apiStub 前置检查 + P3-1 进行中请求合并）
         onLog: logLine,
         onRoster: function (info) {
@@ -3952,9 +4219,10 @@
           liveProgress = null;   // 每轮结束先结算当前 API attempt，再重置为下一轮自己的遥测
           liveStage = null;
           liveLastAt = Date.now();
+          if (roundState.R0 === 'active') roundState.R0 = 'done';
           if (r.gate) { retryCount++; }
-          if (r.ok && r.skipped) { markRound(r.round, 'skipped'); activateNextTribunalRound(r.round); logLine(TXT.run.logSkip + r.round + TXT.run.logSkipTail); }
-          else if (r.ok) { markRound(r.round, 'done'); activateNextTribunalRound(r.round); logLine(TXT.run.logDone + r.round + TXT.run.logDoneTail); }
+          if (r.ok && r.skipped) { if (roundState.R0 === 'active') roundState.R0 = 'done'; markRound(r.round, 'skipped'); activateNextTribunalRound(r.round); logLine(TXT.run.logSkip + r.round + TXT.run.logSkipTail); }
+          else if (r.ok) { if (roundState.R0 === 'active') roundState.R0 = 'done'; markRound(r.round, 'done'); activateNextTribunalRound(r.round); logLine(TXT.run.logDone + r.round + TXT.run.logDoneTail); }
           else {
             markRound(r.round, 'fail');
             var post = !!r.postprocess;
@@ -3969,7 +4237,7 @@
           if (isSemanticFirstStage(s.stage) || s.semanticFirst) {
             if (state === 'active') {
               if (!liveStage) {
-                var formalSteps = roundSteps();
+                var formalSteps = roundSteps().filter(function (name) { return name !== PRECORE_STEP; });
                 semanticReturnRound = formalSteps.find(function (name) { return roundState[name] === 'active'; }) || semanticReturnRound;
               }
               liveStage = s.stage;
@@ -3983,13 +4251,19 @@
               liveLastAt = Date.now();
               logLine('[SemanticFirst] 完成：' + roundLabel(s.stage));
               if (semanticReturnRound) setTribunalCurrentRound(semanticReturnRound, '等待下一步');
-              else setTribunalTransientStage(s.stage, '完成');
+              else {
+                setTribunalTransientStage(s.stage, '完成');
+                if (s.stage === 'sc-fidelity') { roundState.R0 = 'done'; renderTimeline(PRECORE_STEP); }
+              }
             } else if (state === 'fail') {
               commitLiveEstimate();
               liveProgress = null;
               liveStage = null;
               liveLastAt = Date.now();
-              setTribunalTransientStage(s.stage, '失败');
+              var failNote = semanticReturnRound
+                ? ('失败 · ' + semanticReturnRound + ' 暂停，等待语义恢复')
+                : '失败 · R1 尚未开始';
+              setTribunalTransientStage(s.stage, failNote);
               logLine('[SemanticFirst] 失败：' + roundLabel(s.stage) + (s.errors && s.errors.length ? '：' + s.errors.join('; ') : ''));
             }
             updateLiveIndicator();
@@ -4043,7 +4317,7 @@
               return persistSession(dir, { filesOp: 'plain-state', phase: checkpointPhase });
             }
             if (checkpointPhase === 'r8-guide-draft' || checkpointPhase === 'r8-core-cache' || checkpointPhase === 'r8-plain-draft' ||
-                checkpointPhase === 'r8-plain-review' || checkpointPhase === 'r8-plain-repair-draft') {
+                checkpointPhase === 'r8-plain-review' || checkpointPhase === 'r8-plain-repair-draft' || checkpointPhase === 'r8-upstream-review') {
               return persistSession(dir, { filesOp: 'r8-checkpoint', phase: checkpointPhase });
             }
             return persistSession(dir, { filesOp: 'plain-batch', batchIndex: payload && payload.index });
@@ -4084,9 +4358,12 @@
         currentSession = { dir: res.workDir, title: res.workDir.split('/').pop(), createdAt: new Date().toISOString() };
         // terminal FINAL 已由 engine 的必达 persist hook 原子提交；UI 只投影结果，禁止第二次独立写盘制造新的半提交窗口。
         refreshSessionList();
-        if (res.reportHtml) {
-          showReport(res.reportHtml, res.workDir, 'internal', 'PRODUCTION_ACTIVE run report.html');
-          logLine(TXT.run.logReportDone + res.reportFile + '（' + fmtBytes(res.reportHtml.length) + '）');
+        var terminalReportHtml = res.reportHtml || (engine && res.workDir ? engine.readReportHtml(res.workDir) : null);
+        if (terminalReportHtml) {
+          showReport(terminalReportHtml, res.workDir, 'internal',
+            res.reportHtml ? 'PRODUCTION_ACTIVE run report.html' : 'PRODUCTION_ACTIVE canonical VFS report.html fallback');
+          logLine(TXT.run.logReportDone + (res.reportFile || 'report.html') + '（' + fmtBytes(terminalReportHtml.length) + '）' +
+            (res.reportHtml ? '' : ' · canonical VFS fallback'));
         } else {
           logLine(TXT.run.logReportMissing);
         }
@@ -4117,14 +4394,25 @@
     if (abortController) abortController.abort();
   }
   function startPreparedResume() {
-    if (!pendingResume || running) return;
+    if (!pendingResume || running || resumePreparing) return;
     var pending = {
-      dir: pendingResume.dir, startNode: pendingResume.startNode || 'auto', historyRevision: pendingResume.historyRevision,
-      historyInstanceId: pendingResume.historyInstanceId
+      dir: pendingResume.dir, startNode: pendingResume.startNode || 'auto', requestedNode: pendingResume.requestedNode || 'auto',
+      historyRevision: pendingResume.historyRevision, historyInstanceId: pendingResume.historyInstanceId,
+      runModel: pendingResume.runModel || null, resumePlan: pendingResume.resumePlan || null
     };
-    startRun({
-      resumeDir: pending.dir, force: false, resumeStartNode: pending.startNode || 'auto',
-      expectedHistoryRevision: pending.historyRevision, expectedHistoryInstanceId: pending.historyInstanceId
+    // 锁必须在任何 IndexedDB / Flight / 版本快照 await 之前建立，否则“看似没反应”期间重复点击可并发启动第二条续跑。
+    resumePreparing = true;
+    setResumeReadyState(false);
+    $('run-status').textContent = '正在准备续跑：本地校验中（尚未调用 API）';
+    Promise.resolve(startRun({
+      resumeDir: pending.dir, force: false, resumeStartNode: pending.startNode || 'auto', resumeRequestedNode: pending.requestedNode || 'auto',
+      resumeRunModel: pending.runModel, expectedHistoryRevision: pending.historyRevision, expectedHistoryInstanceId: pending.historyInstanceId
+    })).catch(function (e) {
+      console.error('[judge-web TEST] 续跑启动失败:', e);
+      uiAlert('续跑启动失败：' + (e && e.message ? e.message : e));
+    }).then(function () {
+      resumePreparing = false;
+      if (!running && pendingResume) setResumeReadyState(true);
     });
   }
 
@@ -4146,9 +4434,9 @@
     var el = $('upload-config-summary');
     if (!el) return;
     var providerEl = $('cfg-provider'), modelEl = $('cfg-model'), thinkingEl = $('cfg-thinking');
-    var provider = providerEl && providerEl.selectedIndex >= 0 ? providerEl.options[providerEl.selectedIndex].text : String(settings.provider || '');
+    var provider = providerEl && providerEl.selectedIndex >= 0 ? uiLocale.originalText(providerEl.options[providerEl.selectedIndex]) : String(settings.provider || '');
     var model = modelEl ? modelEl.value.trim() : String(settings.model || '');
-    var thinking = thinkingEl && thinkingEl.selectedIndex >= 0 ? thinkingEl.options[thinkingEl.selectedIndex].text : String(settings.thinking || '');
+    var thinking = thinkingEl && thinkingEl.selectedIndex >= 0 ? uiLocale.originalText(thinkingEl.options[thinkingEl.selectedIndex]) : String(settings.thinking || '');
     var plain = $('opt-plain') && $('opt-plain').checked ? '白话：开' : '白话：关';
     var guide = $('opt-reader-guide') && $('opt-reader-guide').checked ? '导览：开' : '导览：关';
     var depth = [];
@@ -4156,7 +4444,7 @@
       var d = $(['depth-verdict','depth-mainline','depth-clash'][i]);
       if (d) depth.push(d.value);
     }
-    el.textContent = provider + ' · ' + model + '\n' + thinking + ' · ' + plain + ' · ' + guide + '\n深度：' + depth.join(' / ') + '\n倾向：' + tendencySummaryText() + '\n额外设定：' + contextSummaryText();
+    el.innerHTML = '<span data-ui-summary>' + esc(provider) + '</span> · ' + uiContent(model) + '<br><span data-ui-summary>' + esc(thinking + ' · ' + plain + ' · ' + guide) + '<br>' + esc('深度：' + depth.join(' / ')) + '<br>' + esc('倾向：' + tendencySummaryText()) + '<br>' + esc('额外设定：' + contextSummaryText()) + '</span>';
   }
   function renderUploadFileList(files) {
     var el = $('upload-file-list');
@@ -4180,7 +4468,7 @@
       var f = pending.shift();
       if (!f) {
         if (allText) { $('transcript').value = allText; $('file-info').style.display = 'block'; $('file-info').textContent = TXT.files.loaded + (allText.length / 1024).toFixed(1) + TXT.files.loadedTail; updateTokenWarn(); }
-        if (errors.length) alert(TXT.files.readFail + errors.join('\n'));
+        if (errors.length) uiAlert(TXT.files.readFail + errors.join('\n'));
         return;
       }
       var ext = f.name.split('.').pop().toLowerCase();
@@ -4280,12 +4568,12 @@
     (NATIVE_FETCH || window.fetch)(url, init)
       .then(function (r) {
         clearTimeout(timer);
-        if (r.ok) { el.textContent = TXT.api.ok + r.status + TXT.api.okTail; el.style.color = 'var(--green)'; }
-        else { el.textContent = TXT.api.warn + r.status + TXT.api.warnTail; el.style.color = 'var(--gold)'; }
+        if (r.ok) { el.innerHTML = '<span>' + esc(TXT.api.ok) + '</span>' + esc(r.status) + '<span>' + esc(TXT.api.okTail) + '</span>'; el.style.color = 'var(--green)'; }
+        else { el.innerHTML = '<span>' + esc(TXT.api.warn) + '</span>' + esc(r.status) + '<span>' + esc(TXT.api.warnTail) + '</span>'; el.style.color = 'var(--gold)'; }
       })
       .catch(function (e) {
         clearTimeout(timer);
-        el.textContent = TXT.api.fail + (e && e.message ? e.message : e) + TXT.api.failTail;
+        el.innerHTML = '<span>' + esc(TXT.api.fail) + '</span>' + uiContent(e && e.message ? e.message : e) + '<span>' + esc(TXT.api.failTail) + '</span>';
         el.style.color = 'var(--red)';
       });
   }
@@ -4310,6 +4598,7 @@
       '<h2 id="tend-help-title">' + TXT.tend.helpTitle + '</h2>' +
       '<div style="font-size:13px;line-height:1.9">' +
       TXT.tend.helpP1 + TXT.tend.helpP2 + TXT.tend.helpP3 + TXT.tend.helpP4 + TXT.tend.helpP5 +
+      '<p class="hint">术语说明：三维六向度是本项目的评价框架。证明关注论证的支持与拆解；理性和感性分别侧重常识共鸣与情境体验；场面感关注回应、论证责任和赛场规则的运用；意义感关注价值理由的深度。英文为说明性译名，不代表国际通用评分分类。</p>' +
       '</div>' +
       '<div class="modal-btns"><button class="btn primary" id="help-close">' + TXT.tend.helpClose + '</button></div></div>';
     document.body.appendChild(ov);
@@ -4333,7 +4622,7 @@
         var durable = false;
         try {
           payload = JSON.parse(ev.target.result);
-          if (payload.kind !== 'judge-web-session-v1' || !payload.workDir || !payload.files) { alert(TXT.sess.notValid); return; }
+          if (payload.kind !== 'judge-web-session-v1' || !payload.workDir || !payload.files) { uiAlert(TXT.sess.notValid); return; }
           assertSemanticTestMetadata(payload.semanticTest);
           if (!engine) initEngine();
           // Import is create-only. A previously exported but still-valid package must never roll an existing local
@@ -4352,9 +4641,13 @@
           priorTargetFiles = existingLiveFiles;
           // Import may carry a valid intermediate semantic state without report.html. If it does carry the canonical
           // report, prove that concrete presentation view before installing/persisting the archive.
-          engine.verifyTestSessionFiles(payload.files, payload.workDir,
-            sessionEvidenceRequiredViews(payload.files, payload.workDir));
-          engine.restoreVerifiedTestSession(payload.files, payload.workDir);
+          var importEvidenceState = engine.inspectSessionFilesForEvidenceExport(payload.files, payload.workDir);
+          if (!importEvidenceState.canResume) throw new Error('导入会话缺少可恢复的 Judge session 输入');
+          // Import can carry published authority or recovery-only pre-current staging; classification never upgrades staging into authority.
+
+
+
+          engine.restoreRecoverableTestSession(payload.files, payload.workDir);
           installed = true;
           // The imported envelope may preserve analysis/presentation preferences, but it cannot choose the receiver's
           // provider endpoint/model transport or skipRosterConfirm. Those remain the explicit local configuration.
@@ -4364,6 +4657,26 @@
           var ok = await persistSession(payload.workDir, { filesOp: 'final', importCreateOnly: true });
           if (!ok) throw new Error('导入会话持久化失败');
           durable = true;
+          if (payload.sessionRecord || payload.runModel) {
+            var importedMeta = await idbGet(payload.workDir);
+            var importedRevision = normalizedHistoryRevision(importedMeta);
+            var importedInstanceId = normalizedHistoryInstanceId(importedMeta, payload.workDir);
+            if (importedMeta && importedRevision !== null && importedInstanceId) {
+              var sourceRecord = payload.sessionRecord && typeof payload.sessionRecord === 'object' ? payload.sessionRecord : {};
+              var sourceRun = payload.runModel || sourceRecord.run || null;
+              var sourceStatus = String(sourceRecord.status || (sourceRun && sourceRun.summary && sourceRun.summary.derivedStatus) || '');
+              var allowedImportedStatus = ['done', 'failed', 'aborted', 'interrupted'].indexOf(sourceStatus) >= 0 ? sourceStatus : null;
+              if (!allowedImportedStatus && importEvidenceState.authorityState !== 'published') allowedImportedStatus = 'failed';
+              var updatedImported = await idbMutateSessionMetadataCas(payload.workDir, importedRevision, importedInstanceId, function (next) {
+                if (sourceRecord.title) next.title = String(sourceRecord.title);
+                if (sourceRecord.createdAt) next.createdAt = sourceRecord.createdAt;
+                if (allowedImportedStatus) next.status = allowedImportedStatus;
+                if (sourceRun) next.run = JSON.parse(JSON.stringify(sourceRun));
+                if (sourceRecord.estimatedTokensTotal != null) next.estimatedTokensTotal = Number(sourceRecord.estimatedTokensTotal) || 0;
+              });
+              if (updatedImported) currentSession = { dir: payload.workDir, title: updatedImported.title, createdAt: updatedImported.createdAt };
+            }
+          }
           // Migration is presentation/history metadata enrichment after the durable authority commit. It is not allowed
           // to roll back an already committed import if metadata refresh itself is unavailable.
           try {
@@ -4374,7 +4687,7 @@
           }
           scheduleHistoryLimit();
           refreshHistoryManager();
-          alert(TXT.sess.imported + payload.workDir + TXT.sess.importedTail);
+          uiAlert(TXT.sess.imported + payload.workDir + TXT.sess.importedTail);
         } catch (err) {
           if (installed && !durable && payload && payload.workDir) {
             try {
@@ -4387,7 +4700,7 @@
               console.error('[judge-web TEST] 导入失败且 VFS/UI rollback 失败:', rollbackError);
             }
           }
-          alert(TXT.sess.importFailed + (err && err.message ? err.message : err));
+          uiAlert(TXT.sess.importFailed + (err && err.message ? err.message : err));
         }
       };
       r.readAsText(f, 'UTF-8');
@@ -4448,7 +4761,7 @@
     }
     if (currentScene === 'run') {
       if (running) {
-        if (confirm(TXT.alert.abortRun)) {
+        if (uiConfirm(TXT.alert.abortRun)) {
           stopRun();
           showScene('upload');
         }
@@ -4476,7 +4789,7 @@
       saveSettings(); applyTheme();
     };
     $('btn-clear-cache').onclick = function () {
-      if (confirm(TXT.alert.clearCache)) {
+      if (uiConfirm(TXT.alert.clearCache)) {
         localStorage.removeItem(LS_KEY);
         localStorage.removeItem('judge_web_settings_v7');
         localStorage.removeItem('judge_web_settings_v6');
@@ -4501,7 +4814,7 @@
       var r = new FileReader();
       r.onload = function (ev) {
         try { applyTendencyProfilePayload(JSON.parse(String(ev.target.result || ''))); }
-        catch (err) { alert(TXT.setup.tendProfileInvalid + err.message); }
+        catch (err) { uiAlert(TXT.setup.tendProfileInvalid + err.message); }
         $('cfg-tend-profile').value = '';
       };
       r.readAsText(f, 'UTF-8');
@@ -4552,7 +4865,7 @@
           syncPlainDictStatus();
           logLine(TXT.setup.plainDictLogPre + Object.keys(j).length + TXT.setup.plainDictLogTail);
         } catch (err) {
-          alert(TXT.setup.plainDictInvalid);
+          uiAlert(TXT.setup.plainDictInvalid);
         }
       };
       r.readAsText(f, 'UTF-8');
@@ -4595,6 +4908,8 @@
     $('btn-run').onclick = function () { startRun({ force: false }); };
     $('btn-resume-run').onclick = startPreparedResume;
     $('btn-stop').onclick = stopRun;
+    $('btn-export-run-log').onclick = exportRunLog;
+    $('btn-export-debug').onclick = exportCurrentDebugBundle;
     $('btn-return-report').onclick = returnToCurrentReport;
     $('btn-back-run').onclick = navigateJudgeBack;
     $('btn-report-run-log').onclick = openRunLogFromReport;
@@ -4653,26 +4968,26 @@
     };
     $('btn-export-html').onclick = function () {
       var html = currentReportHtml();
-      if (!html) { alert(TXT.report.noReport); return; }
+      if (!html) { uiAlert(TXT.report.noReport); return; }
       exportFile(TXT.report.fileHtml + tsName() + '.html', html, 'text/html', { kind: 'report-html', trust: reportState.document && reportState.document.trust });
     };
     $('btn-export-md').onclick = function () {
       var html = currentReportHtml();
-      if (!html) { alert(TXT.report.noReport); return; }
+      if (!html) { uiAlert(TXT.report.noReport); return; }
       exportFile(TXT.report.fileMd + tsName() + '.md', stripHtml(html), 'text/markdown', { kind: 'report-md' });
     };
     $('btn-copy').onclick = function () {
       var html = currentReportHtml();
-      if (!html) { alert(TXT.report.noReport); return; }
-      navigator.clipboard.writeText(stripHtml(html)).then(function () { alert(TXT.report.copied); })
-        .catch(function () { alert(TXT.report.copyFailed); });
+      if (!html) { uiAlert(TXT.report.noReport); return; }
+      navigator.clipboard.writeText(stripHtml(html)).then(function () { uiAlert(TXT.report.copied); })
+        .catch(function () { uiAlert(TXT.report.copyFailed); });
     };
     $('btn-export-session').onclick = function () {
       var workDir = reportState.workDir;
-      if (!workDir || !engine) { alert(TXT.sess.noSession); return; }
+      if (!workDir || !engine) { uiAlert(TXT.sess.noSession); return; }
       var files = engine.snapshotSession(workDir);
       try { engine.verifyTestSessionFiles(files, workDir, ['report']); }
-      catch (e) { alert('当前报告会话无法证明 TEST authority/report binding，拒绝导出为 TEST session：' + (e && e.message ? e.message : e)); return; }
+      catch (e) { uiAlert('当前报告会话无法证明 TEST authority/report binding，拒绝导出为 TEST session：' + (e && e.message ? e.message : e)); return; }
       var payload = { kind: 'judge-web-session-v1', exportedAt: new Date().toISOString(), workDir: workDir, files: files, settings: applySemanticTestRoute(Object.assign({}, settings)), semanticTest: semanticTestMetadata() };
       exportFile(TXT.sess.sessionFile + tsName() + '.json', JSON.stringify(payload, null, 2), 'application/json', { kind: 'report-session' });
     };
@@ -4717,8 +5032,16 @@
     var pm = /[?&]theme=(dark|light)/.exec(location.search);
     if (pm) settings.theme = pm[1];
     renderShell();
+    // 核心按钮绑定必须先于可选的语言增强；i18n 异常不得把整页变成“可见但不可点击”。
+    try { bind(); }
+    catch (e) {
+      console.error('[judge-web TEST] UI 事件绑定失败:', e);
+      window.alert('Judge UI 初始化失败：' + (e && e.message ? e.message : e));
+      return;
+    }
+    try { uiLocale.mount(); }
+    catch (e2) { console.warn('[judge-web TEST] UI 语言增强失败，继续使用默认中文界面:', e2); }
     initFlightRecorder();
-    bind();
     applyTheme();
     syncSettingsToForm();
     setupUpload();

@@ -116,6 +116,19 @@ const PROJECT_SYSTEM = [
   '只输出一个完整严格 JSON authority，不要 Markdown、解释或第二个对象。'
 ].join('\n');
 
+function stableStructuralJson(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableStructuralJson).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort().map(key =>
+      JSON.stringify(key) + ':' + stableStructuralJson(value[key])).join(',') + '}';
+  }
+  const scalar = JSON.stringify(value);
+  return scalar === undefined ? String(value) : scalar;
+}
+function structuralJsonEqual(a, b) {
+  return stableStructuralJson(a) === stableStructuralJson(b);
+}
+
 function sha256Text(value) {
   return crypto.createHash('sha256').update(Buffer.from(String(value == null ? '' : value), 'utf8')).digest('hex');
 }
@@ -764,10 +777,67 @@ function semanticProjectionSnapshot(authority) {
 function assertProjectionSemanticIdentity(beforeAuthority, projectedAuthority) {
   const before = semanticProjectionSnapshot(beforeAuthority);
   const after = semanticProjectionSnapshot(projectedAuthority);
-  if (JSON.stringify(before) !== JSON.stringify(after)) {
+  if (!structuralJsonEqual(before, after)) {
     throw new Error('SC standard projection changed reviewed semantic truth');
   }
   return true;
+}
+
+// Projection is representation-only. The reviewed semantic authority owns every semantic
+// field; sc-project may supply only auditable representation/provenance fields.
+// This avoids treating explanatory projection notes as semantic mutation and, more
+// importantly, makes it impossible for projection output to overwrite reviewed truth.
+function mergeProjectionRepresentation(semanticAuthority, projectionRaw) {
+  const truth = parseSemanticAuthority(semanticAuthority);
+  const projected = typeof projectionRaw === 'string'
+    ? parseStrictJsonObject(projectionRaw, 'SC projection')
+    : JSON.parse(JSON.stringify(projectionRaw));
+  assertNoWinnerKeys(projected);
+  if (projected.schema !== AUTHORITY_SCHEMA) throw new Error('SC projection schema mismatch');
+  if (!projected.sides || typeof projected.sides !== 'object' || Array.isArray(projected.sides)) {
+    throw new Error('SC projection sides invalid');
+  }
+
+  const merged = JSON.parse(JSON.stringify(truth));
+  for (const side of ['affirmative', 'negative']) {
+    const projectedSide = projected.sides[side];
+    if (!projectedSide || typeof projectedSide !== 'object' || !Array.isArray(projectedSide.candidates)) {
+      throw new Error('SC projection side/candidates invalid: ' + side);
+    }
+    const byId = new Map();
+    for (const candidate of projectedSide.candidates) {
+      const id = String(candidate && candidate.id || '');
+      if (!id || byId.has(id)) throw new Error('SC projection candidate identity invalid/duplicate: ' + side + ':' + id);
+      byId.set(id, candidate);
+    }
+    const truthCandidates = merged.sides[side].candidates || [];
+    const truthIds = truthCandidates.map(candidate => String(candidate.id));
+    if (byId.size !== truthIds.length || truthIds.some(id => !byId.has(id))) {
+      throw new Error('SC projection candidate identity set changed: ' + side);
+    }
+    merged.sides[side].candidates = truthCandidates.map(candidate => {
+      const representation = byId.get(String(candidate.id));
+      return Object.assign({}, candidate, {
+        composition_chain: Array.isArray(representation.composition_chain)
+          ? JSON.parse(JSON.stringify(representation.composition_chain)) : [],
+        exact_source_evidence: Array.isArray(representation.exact_source_evidence)
+          ? JSON.parse(JSON.stringify(representation.exact_source_evidence)) : []
+      });
+    });
+  }
+
+  if (!projected.relation || typeof projected.relation !== 'object' || Array.isArray(projected.relation)) {
+    throw new Error('SC projection relation invalid');
+  }
+  merged.relation = Object.assign({}, merged.relation, {
+    evidence: Array.isArray(projected.relation.evidence)
+      ? JSON.parse(JSON.stringify(projected.relation.evidence)) : []
+  });
+
+  // Semantic identity is now guaranteed by construction; keep the assertion as a
+  // defensive invariant against future edits to the merge seam.
+  assertProjectionSemanticIdentity(truth, merged);
+  return merged;
 }
 
 async function runFidelityClosure(input) {
@@ -782,8 +852,8 @@ async function runFidelityClosure(input) {
     input.onStage
   );
   const authority = await validateStage(input.onStage, 'sc-project', () => {
-    assertProjectionSemanticIdentity(semanticAuthority, projectionRaw);
-    const materialized = materializeProjectionEvidence(projectionRaw, input.sourceText);
+    const representationOnly = mergeProjectionRepresentation(semanticAuthority, projectionRaw);
+    const materialized = materializeProjectionEvidence(representationOnly, input.sourceText);
     const parsed = parseAuthority(materialized, input.sourceText);
     if (input.inventory) assertAuthorityInventoryCoverage(parsed, input.inventory);
     return parsed;
@@ -1173,6 +1243,8 @@ module.exports = {
   SEMANTIC_REPRESENTATION_SEPARATION_PROTOCOL,
   RELATION_TYPES,
   PHASE_STATES,
+  stableStructuralJson,
+  structuralJsonEqual,
   sha256Text,
   profileBundleSha256,
   parseStrictJsonObject,
@@ -1194,6 +1266,7 @@ module.exports = {
   parseFidelity,
   semanticProjectionSnapshot,
   assertProjectionSemanticIdentity,
+  mergeProjectionRepresentation,
   parseInventoryOutput,
   generateFrozenInventory,
   callAndParseAnalyze,

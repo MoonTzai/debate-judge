@@ -217,10 +217,22 @@ function executionClassError(label, recorded, requested) {
   e.requestedExecutionClass = requested || null;
   return e;
 }
+function stableStructuralJson(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableStructuralJson).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort().map(key =>
+      JSON.stringify(key) + ':' + stableStructuralJson(value[key])).join(',') + '}';
+  }
+  const scalar = JSON.stringify(value);
+  return scalar === undefined ? String(value) : scalar;
+}
+function structuralJsonEqual(a, b) {
+  return stableStructuralJson(a) === stableStructuralJson(b);
+}
 function receiptExecutionClass(requestConfigRef, rawConfigRef, label) {
   const requestRef = requestConfigRef && typeof requestConfigRef === 'object' ? requestConfigRef : null;
   const rawRef = rawConfigRef && typeof rawConfigRef === 'object' ? rawConfigRef : null;
-  if (requestRef && rawRef && JSON.stringify(requestRef) !== JSON.stringify(rawRef)) {
+  if (requestRef && rawRef && !structuralJsonEqual(requestRef, rawRef)) {
     throw executionClassError(String(label || 'request/raw') + ' configRef', 'request/raw-drift', 'exact-match');
   }
   const configRef = requestRef || rawRef;
@@ -434,7 +446,7 @@ function validateScRequestReceipt(store, rawRef, expectedRole, current, globalBi
   }
   const executionClass = receiptExecutionClass(request.configRef || null, rm.configRef || null,
     'SC ' + expectedRole + ' request');
-  if (qm.configRef && JSON.stringify(qm.configRef) !== JSON.stringify(request.configRef || null)) {
+  if (qm.configRef && !structuralJsonEqual(qm.configRef, request.configRef || null)) {
     throw new Error('SC request metadata configRef mismatch for ' + expectedRole);
   }
   if (qm.role !== expectedRole ||
@@ -500,7 +512,7 @@ function loadScFrozenInventory(store, semanticMeta, current, globalBinding, sour
   const discovery = readStage(fim.inventoryARef, 'discovery', 'sc-inventory-discovery', 'sc-inventory-discover');
   const reviewed = readStage(fim.inventoryBRef, 'reviewed', 'sc-inventory-review', 'sc-inventory-review');
   const inventory = SCA.parseInventory(frozenObj.content, sourceText, 'reviewed');
-  if (JSON.stringify(inventory) !== JSON.stringify(reviewed.doc)) {
+  if (!structuralJsonEqual(inventory, reviewed.doc)) {
     throw new Error('SC frozen inventory bytes differ from reviewed inventory stage');
   }
   const executionClasses = new Set([
@@ -553,14 +565,14 @@ function validateScCurrentChain(workDir, store, current, globalBinding, sourceTe
   const rawReview = reviewReceipt.raw;
   const parsedReview = SCA.parseReview(rawReview.content, sourceText, parentAuthority, inventoryChain.inventory);
   const persistedReview = JSON.parse(reviewObj.content);
-  if (JSON.stringify(parsedReview) !== JSON.stringify(persistedReview) ||
+  if (!structuralJsonEqual(parsedReview, persistedReview) ||
       !['maintain', 'revise'].includes(parsedReview.decision) || !parsedReview.authority) {
     throw new Error('SC normalized review differs from immutable raw output or did not approve authority');
   }
   const authority = SCA.parseAuthority(semanticObj.content, sourceText);
   SCA.assertAuthorityInventoryCoverage(authority, inventoryChain.inventory);
-  if (JSON.stringify(SCA.semanticProjectionSnapshot(authority)) !==
-      JSON.stringify(SCA.semanticProjectionSnapshot(parsedReview.authority))) {
+  if (!structuralJsonEqual(SCA.semanticProjectionSnapshot(authority),
+      SCA.semanticProjectionSnapshot(parsedReview.authority))) {
     throw new Error('SC current authority semantic identity differs from approved review authority');
   }
   const projectionObj = store.readObject(current.projectionRef);
@@ -577,7 +589,7 @@ function validateScCurrentChain(workDir, store, current, globalBinding, sourceTe
   });
   const rawProjection = projectionReceipt.raw;
   const projectedFromRaw = SCA.parseAuthority(SCA.materializeProjectionEvidence(rawProjection.content, sourceText), sourceText);
-  if (JSON.stringify(projectedFromRaw) !== JSON.stringify(authority)) {
+  if (!structuralJsonEqual(projectedFromRaw, authority)) {
     throw new Error('SC projected authority differs from immutable sc-project raw output');
   }
   let fidelityRef = null;
@@ -597,7 +609,7 @@ function validateScCurrentChain(workDir, store, current, globalBinding, sourceTe
       const raw = fidelityReceipt.raw;
       const parsed = SCA.parseFidelity(raw.content, sourceText);
       const persisted = JSON.parse(obj.content);
-      if (parsed.decision !== 'approve' || JSON.stringify(parsed) !== JSON.stringify(persisted)) continue;
+      if (parsed.decision !== 'approve' || !structuralJsonEqual(parsed, persisted)) continue;
       fidelityRef = ref;
       fidelity = parsed;
       fidelityExecutionClass = fidelityReceipt.executionClass;
@@ -697,7 +709,7 @@ function scStageBaseIdentity(current) {
   };
 }
 function sameScStageBaseIdentity(a, b) {
-  return JSON.stringify(scStageBaseIdentity(a)) === JSON.stringify(scStageBaseIdentity(b));
+  return structuralJsonEqual(scStageBaseIdentity(a), scStageBaseIdentity(b));
 }
 function appendScReviewedStage(store, current, globalBinding, sourceSha256, generated, captured, executionClass) {
   const common = {
@@ -821,7 +833,7 @@ function validateScReviewedStage(store, manifestRef, current, globalBinding, sou
   catch (e) { throw new Error('SC reviewed stage manifest JSON invalid: ' + e.message); }
   if (!doc || doc.schema !== 'judge-sc-reviewed-stage-v1' || !doc.refs ||
       !sameScStageBaseIdentity(doc.baseCurrent, current) ||
-      JSON.stringify(mm.baseCurrent || null) !== JSON.stringify(doc.baseCurrent || null)) {
+      !structuralJsonEqual(mm.baseCurrent || null, doc.baseCurrent || null)) {
     throw new Error('SC reviewed stage manifest base-current identity mismatch');
   }
   const refs = doc.refs;
@@ -884,14 +896,14 @@ function validateScReviewedStage(store, manifestRef, current, globalBinding, sou
   });
   const parsedReview = SCA.parseReview(reviewReceipt.raw.content, sourceText, candidate, inventoryChain.inventory);
   const persistedReview = JSON.parse(reviewObj.content);
-  if (JSON.stringify(parsedReview) !== JSON.stringify(persistedReview) ||
+  if (!structuralJsonEqual(parsedReview, persistedReview) ||
       !['maintain','revise'].includes(parsedReview.decision) || !parsedReview.authority) {
     throw new Error('SC staged review differs from immutable raw output or did not approve authority');
   }
   const stagedAuthority = SCA.parseSemanticAuthority(stagedSemanticObj.content);
   SCA.assertAuthorityInventoryCoverage(stagedAuthority, inventoryChain.inventory);
-  if (JSON.stringify(SCA.semanticProjectionSnapshot(stagedAuthority)) !==
-      JSON.stringify(SCA.semanticProjectionSnapshot(parsedReview.authority))) {
+  if (!structuralJsonEqual(SCA.semanticProjectionSnapshot(stagedAuthority),
+      SCA.semanticProjectionSnapshot(parsedReview.authority))) {
     throw new Error('SC staged semantic differs from approved review semantic truth');
   }
 
@@ -942,7 +954,7 @@ function findScReviewedStage(store, current, globalBinding, sourceText, sourceSh
         meta.profileBundleSha256 !== SCA.profileBundleSha256() ||
         Number(meta.globalSemanticRevision) !== Number(globalBinding.identity.revision) ||
         String(meta.globalSemanticObjectId || '') !== String(globalBinding.identity.objectId || '')) continue;
-    if (JSON.stringify(meta.baseCurrent || null) !== JSON.stringify(scStageBaseIdentity(current))) continue;
+    if (!structuralJsonEqual(meta.baseCurrent || null, scStageBaseIdentity(current))) continue;
     matching.push(ref);
   }
   if (!matching.length) return null;
@@ -1668,6 +1680,38 @@ function sameRef(a, b) {
   return !!a && !!b && a.objectId === b.objectId && a.kind === b.kind && a.sha256 === b.sha256;
 }
 
+function verifyDecisionFormatRepair(store, decisionObj, rawObj, label, role) {
+  const meta = decisionObj && decisionObj.metadata || {};
+  const rawMeta = rawObj && rawObj.metadata || {};
+  const syntax = SW.repairStrictJsonSyntax(rawObj && rawObj.content, label);
+  if (syntax.repaired) {
+    if (!meta.formatRepair || !structuralJsonEqual(meta.formatRepair, syntax.repair)) {
+      throw new Error('global ' + role + ' deterministic format repair summary missing/mismatched');
+    }
+    if (!meta.formatRepairRef || meta.formatRepairRef.kind !== 'issue') {
+      throw new Error('global ' + role + ' deterministic format repair journal ref missing');
+    }
+    const journalObj = store.readObject(meta.formatRepairRef);
+    const journalMeta = journalObj.metadata || {};
+    if (journalMeta.repairTarget !== 'format_recovery' ||
+        journalMeta.repairSchema !== 'semantic-json-structure-repair-journal-v1' ||
+        journalMeta.role !== role ||
+        !sameRef(journalMeta.rawRef, meta.rawRef) ||
+        !sameRef(journalMeta.requestRef, rawMeta.requestRef) ||
+        journalMeta.originalSha256 !== syntax.repair.originalSha256 ||
+        journalMeta.repairedSha256 !== syntax.repair.repairedSha256) {
+      throw new Error('global ' + role + ' deterministic format repair journal metadata mismatch');
+    }
+    const expectedJournal = SW.buildJsonRepairJournal(syntax, meta.rawRef, rawMeta.requestRef);
+    if (String(journalObj.content) !== JSON.stringify(expectedJournal, null, 2)) {
+      throw new Error('global ' + role + ' deterministic format repair journal body mismatch');
+    }
+  } else if (meta.formatRepair || meta.formatRepairRef) {
+    throw new Error('global ' + role + ' format repair receipt claims a repair that cannot be replayed');
+  }
+  return syntax;
+}
+
 function verifiedV5ReviewDecision(store, reviewRef, parentSemanticRef, sourceText) {
   if (!store || !reviewRef || !parentSemanticRef) throw new Error('global V5 review receipt refs missing');
   const reviewObj = store.readObject(reviewRef);
@@ -1678,16 +1722,32 @@ function verifiedV5ReviewDecision(store, reviewRef, parentSemanticRef, sourceTex
   const parentObj = store.readObject(parentSemanticRef);
   const rawObj = store.readObject(rm.rawRef);
   if ((rawObj.metadata || {}).role !== 'review') throw new Error('global V5 review raw receipt role mismatch');
+  verifyDecisionFormatRepair(store, reviewObj, rawObj, 'review decision', 'review');
   const V5 = require('./semantic-review-contract-v5.js');
   const parser = { parseStrictJsonObject: SW.parseStrictJsonObject, parseReviewDecision: SW.parseReviewDecision };
   const persisted = V5.parseV5ReviewDecision(reviewObj.content, sourceText, String(parentObj.content), parser);
   const raw = V5.parseV5ReviewDecision(rawObj.content, sourceText, String(parentObj.content), parser);
-  if (JSON.stringify(persisted) !== JSON.stringify(raw)) {
+  if (!structuralJsonEqual(persisted, raw)) {
     throw new Error('normalized V5 review differs from immutable raw output');
   }
   return persisted;
 }
 
+function verifiedFidelityDecision(store, fidelityRef, sourceText) {
+  if (!store || !fidelityRef) throw new Error('global fidelity receipt ref missing');
+  const fidelityObj = store.readObject(fidelityRef);
+  const fm = fidelityObj.metadata || {};
+  if (!fm.rawRef) throw new Error('global fidelity receipt lacks rawRef');
+  const rawObj = store.readObject(fm.rawRef);
+  if ((rawObj.metadata || {}).role !== 'fidelity') throw new Error('global fidelity raw receipt role mismatch');
+  verifyDecisionFormatRepair(store, fidelityObj, rawObj, 'fidelity decision', 'fidelity');
+  const persisted = SW.parseFidelityDecision(fidelityObj.content, sourceText);
+  const raw = SW.parseFidelityDecision(rawObj.content, sourceText);
+  if (!structuralJsonEqual(persisted, raw)) {
+    throw new Error('normalized fidelity decision differs from immutable raw output');
+  }
+  return persisted;
+}
 function verifiedCurrentGlobalReviewDecision(store, current, sourceText) {
   if (!current || !current.semanticRef) throw new Error('global semantic current missing');
   const semanticObj = store.readObject(current.semanticRef);
@@ -1742,7 +1802,7 @@ function semanticIdentity(current) {
 function assertSemanticIdentityUnchanged(before, after, label) {
   const a = semanticIdentity(before);
   const b = semanticIdentity(after);
-  if (JSON.stringify(a) !== JSON.stringify(b)) {
+  if (!structuralJsonEqual(a, b)) {
     const e = new Error('[executor] ' + String(label || 'presentation') + ' changed semantic authority identity');
     e.code = 'ERR_PRESENTATION_CHANGED_SEMANTIC_IDENTITY';
     e.before = a;
@@ -1899,8 +1959,8 @@ function validateGlobalReopenHistory(workDir, active, current, reopenRows) {
       throw e;
     }
     if (String(row.issue || '') !== reopened.issue ||
-        JSON.stringify(normalizeReopenEvidenceForCompare(row.evidence)) !==
-          JSON.stringify(normalizeReopenEvidenceForCompare(reopened.evidence))) {
+        !structuralJsonEqual(normalizeReopenEvidenceForCompare(row.evidence),
+          normalizeReopenEvidenceForCompare(reopened.evidence))) {
       const e = new Error('[executor] TEST provenance reopen receipt issue/evidence mismatch at revision ' + revision);
       e.code = 'ERR_TEST_PROVENANCE_REOPEN_MISMATCH';
       throw e;
@@ -1920,7 +1980,7 @@ function validateGlobalReopenHistory(workDir, active, current, reopenRows) {
       throw e;
     }
     const fidelityObj = store.readObject(row.fidelityRef);
-    const fidelity = SW.parseFidelityDecision(fidelityObj.content, sourceText);
+    const fidelity = verifiedFidelityDecision(store, row.fidelityRef, sourceText);
     const commitObj = store.readObject(row.commitRef);
     const commitDoc = JSON.parse(commitObj.content);
     if (fidelity.decision !== 'approve' ||
@@ -1977,7 +2037,7 @@ function validateTestProvenance(workDir, active, current, doc) {
     }
     const sourceText = fs.readFileSync(path.join(workDir, '.tmp-debate.txt'), 'utf8');
     const reviewDecision = verifiedV5ReviewDecision(receiptStore, a.reviewRef, semanticObj.metadata.parentSemanticRef, sourceText);
-    const fidelityDecision = SW.parseFidelityDecision(fidelityObj.content, sourceText);
+    const fidelityDecision = verifiedFidelityDecision(receiptStore, a.fidelityRef, sourceText);
     if (!['maintain', 'revise'].includes(reviewDecision.decision) || fidelityDecision.decision !== 'approve' ||
         !sameRef(fidelityObj.metadata && fidelityObj.metadata.semanticRef, current.semanticRef) ||
         !sameRef(fidelityObj.metadata && fidelityObj.metadata.projectionRef, current.projectionRef) ||
@@ -2189,7 +2249,7 @@ function validateTestR3ReopenIssue(workDir, active, issueRef, expectedRevision, 
     lineStart: Number.isInteger(e && e.lineStart) ? e.lineStart : null,
     lineEnd: Number.isInteger(e && e.lineEnd) ? e.lineEnd : null
   });
-  if (JSON.stringify(anchored.map(normalizeHint)) !== JSON.stringify((doc.evidence || []).map(normalizeHint))) {
+  if (!structuralJsonEqual(anchored.map(normalizeHint), (doc.evidence || []).map(normalizeHint))) {
     throw new Error('R3 reopen evidence provenance/locator drift');
   }
   const issue = String(doc.issue).trim();
@@ -2248,13 +2308,11 @@ function recoverTestPublicationFromStore(workDir, active, current, storeRecovery
         if (!sameRef(fm.semanticRef, semanticRef) || !sameRef(fm.projectionRef, commit.doc.projectionRef) || !fm.rawRef ||
             fm.sourceSha256 !== current.sourceSha256 ||
             (fm.contextSha256 || null) !== (current.contextSha256 || null)) continue;
-        const decision = SW.parseFidelityDecision(obj.content, sourceText);
+        const decision = verifiedFidelityDecision(active.store, ref, sourceText);
         if (decision.decision !== 'approve') continue;
         const fidelityRequest = testAuthorityRequestReceipt(
           active, fm.rawRef, 'fidelity', prefix + '-fidelity', active.profile.fidelity);
-        const rawDecision = SW.parseFidelityDecision(fidelityRequest.raw.content, sourceText);
-        if (JSON.stringify(decision) !== JSON.stringify(rawDecision) ||
-            !fidelityRequest.content.includes('【已审语义】\n' + String(semanticObj.content)) ||
+        if (            !fidelityRequest.content.includes('【已审语义】\n' + String(semanticObj.content)) ||
             !fidelityRequest.content.includes('【实际 projection】\n' + String(projectionObj.content))) continue;
         if (fidelityRequest.executionClass) executionClasses.add(fidelityRequest.executionClass);
         fidelityRef = ref;
@@ -2369,13 +2427,11 @@ function recoverTestPublicationFromStore(workDir, active, current, storeRecovery
       const fm = obj.metadata || {};
       if (!sameRef(fm.semanticRef, current.semanticRef) || !sameRef(fm.projectionRef, current.projectionRef) || !fm.rawRef ||
           fm.sourceSha256 !== current.sourceSha256 || (fm.contextSha256 || null) !== (current.contextSha256 || null)) continue;
-      const decision = SW.parseFidelityDecision(obj.content, sourceText);
+      const decision = verifiedFidelityDecision(active.store, ref, sourceText);
       if (decision.decision !== 'approve') continue;
       const fidelityRequest = testAuthorityRequestReceipt(active, fm.rawRef, 'fidelity', prefix + '-fidelity', active.profile.fidelity);
       if (fidelityRequest.executionClass) executionClasses.add(fidelityRequest.executionClass);
-      const rawFidelityDecision = SW.parseFidelityDecision(fidelityRequest.raw.content, sourceText);
-      if (JSON.stringify(decision) !== JSON.stringify(rawFidelityDecision) ||
-          !fidelityRequest.content.includes('【已审语义】\n' + String(finalSemanticObj.content)) ||
+      if (          !fidelityRequest.content.includes('【已审语义】\n' + String(finalSemanticObj.content)) ||
           !fidelityRequest.content.includes('【实际 projection】\n' + String(projectionObj.content))) continue;
       fidelityRef = ref;
       fidelityDecision = decision;
@@ -2546,19 +2602,118 @@ async function prepareTestSemanticAuthority(workDir, opts) {
     };
   }
 
-  const analyze = await active.workflow.analyze({
-    sessionId: active.sessionId,
-    sourceRef: '.tmp-debate.txt',
-    contextRef: active.binding.contextText ? 'test-context' : null,
-    prompt: active.profile.analyze,
-    requestId: 'test-active-analyze',
-    requireVerifiedCompletion: true,
-    configRef: semanticSafeConfigRef(opts.cfg)
-  });
+  // current=0 is not downstream authority, but it may contain a source-bound durable staging chain.
+  // Reuse the completed analyze candidate and, when replayable, the exact verified review raw so a browser
+  // crash / JSON-punctuation failure does not pay for the same semantic decisions twice.
+  let semanticCandidateRef = null;
+  let resumeReviewRawRef = null;
+  const stagedRefs = active.store.listObjects(active.sessionId) || [];
+  const stagedAnalyze = [];
+  for (const ref of stagedRefs.filter(r => r && r.kind === 'semantic')) {
+    try {
+      const obj = active.store.readObject(ref);
+      const meta = obj.metadata || {};
+      if (meta.state !== 'candidate' || !meta.rawRef ||
+          meta.sourceSha256 !== active.binding.sourceSha256 ||
+          (meta.contextSha256 || null) !== (active.binding.contextSha256 || null)) continue;
+      const receipt = testAuthorityRequestReceipt(active, meta.rawRef, 'analyze', 'test-active-analyze', active.profile.analyze);
+      if (String(obj.content) !== String(receipt.raw.content)) continue;
+      stagedAnalyze.push({ ref, obj });
+    } catch (_) {}
+  }
+  if (stagedAnalyze.length > 1) {
+    // Multiple provenance-valid semantic candidates are a semantic ambiguity, not a reason for
+    // deterministic latest/longest selection. Preserve them as evidence and ask the LLM to
+    // analyze the same bound source again; the fresh candidate must still pass review/fidelity.
+    const ambiguityRef = active.store.appendObject({
+      sessionId: active.sessionId,
+      kind: 'issue',
+      content: JSON.stringify({
+        schema: 'judge-precurrent-semantic-ambiguity-v1',
+        stage: 'analyze',
+        candidateRefs: stagedAnalyze.map(x => x.ref)
+      }, null, 2),
+      metadata: {
+        repairTarget: 'semantic_reanalysis',
+        sourceSha256: active.binding.sourceSha256,
+        contextSha256: active.binding.contextSha256 || null,
+        candidateCount: stagedAnalyze.length
+      }
+    });
+    if (typeof opts.onLog === 'function') {
+      opts.onLog('[executor] pre-current analyze 存在多份同源合法候选；不机械择一，保留 ambiguity=' +
+        String(ambiguityRef && ambiguityRef.objectId || '') + '，重新交由 LLM 语义分析');
+    }
+  }
+  if (stagedAnalyze.length === 1) {
+    semanticCandidateRef = stagedAnalyze[0].ref;
+    if (typeof opts.onStage === 'function') {
+      await Promise.resolve(opts.onStage({
+        stage: 'semantic-analyze', state: 'complete', semanticFirst: true,
+        authorityScope: 'global', recovered: true, precurrent: true
+      }));
+    }
+    const candidateText = String(stagedAnalyze[0].obj.content);
+    const V5 = require('./semantic-review-contract-v5.js');
+    const parser = { parseStrictJsonObject: SW.parseStrictJsonObject, parseReviewDecision: SW.parseReviewDecision };
+    const validReviewRaws = [];
+    for (const ref of stagedRefs.filter(r => r && r.kind === 'raw')) {
+      try {
+        const raw = active.store.readObject(ref);
+        const meta = raw.metadata || {};
+        if (meta.role !== 'review' || meta.requestId !== 'test-active-authority-review') continue;
+        const receipt = testAuthorityRequestReceipt(
+          active, ref, 'review', 'test-active-authority-review', active.profile.review);
+        if (!receipt.content.includes('【被审语义】\n' + candidateText) ||
+            !receipt.content.includes('【具体问题】\n' + active.profile.issueText)) continue;
+        V5.parseV5ReviewDecision(raw.content, active.binding.sourceText, candidateText, parser);
+        validReviewRaws.push(ref);
+      } catch (_) {}
+    }
+    if (validReviewRaws.length > 1) {
+      // Two independently valid review outputs may disagree semantically. Do not choose by
+      // timestamp/length/object id. Preserve both, then let publishReviewedAuthority perform
+      // one fresh LLM review against the same source + candidate.
+      const ambiguityRef = active.store.appendObject({
+        sessionId: active.sessionId,
+        kind: 'issue',
+        content: JSON.stringify({
+          schema: 'judge-precurrent-semantic-ambiguity-v1',
+          stage: 'review',
+          reviewRawRefs: validReviewRaws
+        }, null, 2),
+        metadata: {
+          repairTarget: 'semantic_review',
+          sourceSha256: active.binding.sourceSha256,
+          contextSha256: active.binding.contextSha256 || null,
+          reviewRawCount: validReviewRaws.length
+        }
+      });
+      if (typeof opts.onLog === 'function') {
+        opts.onLog('[executor] pre-current review 存在多份同源合法结果；不机械择一，保留 ambiguity=' +
+          String(ambiguityRef && ambiguityRef.objectId || '') + '，重新交由 LLM 语义复核');
+      }
+      resumeReviewRawRef = null;
+    } else {
+      resumeReviewRawRef = validReviewRaws.length === 1 ? validReviewRaws[0] : null;
+    }
+  }
+  if (!semanticCandidateRef) {
+    const analyze = await active.workflow.analyze({
+      sessionId: active.sessionId,
+      sourceRef: '.tmp-debate.txt',
+      contextRef: active.binding.contextText ? 'test-context' : null,
+      prompt: active.profile.analyze,
+      requestId: 'test-active-analyze',
+      requireVerifiedCompletion: true,
+      configRef: semanticSafeConfigRef(opts.cfg)
+    });
+    semanticCandidateRef = analyze.refs.semanticCandidateRef;
+  }
   const expectedCurrent = active.store.readCurrent(active.sessionId);
   const publication = await active.workflow.publishReviewedAuthority({
     sessionId: active.sessionId,
-    semanticRef: analyze.refs.semanticCandidateRef,
+    semanticRef: semanticCandidateRef,
     sourceRef: '.tmp-debate.txt',
     contextRef: active.binding.contextText ? 'test-context' : null,
     expectedCurrent,
@@ -2569,7 +2724,8 @@ async function prepareTestSemanticAuthority(workDir, opts) {
     fidelityPrompt: active.profile.fidelity,
     requestId: 'test-active-authority',
     requireVerifiedCompletion: true,
-    configRef: semanticSafeConfigRef(opts.cfg)
+    configRef: semanticSafeConfigRef(opts.cfg),
+    resumeReviewRawRef
   });
   if (publication.status === 'commit_state_unknown' || publication.status === 'stale_result_preserved') {
     const e = new Error('[executor] TEST semantic authority commit/current state is not safely classifiable: ' + publication.status);
@@ -4815,7 +4971,7 @@ async function buildPlainReaderGuideArtifact(workDir, cfg, input, guide, onLog, 
           // 跨 Job 恢复不能退回整批重译：保留当前完整候选作为冻结基底，
           // 下一步只把当前机械门精确点名的字段交给 translateUnitsLLM 定点修复。
           restoredDraft = restored;
-          restoredDraftError = 'R8 白话导览机械语义门失败: ' + restoredCheck.errors.join('; ');
+          restoredDraftError = 'R8 白话导览结构/事实硬门失败: ' + restoredCheck.errors.join('; ');
           onLog('[executor] R8 白话私有 draft 仍未过门，冻结其余字段并从失败字段定点续跑：' + restoredCheck.errors.join('; '));
         }
       }
@@ -4959,6 +5115,7 @@ function readVerifiedReaderGuideSnapshot(workDir, inputWorkDir, opts) {
   const inputHash = input && RG.hashGuideInput(input);
   if (!cache || cache.inputHash !== inputHash) errors.push('R8 cache inputHash 不匹配');
   if (!cache || cache.key !== RG.cacheKey(input, modelSnapshot || {})) errors.push('R8 cache key 不匹配');
+  if (!cache || cache.reviewPromptVersion !== RG.REVIEW_PROMPT_VERSION) errors.push('R8 cache reviewPromptVersion 不匹配');
   if (!cache || RG.stableJson(cache.guide || {}) !== RG.stableJson(guide || {})) errors.push('R8 cache guide 与保存 guide 不一致');
   if (input && guide) {
     const reviewCheck = RG.validateReview(input, guide, cache && cache.review);
@@ -5015,9 +5172,23 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
     if (opts.cache !== false && fs.existsSync(files.cache)) {
       try {
         const saved = JSON.parse(fs.readFileSync(files.cache, 'utf-8'));
-        if (saved && saved.key === key && saved.inputHash === inputHash) {
+        if (saved && saved.key === key && saved.inputHash === inputHash &&
+            saved.reviewPromptVersion === RG.REVIEW_PROMPT_VERSION) {
           const guideCheck = checkReaderGuideContract(RG, input, saved.guide, snapshot);
           const reviewCheck = RG.validateReview(input, saved.guide, saved.review);
+          if (reviewCheck.upstreamIssues && reviewCheck.upstreamIssues.length) {
+            fs.writeFileSync(path.join(workDir, '.tmp-reader-guide-review.json'), JSON.stringify({
+              inputHash, guide: saved.guide, review: saved.review,
+              reviewPromptVersion: RG.REVIEW_PROMPT_VERSION,
+              disposition: 'upstream_review',
+              reopenNode: reviewCheck.reopenNodes[0] || null,
+              reopenNodes: reviewCheck.reopenNodes || []
+            }, null, 2), 'utf-8');
+            const upstreamError = new Error('R8 缓存中存在未处理的上游语义异议；保留原异议，不重新求批准，不在导览层改判');
+            upstreamError.code = 'R8_UPSTREAM_REVIEW';
+            upstreamError.review = saved.review;
+            throw upstreamError;
+          }
           if (guideCheck.ok && reviewCheck.ok) {
             guide = saved.guide;
             review = saved.review;
@@ -5028,6 +5199,7 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
           }
         }
       } catch (e) {
+        if (e && e.code === 'R8_UPSTREAM_REVIEW') throw e;
         onLog('[executor] R8 章节导览缓存不可用，重新生成：' + e.message);
       }
     }
@@ -5114,19 +5286,74 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
       }
     }
 
+    // A prior build may have persisted a fully explicit reviewer result as classification_pending
+    // solely because its free-text keys were not recognized. Reclassify that exact same
+    // inputHash + guide locally before spending another reviewer call. This never guesses a
+    // target round: action/targetRound must already be explicit in the saved review.
+    const pendingReviewJournalPath = path.join(workDir, '.tmp-reader-guide-review.json');
+    if (!review && guide && guideCheck && guideCheck.ok && opts.cache !== false && fs.existsSync(pendingReviewJournalPath)) {
+      try {
+        const pendingJournal = JSON.parse(fs.readFileSync(pendingReviewJournalPath, 'utf8'));
+        if (pendingJournal && pendingJournal.disposition === 'classification_pending' &&
+            pendingJournal.classificationPending === true &&
+            pendingJournal.reviewPromptVersion === RG.REVIEW_PROMPT_VERSION &&
+            pendingJournal.inputHash === inputHash && pendingJournal.review &&
+            RG.stableJson(pendingJournal.guide || {}) === RG.stableJson(guide)) {
+          const reclassified = RG.validateReview(input, guide, pendingJournal.review);
+          if (!reclassified.needsClarification) {
+            if (reclassified.upstreamIssues && reclassified.upstreamIssues.length) {
+              const promotedJournal = {
+                inputHash,
+                guide,
+                review: pendingJournal.review,
+                reviewPromptVersion: RG.REVIEW_PROMPT_VERSION,
+                disposition: 'upstream_review',
+                classificationPending: false,
+                reopenNode: reclassified.reopenNodes[0] || null,
+                reopenNodes: reclassified.reopenNodes || []
+              };
+              fs.writeFileSync(pendingReviewJournalPath, JSON.stringify(promotedJournal, null, 2), 'utf8');
+              if (typeof opts.onBatchCheckpoint === 'function') {
+                try { await Promise.resolve(opts.onBatchCheckpoint({ phase: 'r8-upstream-review', workDir, reopenNodes: (reclassified.reopenNodes || []).slice() })); }
+                catch (checkpointError) { onLog('[executor] R8 旧复核零模型重分类 checkpoint 回调失败（异议已安全落盘）: ' + (checkpointError && checkpointError.message || checkpointError)); }
+              }
+              onLog('[executor] R8 已将旧 classification_pending review 零模型重分类为 upstream_review：' + (reclassified.reopenNodes || []).join('、'));
+              const upstreamError = new Error('R8 已有复核明确要求上游语义回查 ' + (reclassified.reopenNodes || []).join('、') + '；复用既有 review，不重复调用模型');
+              upstreamError.code = 'R8_UPSTREAM_REVIEW';
+              upstreamError.review = pendingJournal.review;
+              upstreamError.reopenNode = reclassified.reopenNodes[0] || null;
+              upstreamError.reopenNodes = (reclassified.reopenNodes || []).slice();
+              throw upstreamError;
+            }
+            if (reclassified.ok) {
+              review = pendingJournal.review;
+              onLog('[executor] R8 已将旧 classification_pending review 零模型重分类为可接受结果，不重复调用模型');
+            }
+          }
+        }
+      } catch (e) {
+        if (e && e.code === 'R8_UPSTREAM_REVIEW') throw e;
+        onLog('[executor] R8 旧 classification_pending review 不可零模型复用：' + (e && e.message || e));
+      }
+    }
+
     if (!review) {
       let reviewCheck = null;
       let lastReviewError = null;
+      let reviewStopReason = null;
       for (let attempt = 0; attempt <= core.MAX_RETRIES; attempt++) {
         if (attempt > 0) {
           const d = core.retryDelayMs(attempt);
           onLog('[executor] R8 独立复核纠错 ' + attempt + '/' + core.MAX_RETRIES + ' · 退避 ' + d + 'ms');
           await sleep(d);
         }
+        let semanticRejected = false;
         try {
           let reviewPrompt = RG.buildReviewPrompt(input, guide);
           if (reviewCheck && reviewCheck.errors && reviewCheck.errors.length) {
-            reviewPrompt += '\n\n上一版复核未通过机械门；请重新逐卡核查并纠正以下复核错误：\n- ' + reviewCheck.errors.join('\n- ');
+            reviewPrompt += reviewCheck.needsClarification
+              ? '\n\n上一版复核提出了异议但没有完整说明 note / upstream_review 与责任轮。保留已有实质判断，只补齐分类，不要为了通过而撤销异议：\n- ' + reviewCheck.errors.join('\n- ') + '\n上一版复核：\n' + JSON.stringify(review)
+              : '\n\n上一版复核尚不能执行。保留已有实质判断，并处理已指出的问题；不要对未修改候选反复投赞成票：\n- ' + reviewCheck.errors.join('\n- ') + '\n上一版复核：\n' + JSON.stringify(review);
           }
           const rawReview = await requestCompletion(cfg, [{ role: 'user', content: reviewPrompt }], {
             system: READER_GUIDE_SYSTEM,
@@ -5134,22 +5361,118 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
           });
           review = RG.parseJson(rawReview, '独立复核响应');
           reviewCheck = RG.validateReview(input, guide, review);
-          if (reviewCheck.ok) { lastReviewError = null; break; }
-          lastReviewError = new Error('独立复核门禁失败: ' + reviewCheck.errors.join('; '));
+          if (reviewCheck.upstreamIssues && reviewCheck.upstreamIssues.length) {
+            fs.writeFileSync(path.join(workDir, '.tmp-reader-guide-review.json'), JSON.stringify({
+              inputHash, guide, review,
+              reviewPromptVersion: RG.REVIEW_PROMPT_VERSION,
+              disposition: 'upstream_review',
+              reopenNode: reviewCheck.reopenNodes[0] || null,
+              reopenNodes: reviewCheck.reopenNodes || []
+            }, null, 2), 'utf-8');
+            if (typeof opts.onBatchCheckpoint === 'function') {
+              try { await Promise.resolve(opts.onBatchCheckpoint({ phase: 'r8-upstream-review', workDir, reopenNodes: (reviewCheck.reopenNodes || []).slice() })); }
+              catch (checkpointError) { onLog('[executor] R8 上游异议 checkpoint 回调失败（异议已安全落盘）: ' + (checkpointError && checkpointError.message || checkpointError)); }
+            }
+            const upstreamError = new Error('R8 发现上游语义问题，需回查 ' + (reviewCheck.reopenNodes || []).join('、') + '；已保留异议，不在导览层改判');
+            upstreamError.code = 'R8_UPSTREAM_REVIEW';
+            upstreamError.review = review;
+            upstreamError.reopenNodes = (reviewCheck.reopenNodes || []).slice();
+            throw upstreamError;
+          }
+          if (reviewCheck.ok) {
+            lastReviewError = null;
+            break;
+          }
+          lastReviewError = new Error('独立复核未通过: ' + reviewCheck.errors.join('; '));
+          if (reviewCheck.needsClarification) {
+            fs.writeFileSync(path.join(workDir, '.tmp-reader-guide-review.json'), JSON.stringify({
+              inputHash, guide, review, reviewPromptVersion: RG.REVIEW_PROMPT_VERSION, disposition: 'classification_pending', classificationPending: true, reopenNode: null, reopenNodes: []
+            }, null, 2), 'utf-8');
+            if (attempt === core.MAX_RETRIES) reviewStopReason = '异议影响与责任尚未说明';
+            continue;
+          }
+          const failedCards = (review.cardChecks || [])
+            .filter(c => c && (c.noNewJudgment !== true || c.factsConsistent !== true || c.anchorsConsistent !== true))
+            .map(c => c.sectionId)
+            .filter(id => RG.SECTION_IDS.includes(id));
+          semanticRejected = review.approved === false || failedCards.length > 0;
+          if (semanticRejected) {
+            fs.writeFileSync(path.join(workDir, '.tmp-reader-guide-review.json'), JSON.stringify({
+              inputHash, guide, review, reviewPromptVersion: RG.REVIEW_PROMPT_VERSION, disposition: 'guide_semantic_repair', reopenNode: 'R8', reopenNodes: ['R8']
+            }, null, 2), 'utf-8');
+            reviewStopReason = '导览语义复核未通过';
+            if (failedCards.length && attempt < core.MAX_RETRIES) {
+              const repairPrompt = RG.buildGuideRepairPrompt(
+                input,
+                guide,
+                ['独立语义复核意见：' + JSON.stringify(Object.assign({}, review, {
+                  cardChecks: (review.cardChecks || []).filter(c => failedCards.includes(c.sectionId))
+                }))],
+                failedCards
+              );
+              core.assertWithinContextLimit(repairPrompt, 'R8 semantic targeted guide repair');
+              const rawRepair = await requestCompletion(cfg, [{ role: 'user', content: repairPrompt }], {
+                system: READER_GUIDE_SYSTEM,
+                codexRunner: opts.codexRunner
+              });
+              const repair = RG.parseJson(rawRepair, '导览语义定点修复响应');
+              const cards = repair && repair.cards;
+              if (!Array.isArray(cards) || cards.length !== failedCards.length ||
+                  new Set(cards.map(c => c && c.sectionId)).size !== failedCards.length ||
+                  cards.some(c => !c || !failedCards.includes(c.sectionId))) {
+                throw new Error('导览语义修复必须恰好覆盖失败卡: ' + failedCards.join(','));
+              }
+              const byId = new Map(cards.map(c => [c.sectionId, c]));
+              const frozenBefore = new Map((guide.cards || []).filter(c => !failedCards.includes(c.sectionId)).map(c => [c.sectionId, RG.stableJson(c)]));
+              guide = Object.assign({}, guide, { cards: (guide.cards || []).map(c => byId.get(c.sectionId) || c) });
+              for (const card of guide.cards || []) {
+                if (!failedCards.includes(card.sectionId) && frozenBefore.get(card.sectionId) !== RG.stableJson(card)) {
+                  throw new Error('导览语义修复越权改写冻结卡: ' + card.sectionId);
+                }
+              }
+              guideCheck = checkReaderGuideContract(RG, input, guide, snapshot);
+              fs.writeFileSync(files.draft, JSON.stringify({ v: 1, key, inputHash, guide, errors: guideCheck.errors || [] }, null, 2), 'utf-8');
+              if (!guideCheck.ok) {
+                lastReviewError = new Error('导览语义修复后机械门失败: ' + guideCheck.errors.join('; '));
+                break;
+              }
+              continue;
+            }
+            break;
+          }
         } catch (e) {
+          if (e && e.code === 'R8_UPSTREAM_REVIEW') throw e;
           lastReviewError = e;
+          if (semanticRejected) break;
         }
         if (attempt === core.MAX_RETRIES) break;
       }
       if (!reviewCheck || !reviewCheck.ok) {
-        throw new Error('独立复核纠错预算耗尽: ' + (lastReviewError && lastReviewError.message ? lastReviewError.message : '未知错误'));
+        throw new Error((reviewStopReason || '独立复核纠错预算耗尽') + ': ' + (lastReviewError && lastReviewError.message ? lastReviewError.message : '未知错误'));
       }
     }
+
+    const acceptedReview = RG.validateReview(input, guide, review);
+    for (const note of acceptedReview.notes || []) {
+      onLog('[executor] R8 复核备注（模型判为不阻断）：' + RG.semanticIssueText(note));
+    }
+    const reviewJournalPath = path.join(workDir, '.tmp-reader-guide-review.json');
+    const acceptedJournal = JSON.stringify({
+      inputHash, guide, review, reviewPromptVersion: RG.REVIEW_PROMPT_VERSION, reopenNode: null, reopenNodes: [],
+      disposition: (acceptedReview.notes || []).length ? 'accepted_with_notes' : 'accepted'
+    }, null, 2);
+    if (fs.existsSync(reviewJournalPath)) {
+      const previousReview = fs.readFileSync(reviewJournalPath, 'utf8');
+      if (previousReview !== acceptedJournal) {
+        fs.writeFileSync(reviewJournalPath + '.previous-' + Date.now(), previousReview, 'utf8');
+      }
+    }
+    fs.writeFileSync(reviewJournalPath, acceptedJournal, 'utf8');
 
     // 原导览 + 独立复核一旦通过，先保存私有 checkpoint；若后续白话失败，重跑可复用前两次已验证 LLM 结果。
     // 这里只写 .tmp cache，不写任何公共 reader-guide 产物，也不改 report.html，因此不把半完成 R8 冒充完成态。
     if (!cached) {
-      fs.writeFileSync(files.cache, JSON.stringify({ key, inputHash, guide, review }, null, 2), 'utf-8');
+      fs.writeFileSync(files.cache, JSON.stringify({ key, inputHash, guide, review, reviewPromptVersion: RG.REVIEW_PROMPT_VERSION }, null, 2), 'utf-8');
       if (fs.existsSync(files.draft)) fs.rmSync(files.draft, { force: true });
       if (typeof opts.onBatchCheckpoint === 'function') {
         try { opts.onBatchCheckpoint({ phase: 'r8-core-cache', file: path.basename(files.cache), workDir }); }
@@ -5189,14 +5512,23 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
     } catch (immutabilityError) {
       throw new Error('[executor] R8 章节导览失败且检测到上游权威产物漂移: ' + (immutabilityError && immutabilityError.message ? immutabilityError.message : String(immutabilityError)) + '；原错误=' + (e && e.message ? e.message : String(e)));
     }
-    throw new Error('[executor] R8 章节导览失败: ' + (e && e.message ? e.message : String(e)));
+    const wrapped = new Error('[executor] R8 章节导览失败: ' + (e && e.message ? e.message : String(e)));
+    // Preserve semantic upstream-review authority metadata across presentation rollback wrapping.
+    // The journal remains the durable source of truth; these fields prevent callers/logs from
+    // collapsing a semantic reopen requirement into an ordinary R8 presentation failure.
+    if (e && e.code === 'R8_UPSTREAM_REVIEW') {
+      wrapped.code = e.code;
+      wrapped.reopenNode = e.reopenNode || (Array.isArray(e.reopenNodes) && e.reopenNodes[0]) || null;
+      wrapped.reopenNodes = Array.isArray(e.reopenNodes) ? e.reopenNodes.slice() : [];
+    }
+    throw wrapped;
   }
 }
 
 // ---------- R7 阶段 2：白话化（LLM 翻译 + 双版本合并 + 外部门禁） ----------
 
-const TRANSLATE_SYSTEM = '你是辩论裁判报告的 PLAIN 语义白话生成器。你的职责是生成候选 draft，不负责给自己判定“已经足够易懂”。硬性规则：1. 不新增、不删除、不改变任何主体、判断、结论、事实、数据、因果、否定、条件、责任、程度与逻辑；2. 数字、比分、轮次编号、判决结论、枚举与 ID（N#、M-ID、CP-ID、S# 等）、辩手名、辩题名、专名、章节标题、证据回引和标记类内容必须原样、原次数保留；3. 术语表只是认知提示，可以用自然等价解释，不得机械强塞“术语（固定释义）”；4. 内部编号可以只是 locator，若邻接上下文已经把事件/判断说清，不要求逐个解释编号，更不得为解释编号重复该编号；5. 每个 DOM 文本单元仍独立回填，但阅读语义会由后续独立 reviewer 在完整有序上下文中判断；6. 输出必须是合法 JSON：{"units":[{"id":"...","text":"改写后文本"}]}，覆盖全部输入 id，禁止额外文字。';
-const TRANSLATE_GUIDE_SYSTEM = '你是辩论裁判报告的 PLAIN 零背景章节导览生成器。保持原导览主体、胜负、事实、数字、因果方向、否定、条件、责任、程度和结论强度不变。术语表只是认知提示，可自然解释，不要求固定括号模板。原导览已有 N/M/CP/B0/Q/Phase/Lv/路径号等定位码必须原样、原次数保留，但 locator 本身不是读者必须学习的知识：同卡上下文已经把事件和判断说清时，不要求逐个解释。输出只负责候选 draft，最终 semanticEquivalent/zeroBackgroundReadable/naturalReadable/noLocatorDependency 由独立 reviewer 判断。只输出覆盖全部输入 id 的合法 JSON。';
+const TRANSLATE_SYSTEM = '你是辩论裁判报告的 PLAIN 语义白话生成器。你的职责是生成候选 draft，不负责给自己判定“已经足够易懂”。硬性规则：1. 不新增、不删除、不改变任何主体、判断、结论、事实、数据、因果、否定、条件、责任、程度与逻辑；2. 明确数字、比分以及证据定位 ID（N#、M-ID、CP-ID、S# 等）必须原样、原次数保留；辩手名、辩题名、专名、章节标题、证据回引不得被篡改；3. B0/B\'/B\'\'/SC/Phase/Q/Lv/场C 等框架标签属于语义概念，不要求原样或原次数保留，可以结合本场上下文自然解释、复述、改写或省略标签本身，但其所指概念、阶段关系和论证作用不能改变；4. 术语表只是认知提示，不是翻译表或答案键；必须先理解该术语在本场具体指什么，再决定如何自然表达，不得机械强塞“术语（固定释义）”；5. locator 本身不是读者必须学习的知识；如果邻接上下文已经把事件/判断说清，不要求逐个解释；6. 每个 DOM 文本单元仍独立回填，但阅读语义会由后续独立 reviewer 在完整有序上下文中判断；7. 输出必须是合法 JSON：{"units":[{"id":"...","text":"改写后文本"}]}，覆盖全部输入 id，禁止额外文字。';
+const TRANSLATE_GUIDE_SYSTEM = '你是辩论裁判报告的 PLAIN 零背景章节导览生成器。保持原导览主体、胜负、事实、数字、因果方向、否定、条件、责任、程度和结论强度不变。术语表只是帮助理解的候选语义，不是标准译文或答案键；必须先结合本场上下文理解，再自然解释。N/M/CP/S 等证据定位 ID 必须原样、原次数保留；B0/B\'/B\'\'/SC/Phase/Q/Lv/场C 等框架标签不要求原样或原次数保留，只要其所指概念、阶段关系和论证作用保持不变。locator 本身不是读者必须学习的知识：同卡上下文已经把事件和判断说清时，不要求逐个解释。输出只负责候选 draft，最终 semanticEquivalent/zeroBackgroundReadable/naturalReadable/noLocatorDependency 由独立 reviewer 判断。只输出覆盖全部输入 id 的合法 JSON。';
 
 // R7 阶段 3：核心字典（内嵌 PLAIN_DICT）＋可选外部扩展字典（--plain-dict，覆盖核心）
 function loadPlainDict(workDir, extraPath) {
@@ -5262,7 +5594,7 @@ const PLAIN_REFRESH_R8_OUTPUTS = ['reader-guide-input.json', 'reader-guide.json'
 
 function chunkHashOf(chunk) {
   return crypto.createHash('sha256')
-    // PLAIN-V2：旧 glossary 义务与新 comprehension 义务都属于缓存键；任一改变必须失效。
+    // Cache identity binds legacy template metadata and live semantic-hint metadata; any prompt-relevant change invalidates the cache.
     .update(chunk.map(it => it.id + '\u0000' + it.text + '\u0000' +
       (it.requiredGlosses || []).map(r => r.term + '\u0000' + r.gloss).join('\u0001') + '\u0000' +
       JSON.stringify(it.comprehensionRequirements || [])).join('\u0002'))
@@ -5332,13 +5664,14 @@ function splitPlainCacheChunks(units) {
   return chunks;
 }
 
-// A4-P1a：从一份报告重建 R7 输入，必须与 processReportAsync 的词典/首现语义同口径。
+// A4-P1a legacy cache-only compatibility: rebuild the historical first-seen glossary metadata exactly.
+// Live v4 does not treat this metadata as semantic approval authority.
 function plainCacheInputsFromHtml(html, dict) {
   const PL = require('../scripts/plain-language.js');
   const all = PL.extractUnits(PL.parseHtml(html));
   const translatable = all.filter(u => PL.classifyUnit(u) === 'translate');
   for (const unit of translatable) unit.dictHints = PL.dictHintsForText(unit.text, dict);
-  PL.annotateSemanticRequirements(translatable, dict);
+  PL.annotateSemanticRequirements(translatable, dict, { legacyFixed: true });
   annotatePlainComprehensionRequirements(translatable, require('../scripts/plain-comprehension.js').PROFILE_BODY);
   return { all, translatable, chunks: splitPlainCacheChunks(translatable) };
 }
@@ -5348,7 +5681,7 @@ function assertEqualPlainSignatures(label, actual, expected) {
     throw new Error('[executor] A4-P1a ' + label + ' 数量不一致: ' + actual.length + ' ≠ ' + expected.length);
   }
   for (let i = 0; i < actual.length; i++) {
-    if (JSON.stringify(actual[i]) !== JSON.stringify(expected[i])) {
+    if (!structuralJsonEqual(actual[i], expected[i])) {
       throw new Error('[executor] A4-P1a ' + label + ' 第 ' + i + ' 项不一致');
     }
   }
@@ -5402,10 +5735,10 @@ function readVerifiedPlainCache(workDir, index, chunk, dict) {
   }
   const missing = chunk.filter(item => typeof cache.results[item.id] !== 'string');
   if (missing.length) throw new Error('[executor] A4-P1a 缓存 ' + index + ' 缺少结果: ' + missing.slice(0, 5).map(x => x.id).join(','));
-  const semantic = PL.checkRequiredGlosses(chunk, id => cache.results[id]);
-  if (!semantic.ok) throw new Error('[executor] A4-P1a 缓存 ' + index + ' 首现术语解释缺失: ' + semantic.missing.map(x => x.term + '@' + x.unitId).join(','));
+  const legacyTemplate = PL.checkLegacyFixedGlossaryTemplate(chunk, id => cache.results[id]);
+  if (!legacyTemplate.ok) throw new Error('[executor] A4-P1a legacy-v3 固定术语模板不一致: ' + legacyTemplate.missing.map(x => x.term + '@' + x.unitId).join(','));
   const comprehension = checkPlainComprehensionItems(chunk, id => cache.results[id], require('../scripts/plain-comprehension.js').PROFILE_BODY);
-  if (!comprehension.ok) throw new Error('[executor] A4-P1a 缓存 ' + index + ' PLAIN-V2 可理解性门失败: ' + JSON.stringify(comprehension.issues.slice(0, 5)));
+  if (!comprehension.ok) throw new Error('[executor] A4-P1a 缓存 ' + index + ' PLAIN hard invariant 失败: ' + JSON.stringify(comprehension.issues.slice(0, 5)));
   return cache;
 }
 
@@ -5430,7 +5763,7 @@ function fingerprintFiles(workDir, names) {
 }
 
 function assertSameFingerprints(label, before, after) {
-  if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('[executor] A4-P1a ' + label + ' 指纹漂移');
+  if (!structuralJsonEqual(before, after)) throw new Error('[executor] A4-P1a ' + label + ' 指纹漂移');
 }
 
 function assertRefreshControls(dualHtml, plainHtml) {
@@ -5562,8 +5895,8 @@ async function refreshPlainArtifacts(workDir, opts) {
       if (oldChunk.length !== newChunk.length) throw new Error('[executor] A4-P1a 第 ' + index + ' 批单元数量不一致');
       const results = {};
       for (let i = 0; i < oldChunk.length; i++) results[newChunk[i].id] = legacyCaches[index].results[oldChunk[i].id];
-      const semantic = require('../scripts/plain-language.js').checkRequiredGlosses(newChunk, id => results[id]);
-      if (!semantic.ok) throw new Error('[executor] A4-P1a 第 ' + index + ' 批重键后首次术语解释缺失');
+      const legacyTemplate = require('../scripts/plain-language.js').checkLegacyFixedGlossaryTemplate(newChunk, id => results[id]);
+      if (!legacyTemplate.ok) throw new Error('[executor] A4-P1a 第 ' + index + ' 批重键后 legacy-v3 固定术语模板不一致');
       writePlainCache(stageDir, index, newChunk, dict, results);
     }
     let modelCalls = 0;
@@ -5579,8 +5912,8 @@ async function refreshPlainArtifacts(workDir, opts) {
     const PC = require('../pipeline-controller.js');
     const compare = PL.compareVersions(freshBase, stagePlain);
     if (!compare.ok) throw new Error('[executor] A4-P1a 暂存双版本比较失败');
-    const semantic = PL.checkSemanticPlain(freshBase, stagePlain, dict);
-    if (!semantic.ok) throw new Error('[executor] A4-P1a 暂存语义门禁失败');
+    const legacyTemplate = PL.checkLegacyFixedGlossaryReport(freshBase, stagePlain, dict);
+    if (!legacyTemplate.ok) throw new Error('[executor] A4-P1a 暂存 legacy-v3 固定术语模板一致性失败');
     const dataSource = fs.existsSync(path.join(stageDir, '.tmp-adjudicated-data.md')) ? path.join(stageDir, '.tmp-adjudicated-data.md') : path.join(stageDir, 'transition-final.md');
     const data = PC.extractDataMarkers(fs.readFileSync(dataSource, 'utf8'));
     for (const file of ['report.html', 'report-plain.html']) {
@@ -5962,7 +6295,7 @@ async function regeneratePlainV2Artifacts(workDir, cfg, onLog, opts) {
 
 function r8RepairIdsFromError(message, chunk) {
   const text = String(message || '');
-  if (!text.includes('R8 白话导览机械语义门失败') && !text.includes('R8 白话导览结构/事实硬门失败')) return [];
+  if (!text.includes('R8 白话导览结构/事实硬门失败')) return [];
   const wanted = new Set();
   const add = (sectionId, fields) => {
     for (const field of fields) {
@@ -5975,7 +6308,6 @@ function r8RepairIdsFromError(message, chunk) {
   while ((match = sectionRe.exec(text))) {
     const fields = [...match[2].matchAll(/"field":"(what|why|conclusion)"/g)].map(m => m[1]);
     if (fields.length) add(match[1], [...new Set(fields)]);
-    else if (match[2].includes('reasoning-bridge')) add(match[1], ['why']);
     else add(match[1], ['what', 'why', 'conclusion']);
   }
   const factRe = /reader-guide-plain 事实门:\s*(C(?:1[0-2]|[1-9]))(?:\s+(what|why|conclusion))?\b[^;]*/g;
@@ -5986,11 +6318,8 @@ function r8RepairIdsFromError(message, chunk) {
 function bodyRepairIdsFromError(message, chunk) {
   const text = String(message || '');
   const wanted = new Set();
-  if (text.includes('PLAIN-V2 可理解性门失败')) {
+  if (text.includes('PLAIN hard invariant 失败')) {
     for (const match of text.matchAll(/"id":"([^"]+)"/g)) wanted.add(match[1]);
-  }
-  if (text.includes('首次术语受控解释缺失')) {
-    for (const match of text.matchAll(/@([^,;\s]+)/g)) wanted.add(match[1]);
   }
   return (chunk || []).map(item => item.id).filter(id => wanted.has(id));
 }
@@ -6009,22 +6338,10 @@ function plainComprehensionRetryGuidance(errMsg) {
   const text = String(errMsg || '');
   const rules = [];
   if (text.includes('protected-token-drift')) {
-    rules.push('对 protected-token-drift：原文已有的数字、比分、轮次和内部 ID 必须逐字、逐次数保留，不能新增、删除、改号或重复；解释时改用“这个编号”“这一步”“这一阶段”“这个比例”等自然语言指代。');
+    rules.push('对 protected-token-drift：只修复明确数字、比分以及 N/M/CP/S 等证据定位 ID 的新增、删除、改号或重复；B0/B\'/B\'\'/SC/Phase/Q/Lv/场C 等语义概念标签不属于机械 exact-count 范围，不要为了通过机械门强行保留或删除它们。');
   }
-  if (text.includes('opaque-concept')) {
-    rules.push('对 opaque-concept：只处理机械诊断点名的单元/字段，使用本批“PLAIN-V2 认知义务”给出的受控解释就地说明该概念，优先写成“术语（受控解释）”或等价同句解释；不要只保留术语，也不要用另一个 Judge 内部术语解释它。');
-  }
-  if (text.includes('internal-marker')) {
-    rules.push('对 internal-marker：原文已有的内部定位标记必须逐字保留且出现次数不变，不能删除、改号、新增或重复；同时要在同一单元/字段用自然语言说明这个标记对应哪个步骤或判断、对读者起什么定位作用，使读者不需要先懂内部编号体系。解释时不要再次复述该标记。');
-  }
-  if (text.includes('density')) {
-    rules.push('对 density：不得删减信息；请在同一文本单元内拆成更短的句子，逐一解释诊断点名的概念/内部标记并补齐必要中间台阶，禁止跨单元搬运内容。');
-  }
-  if (text.includes('surface-only-rewrite')) {
-    rules.push('对 surface-only-rewrite：不要只做同义词替换；必须把原文默认读者已知的概念作用、比较关系或推理台阶补成普通读者可直接理解的自然语言，同时保持原判断强度和事实不变。');
-  }
-  if (text.includes('reasoning-bridge')) {
-    rules.push('对 reasoning-bridge：在被点名单元/字段内明确补出“前面的事实/比较 → 为什么产生影响 → 后面的判断/结论”的中间因果桥，可用“因为……所以……”或“因为……这意味着……”等自然表达；不能只说“重要”“有影响”而省略中间理由。');
+  if (text.includes('\"empty\"') || /白话文本为空/.test(text)) {
+    rules.push('对 empty：不得返回空文本；恢复原单元已经表达的事实与判断，并用自然语言重述，不能新增原文没有的结论。');
   }
   return rules.length ? '\n' + rules.join('\n') : '';
 }
@@ -6053,7 +6370,8 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
       id: u.id,
       context: (u.module ? u.module + ' · ' : '') + (u.blockType || 'block'),
       text: u.text,
-      requiredGlosses: Array.isArray(u.requiredGlosses) ? u.requiredGlosses : [],
+      // Historical first-seen fixed-gloss metadata is excluded from live v4 model input.
+      requiredGlosses: legacyV3 && Array.isArray(u.requiredGlosses) ? u.requiredGlosses : [],
       comprehensionRequirements: Array.isArray(u.comprehensionRequirements) ? u.comprehensionRequirements : []
     };
     if (cur.length >= MAX_UNITS || (curChars + item.text.length > MAX_CHARS && cur.length)) {
@@ -6086,9 +6404,9 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
       if (cached) {
         const hit = chunk.every(it => typeof cached[it.id] === 'string');
         const PL = require('../scripts/plain-language.js');
-        const legacySemantic = !legacyV3 || (hit && PL.checkRequiredGlosses(chunk, id => cached[id]).ok);
+        const legacyTemplateOk = !legacyV3 || (hit && PL.checkLegacyFixedGlossaryTemplate(chunk, id => cached[id]).ok);
         const hard = hit ? checkPlainComprehensionItems(chunk, id => cached[id], comprehensionProfile) : { ok: false };
-        if (hit && legacySemantic && hard.ok) {
+        if (hit && legacyTemplateOk && hard.ok) {
           for (const it of chunk) out.set(it.id, cached[it.id]);
           onLog('[executor] 白话批缓存命中 ' + (ci + 1) + '/' + chunks.length + '（' + chunk.length + ' 单元；' +
             (legacyV3 ? 'legacy-v3' : (cachedMeta && cachedMeta.approved === true ? 'approved' : 'draft')) + '）');
@@ -6118,9 +6436,9 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
       '- ' + u.id + ': ' + (req.term ? req.term + ' → ' + (req.explanation || '') : (req.markers || []).join('/') + ' → ' + req.mode)));
     const prompt = PV2.buildPromptContract({ profile: comprehensionProfile }) +
       '\n\n输入单元（JSON）：\n' + JSON.stringify({ units: chunk }, null, 2) +
-      (gloss.length ? '\n\n术语表（认知提示，不是固定输出模板；可自然等价解释）：\n- ' + gloss.join('\n- ') : '') +
-      (chunk.some(u => u.requiredGlosses.length) ? '\n\n首次出现术语提示（只帮助理解，不要求逐字括号复刻）：\n' + chunk.flatMap(u => u.requiredGlosses.map(r => '- ' + u.id + ': ' + r.term + ' → ' + r.gloss)).join('\n') : '') +
-      (comprehensionLines.length ? '\n\nPLAIN 认知提示（由独立 reviewer 结合上下文判断，不是机械 hard gate）：\n' + comprehensionLines.join('\n') : '') +
+      (legacyV3 && gloss.length ? '\n\nlegacy-v3 术语模板来源（仅历史兼容）：\n- ' + gloss.join('\n- ') : '') +
+      (legacyV3 && chunk.some(u => u.requiredGlosses.length) ? '\n\nlegacy-v3 首现固定模板元数据：\n' + chunk.flatMap(u => u.requiredGlosses.map(r => '- ' + u.id + ': ' + r.term + ' → ' + r.gloss)).join('\n') : '') +
+      (!legacyV3 && comprehensionLines.length ? '\n\nPLAIN 语义理解提示（只提供概念可能含义，不是翻译表或答案键；先结合本场上下文理解，不要求复现词典措辞）：\n' + comprehensionLines.join('\n') : '') +
       '\n\n请按规则对每个单元做白话改写，输出覆盖全部 id 的 JSON。';
     let parsed = null;
     let lastErr = null;
@@ -6159,7 +6477,7 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
               context: source.context,
               originalText: source.text,
               text: repairBase.get(id),
-              requiredGlosses: source.requiredGlosses || [],
+              requiredGlosses: legacyV3 ? (source.requiredGlosses || []) : [],
               comprehensionRequirements: source.comprehensionRequirements || []
             };
           });
@@ -6193,8 +6511,8 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
         }
         const PL = require('../scripts/plain-language.js');
         if (legacyV3) {
-          const semantic = PL.checkRequiredGlosses(chunk, id => parsed.get(id));
-          if (!semantic.ok) throw new Error('legacy-v3 首次术语受控解释缺失: ' + semantic.missing.map(x => x.term + '@' + x.unitId).join(','));
+          const legacyTemplate = PL.checkLegacyFixedGlossaryTemplate(chunk, id => parsed.get(id));
+          if (!legacyTemplate.ok) throw new Error('legacy-v3 固定术语模板不一致: ' + legacyTemplate.missing.map(x => x.term + '@' + x.unitId).join(','));
         }
         const hard = checkPlainComprehensionItems(chunk, id => parsed.get(id), comprehensionProfile);
         if (!hard.ok) throw new Error('PLAIN hard invariant 失败: ' + JSON.stringify(hard.issues.slice(0, 8)));
@@ -6214,7 +6532,7 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
         onLog('[executor] 白话翻译批 ' + (ci + 1) + '/' + chunks.length + ' attempt ' + (attempt + 1) + ' 失败: ' + errMsg.slice(0, 1200));
         if (e && e.code === 'ERR_PLAIN_RETRY_STALLED') throw e;
         if (failedCandidate && comprehensionProfile === PV2.PROFILE_GUIDE &&
-          (errMsg.includes('R8 白话导览机械语义门失败') || errMsg.includes('R8 白话导览结构/事实硬门失败'))) {
+          errMsg.includes('R8 白话导览结构/事实硬门失败')) {
           const nextRepairIds = r8RepairIdsFromError(errMsg, chunk);
           if (nextRepairIds.length) {
             repairBase = failedCandidate;
@@ -6224,8 +6542,8 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
             try { opts.onFailedCandidate({ results: failedCandidate, error: errMsg, repairIds: nextRepairIds, chunk, index: ci, total: chunks.length }); }
             catch (checkpointError) { onLog('[executor] R8 白话私有 draft checkpoint 失败（不改变原门禁结果）: ' + (checkpointError && checkpointError.message || checkpointError)); }
           }
-        } else if (failedCandidate && comprehensionProfile === PV2.PROFILE_BODY &&
-          (errMsg.includes('PLAIN-V2 可理解性门失败') || errMsg.includes('首次术语受控解释缺失'))) {
+        } else if (!legacyV3 && failedCandidate && comprehensionProfile === PV2.PROFILE_BODY &&
+          errMsg.includes('PLAIN hard invariant 失败')) {
           const nextRepairIds = bodyRepairIdsFromError(errMsg, chunk);
           if (nextRepairIds.length) {
             repairBase = failedCandidate;
@@ -6233,23 +6551,24 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
           }
         }
         parsed = null;
-        // 只为可行动的语义缺口追加固定反馈；下一次仍携带完整受控字典，避免把模型
-        // 自由文本或异常堆栈混进提示词。
+        // Retry feedback is limited to machine-provable hard invariants and output shape.
+        // Readability / concept explanation defects are handled by the independent semantic reviewer.
         const shapeError = errMsg.includes('翻译响应缺失') || errMsg.includes('翻译响应无 units 数组') ||
           /Unexpected token|Expected property name|JSON.*(?:parse|position)|position\s+\d+/i.test(errMsg);
-        lastRetryDeterministic = errMsg.includes('protected-token-drift') || errMsg.includes('首次术语受控解释缺失') || errMsg.includes('PLAIN-V2 可理解性门失败') ||
-          errMsg.includes('R8 白话导览机械语义门失败') || errMsg.includes('R8 白话导览结构/事实硬门失败') || shapeError;
+        lastRetryDeterministic = errMsg.includes('protected-token-drift') || errMsg.includes('PLAIN hard invariant 失败') ||
+          (legacyV3 && errMsg.includes('legacy-v3 固定术语模板不一致')) ||
+          errMsg.includes('R8 白话导览结构/事实硬门失败') || shapeError;
         const scopedCount = repairBase && repairIds.length ? repairIds.length : chunk.length;
         const scopedLabel = repairBase && repairIds.length ? '当前待修范围的全部 ' + scopedCount + ' 个 id' : '本批全部 ' + scopedCount + ' 个输入 id';
-        retryFeedback = errMsg.includes('首次术语受控解释缺失')
-          ? '\n\n上一次响应缺少首次术语受控解释。请严格按“首次术语硬约束”逐字修正对应单元；若已进入定点修复，只重发待修 id。'
+        retryFeedback = legacyV3 && errMsg.includes('legacy-v3 固定术语模板不一致')
+          ? '\n\n这是 legacy-v3 历史兼容重放：上一次响应不符合旧固定术语模板。仅为保持历史模板一致性修正；这不是 live v4 的语义判据。'
           : (shapeError
               ? '\n\n上一次响应没有遵守输出结构。你必须输出且只输出 {"units":[{"id":"...","text":"..."}]} 这一种 JSON 结构。必须恰好包含' + scopedLabel + '，每个 id 恰好一次且逐字保留；不得返回 cards、guide、review、说明文字或 Markdown。' +
                 (repairBase && repairIds.length
                   ? '当前为定点修复，只能返回当前待修范围，不能夹带未点名字段。'
                   : '即使只需要修正被点名的少数章节，也不得只返回修改项，必须重发本批全部 ' + chunk.length + ' 个 units。') +
                 '结构错误：' + errMsg.slice(0, 1200)
-              : ((errMsg.includes('R8 白话导览机械语义门失败') || errMsg.includes('R8 白话导览结构/事实硬门失败'))
+              : (errMsg.includes('R8 白话导览结构/事实硬门失败')
                 ? '\n\n上一次响应通过了字段级格式检查，但没有通过 R8 白话导览结构/事实硬门。以下诊断必须逐项消除；不得删减原导览信息、不得新增任何事实/胜负/主体/数字，也不得用新的内部术语替代旧术语。' +
                   plainComprehensionRetryGuidance(errMsg) +
                   (/含来源外事实 token:\s*(?:胜出|胜利|获胜|胜方|获胜方)/.test(errMsg)
@@ -6259,13 +6578,13 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
                     ? '\n本轮已进入定点修复：只输出待修字段的 ' + repairIds.length + ' 个 id；其它字段由执行器冻结并机械保留，禁止重写。'
                     : '\n无论只修改几个章节，都必须继续使用原 {"units":[...]} 结构并完整重发本批全部 ' + chunk.length + ' 个 id。') +
                   '\n请根据具体章节和字段修正后重发 JSON：\n' + errMsg.slice(0, 6000)
-                : (errMsg.includes('PLAIN-V2 可理解性门失败')
-                  ? '\n\n上一次响应没有通过 PLAIN-V2 可理解性门。不要只换同义词；必须逐项消除下面的机械诊断，同时保持所有事实、主体、数字、因果方向、否定、责任和结论强度不变。' +
+                : (errMsg.includes('PLAIN hard invariant 失败')
+                  ? '\n\n上一次响应没有通过 PLAIN 机械硬不变量检查。只修复机器明确指出的空输出或受保护 token 漂移；不要用固定词典措辞来“过可读性门”。术语解释是否充分由后续独立 semantic reviewer 判断。' +
                     plainComprehensionRetryGuidance(errMsg) +
                     (repairIds.length
-                      ? '\n本轮已进入 BODY 定点修复：只输出待修的 ' + repairIds.length + ' 个 id；其它已绿单元由执行器冻结并机械保留，合并后会重新跑完整机械门。'
+                      ? '\n本轮已进入 BODY 定点机械修复：只输出待修的 ' + repairIds.length + ' 个 id；其它单元由执行器冻结并机械保留。'
                       : '') +
-                    '\n请只根据本批既有受控解释和机械诊断修正后重发 JSON。机械诊断：\n' + errMsg.slice(0, 6000)
+                    '\n机械诊断：\n' + errMsg.slice(0, 6000)
                   : (errMsg.includes('protected-token-drift')
                     ? '\n\n上一次响应改变了受保护数字/编号。' + plainComprehensionRetryGuidance(errMsg) + '\n请修正后重发 JSON。'
                     : ''))));
@@ -6391,7 +6710,7 @@ function verifyApprovedPlainReviewProof(cacheDir, cfg, units, results, dict) {
   for (const key of ['sourceHash','candidateHash','dictHash','generatorPromptVersion','generatorPromptHash','reviewPromptVersion']) {
     if (proof && proof[key] !== binding[key]) return { ok: false, error: 'review proof binding drift: ' + key };
   }
-  if (!proof || JSON.stringify(proof.modelSnapshot || {}) !== JSON.stringify(binding.modelSnapshot) || proof.state !== 'approved') {
+  if (!proof || !structuralJsonEqual(proof.modelSnapshot || {}, binding.modelSnapshot) || proof.state !== 'approved') {
     return { ok: false, error: 'review proof state/modelSnapshot 不匹配' };
   }
   const expectedIds = (units || []).map(unit => unit.id);
@@ -6434,6 +6753,7 @@ async function reviewPlainUnits(cfg, units, initialResults, onLog, dict, opts) {
 
   let targetIds = allIds.slice();
   let repairCount = 0;
+  let hardRepairCount = 0;
   let changed = false;
   const history = [];
   while (true) {
@@ -6526,15 +6846,54 @@ async function reviewPlainUnits(cfg, units, initialResults, onLog, dict, opts) {
     }
     const incoming = parseTranslateJson(repairRaw, failedIds);
     const before = new Map(results);
-    for (const id of failedIds) results.set(id, incoming.get(id));
+    const candidateResults = new Map(results);
+    for (const id of failedIds) candidateResults.set(id, incoming.get(id));
     for (const id of allIds) {
-      if (!failedIds.includes(id) && results.get(id) !== before.get(id)) {
+      if (!failedIds.includes(id) && candidateResults.get(id) !== before.get(id)) {
         throw new Error('[executor] R7 repair 越权改写已冻结 ID: ' + id);
       }
     }
     const repairedUnits = (units || []).filter(unit => failedIds.includes(unit.id));
-    const repairedHard = checkPlainComprehensionItems(repairedUnits, id => results.get(id), PV2.PROFILE_BODY);
-    if (!repairedHard.ok) throw new Error('[executor] R7 repair 硬不变量失败: ' + JSON.stringify(repairedHard.issues.slice(0, 8)));
+    let repairedHard = checkPlainComprehensionItems(repairedUnits, id => candidateResults.get(id), PV2.PROFILE_BODY);
+    if (!repairedHard.ok) {
+      if (hardRepairCount >= 1) {
+        throw new Error('[executor] R7 repair 机械硬门定点纠错预算耗尽: ' + JSON.stringify(repairedHard.issues.slice(0, 8)));
+      }
+      const hardFailedIds = [];
+      for (const item of repairedHard.issues || []) {
+        const id = String(item && item.id || '');
+        if (failedIds.includes(id) && !hardFailedIds.includes(id)) hardFailedIds.push(id);
+      }
+      if (!hardFailedIds.length) {
+        throw new Error('[executor] R7 repair 硬不变量失败且无法定位 ID: ' + JSON.stringify(repairedHard.issues.slice(0, 8)));
+      }
+      hardRepairCount++;
+      const hardRepairPrompt = PV2.buildReadabilityHardRepairPrompt(
+        units,
+        id => candidateResults.get(id),
+        dict,
+        { targetIds: hardFailedIds, mechanicalIssues: repairedHard.issues }
+      );
+      core.assertWithinContextLimit(hardRepairPrompt, 'R7 readability mechanical hard repair');
+      onLog('[executor] R7 repair 机械硬门拒绝：' + hardFailedIds.join(',') + '；执行定点机械纠错 1/1');
+      let hardRepairRaw;
+      if (cfg && cfg.provider === 'mock' && !opts.requestCompletion) {
+        hardRepairRaw = JSON.stringify({ units: hardFailedIds.map(id => ({ id, text: candidateResults.get(id) })) });
+      } else {
+        hardRepairRaw = await rc(cfg, [{ role: 'user', content: hardRepairPrompt }], {
+          system: '你是 PLAIN 机械硬不变量定点纠错器。只能修机器明确指出的 token/数字/ID 次数或内容违规；保持上一轮语义修复，其余上下文只读。只输出严格 units JSON。',
+          codexRunner: opts.codexRunner
+        });
+      }
+      const hardIncoming = parseTranslateJson(hardRepairRaw, hardFailedIds);
+      for (const id of hardFailedIds) candidateResults.set(id, hardIncoming.get(id));
+      repairedHard = checkPlainComprehensionItems(repairedUnits, id => candidateResults.get(id), PV2.PROFILE_BODY);
+      if (!repairedHard.ok) {
+        throw new Error('[executor] R7 repair 机械硬门定点纠错仍失败: ' + JSON.stringify(repairedHard.issues.slice(0, 8)));
+      }
+      onLog('[executor] R7 repair 机械硬门定点纠错通过：' + hardFailedIds.join(','));
+    }
+    for (const id of failedIds) results.set(id, candidateResults.get(id));
     rewriteLivePlainCaches(cacheDir, results, false, null);
     if (opts && typeof opts.onBatchCheckpoint === 'function') {
       await Promise.resolve(opts.onBatchCheckpoint({ phase: 'repair-draft', state: 'draft', targetIds: failedIds.slice(), cacheDir }));
@@ -6600,7 +6959,7 @@ async function applyPlain(workDir, cfg, onLog, extraDictPath, opts) {
             id: unit.id,
             context: (unit.module ? unit.module + ' · ' : '') + (unit.blockType || 'block'),
             text: unit.text,
-            requiredGlosses: Array.isArray(unit.requiredGlosses) ? unit.requiredGlosses : [],
+            requiredGlosses: [],
             comprehensionRequirements: Array.isArray(unit.comprehensionRequirements) ? unit.comprehensionRequirements : []
           };
           if (mockCur.length >= 40 || (mockChars + item.text.length > 6000 && mockCur.length)) {
@@ -6646,15 +7005,16 @@ async function applyPlain(workDir, cfg, onLog, extraDictPath, opts) {
     strictIdentity: false,
     context: { topic },
     dict,
+    legacyFixedGlossary: legacyV3,
     translateUnits: translateDraft
   });
 
   if (legacyV3) {
     // A4 compatibility lane only: retain the historical exact first-gloss contract for no-model refresh.
-    const semantic = PL.checkSemanticPlain(html, res.html, dict);
-    if (!semantic.ok) {
-      throw new Error('[executor] legacy-v3 白话产物语义门禁失败：首次术语解释缺失 ' +
-        semantic.missing.map(x => x.term + '@' + x.unitId).join(','));
+    const legacyTemplate = PL.checkLegacyFixedGlossaryReport(html, res.html, dict);
+    if (!legacyTemplate.ok) {
+      throw new Error('[executor] legacy-v3 历史固定术语模板一致性失败：' +
+        legacyTemplate.missing.map(x => x.term + '@' + x.unitId).join(','));
     }
   } else {
     if (!(draftResults instanceof Map) || !reviewUnits.length) throw new Error('[executor] R7 未获得可复核的完整 draft 单元序列');
@@ -6673,6 +7033,7 @@ async function applyPlain(workDir, cfg, onLog, extraDictPath, opts) {
         strictIdentity: false,
         context: { topic },
         dict,
+        legacyFixedGlossary: legacyV3,
         translateUnits: async units => {
           const expected = units.map(unit => unit.id);
           const missing = expected.filter(id => !draftResults.has(id));
@@ -7112,7 +7473,7 @@ function assertR45AdjudicationInputBinding(workDir, adj, binding) {
   }
   assertR45BindingEqual(sidecar, expectedNow, expectedNow.parent_view_revision, 'R4.5 lineage sidecar/current');
   assertR45BindingEqual(actual, expectedNow, expectedNow.parent_view_revision, 'adjudication/current R4.5 lineage');
-  if (JSON.stringify(actual) !== JSON.stringify(sidecar)) {
+  if (!structuralJsonEqual(actual, sidecar)) {
     throw consumerAuthorityError('adjudication R4.5 lineage 与机械 sidecar 不一致');
   }
   return true;
@@ -8232,4 +8593,15 @@ async function runPipeline(opts) {
   return { ok: results.every(r => r.ok), results, consumerBinding, semanticFirstMode: sfMode, semanticProvenance };
 }
 
-module.exports = { runRound, runPipeline, resolveActiveSemanticAuthority, buildFullData, buildR3Prompt, buildR25Prompt, buildR2Prompt, buildR4Prompt, enrichR5Prompts, injectDataSource, assertPromptsWithinContext, resolveSkillPath, mergeNarrative, buildTransitionFinal, renderReport, loadFileConfig, validateRound, validateR3FinalOwnedPreview, goodMockResponder, sleep, adjudicationRecheck, buildAdjudicationInput, translateUnitsLLM, reviewPlainUnits, applyPlain, rebuildApprovedPlainReport, refreshPlainArtifacts, regeneratePlainV2Artifacts, applyReaderGuide, embedVerifiedReaderGuide, loadPlainDict, injectAdjudication, parseAdjArtifact, loadSourceAnchorExemptions, warningsForAdjudication, adjudicationConflictExclusions, legacySemanticAdjudicationConflicts, writeR45InputBinding, stampR45AdjudicationInputBinding, assertR45AdjudicationInputBinding, assertSourceAnchorExemptionArtifactBinding, verifiedV5ReviewDecision, verifiedCurrentGlobalReviewDecision, checkFiniteNetWinnerAlignment, buildFinalAdjudicationBindings, checkFinalAdjudicationAlignment, ensureFinalAdjudicationAuthority, verifyFinalAdjudicationAuthority, semanticFirstMode, semanticShadowRoot, createSemanticSidecarStore, createTestActiveWorkflow, prepareTestSemanticAuthority, buildSemanticConsumerBinding, testSemanticAuthorityBlock, buildTestProvenance, validateTestProvenance, updateTestProvenance, readTestProvenance, writeTestProvenance, semanticIdentity, assertSemanticIdentityUnchanged, readTestSemanticCurrent, semanticReopenRequestFingerprint, duplicateReopenProjectionGate, collectPersistedReopenFingerprints, validateGlobalReopenHistory, extractSemanticReopenRequest, publishTestR3Reopen, invalidateAfterSemanticReopen, invalidateBlockedR3Projection, pruneConsumerBindingAfterInvalidation, captureRoundPromptBaseline, restoreRoundPromptBaseline, resolveConsumerBinding, consumerViewPath, validationConsumerViewPath, validationConsumerViewText, consumerBindingFromProducedViews, readerGuidePaths, buildReaderGuideInputFromWorkDir, prepareTestScAuthority, publishTestScReopen, validateScRequestReceipt, validateScCurrentChain, buildScProvenance, validateScProvenance, readScProvenance, writeScProvenance, invalidateAfterScReopen, scGlobalBinding, buildScCurrentView };
+function readerGuideContractIdentity() {
+  const RG = require('../scripts/reader-guide.js');
+  return {
+    schemaVersion: RG.SCHEMA_VERSION,
+    promptVersion: RG.PROMPT_VERSION,
+    reviewPromptVersion: RG.REVIEW_PROMPT_VERSION,
+    plainSchemaVersion: RG.PLAIN_SCHEMA_VERSION,
+    plainPromptVersion: RG.PLAIN_PROMPT_VERSION
+  };
+}
+
+module.exports = { stableStructuralJson, structuralJsonEqual, runRound, runPipeline, resolveActiveSemanticAuthority, buildFullData, buildR3Prompt, buildR25Prompt, buildR2Prompt, buildR4Prompt, enrichR5Prompts, injectDataSource, assertPromptsWithinContext, resolveSkillPath, mergeNarrative, buildTransitionFinal, renderReport, loadFileConfig, validateRound, validateR3FinalOwnedPreview, goodMockResponder, sleep, adjudicationRecheck, buildAdjudicationInput, translateUnitsLLM, reviewPlainUnits, applyPlain, rebuildApprovedPlainReport, refreshPlainArtifacts, regeneratePlainV2Artifacts, applyReaderGuide, embedVerifiedReaderGuide, loadPlainDict, injectAdjudication, parseAdjArtifact, loadSourceAnchorExemptions, warningsForAdjudication, adjudicationConflictExclusions, legacySemanticAdjudicationConflicts, writeR45InputBinding, stampR45AdjudicationInputBinding, assertR45AdjudicationInputBinding, assertSourceAnchorExemptionArtifactBinding, verifiedV5ReviewDecision, verifiedCurrentGlobalReviewDecision, checkFiniteNetWinnerAlignment, buildFinalAdjudicationBindings, checkFinalAdjudicationAlignment, ensureFinalAdjudicationAuthority, verifyFinalAdjudicationAuthority, semanticFirstMode, semanticShadowRoot, createSemanticSidecarStore, createTestActiveWorkflow, prepareTestSemanticAuthority, buildSemanticConsumerBinding, testSemanticAuthorityBlock, buildTestProvenance, validateTestProvenance, updateTestProvenance, readTestProvenance, writeTestProvenance, semanticIdentity, assertSemanticIdentityUnchanged, readTestSemanticCurrent, semanticReopenRequestFingerprint, duplicateReopenProjectionGate, collectPersistedReopenFingerprints, validateGlobalReopenHistory, extractSemanticReopenRequest, publishTestR3Reopen, invalidateAfterSemanticReopen, invalidateBlockedR3Projection, pruneConsumerBindingAfterInvalidation, captureRoundPromptBaseline, restoreRoundPromptBaseline, resolveConsumerBinding, consumerViewPath, validationConsumerViewPath, validationConsumerViewText, consumerBindingFromProducedViews, readerGuidePaths, buildReaderGuideInputFromWorkDir, prepareTestScAuthority, publishTestScReopen, validateScRequestReceipt, validateScCurrentChain, buildScProvenance, validateScProvenance, readScProvenance, writeScProvenance, invalidateAfterScReopen, scGlobalBinding, buildScCurrentView, readerGuideContractIdentity };

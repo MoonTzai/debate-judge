@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const FROZEN_HTML_SHA256 = 'e392b5af98ecefefb70a3e8260d1376603bbb9e0d2b5e674647d2a2826eeba58';
+const FROZEN_HTML_SHA256 = '5c3750d3725326feb7ef3a1e5297dd205febcad1049863846aec0e2c5c3b6cde';
 const HTML = path.join(ROOT, 'web', 'judge.html');
 
 function shaBytes(bytes) {
@@ -27,7 +27,7 @@ for (const rel of ['web/assets/sanctum-dark.webp', 'web/assets/sanctum-light.web
   }
 }
 
-run(['--test', ...["tests/consumer-claims.test.js","tests/flight-incarnation-regression.test.js","tests/global-semantic-review-v5-format-v10.test.js","tests/plain-semantic.test.js","tests/plain-toggle.test.js","tests/reader-guide.test.js","tests/report-host-auto-height-v10.test.js","tests/run-settings.test.js","tests/sc-semantic-authority-host-v10.test.js","tests/semantic-evidence-anchor-v10.test.js","tests/semantic-first-e2e-web-runtime-v10.test.js","tests/single-file-parity.test.js","tests/tenth-auto-fix-boundary.test.js","tests/tenth-control-plane.test.js","tests/tenth-recovery.test.js"]]);
+run(['--test', ...["tests/consumer-claims.test.js","tests/flight-incarnation-regression.test.js","tests/global-semantic-review-v5-format-v10.test.js","tests/plain-comprehension.test.js","tests/plain-semantic.test.js","tests/plain-toggle.test.js","tests/postprocess-report-return-contract.test.js","tests/published-precore-recovery.test.js","tests/r8-c8-fact-semantic.test.js","tests/r8-review-contract-v3-real-shape.test.js","tests/r8-upstream-guard.test.js","tests/reader-guide.test.js","tests/report-host-auto-height-v10.test.js","tests/resume-review-store-contract.test.js","tests/run-settings.test.js","tests/sc-projection-representation-separation.test.js","tests/sc-semantic-authority-host-v10.test.js","tests/semantic-evidence-anchor-v10.test.js","tests/semantic-first-e2e-web-runtime-v10.test.js","tests/semantic-mechanical-llm-boundary.test.js","tests/semantic-structured-recovery-extra-closer.test.js","tests/single-file-parity.test.js","tests/structural-json-gate-audit.test.js","tests/tenth-auto-fix-boundary.test.js","tests/tenth-control-plane.test.js","tests/tenth-recovery.test.js"]]);
 // Manual generic acceptance needs a caller-supplied completed workDir and is not a zero-argument CI test.
 // Example: node tests/sc-semantic-authority-generic-acceptance.js <workDir>
 console.log('DELIBERATIVE_PUBLIC_VERIFY_PASS');

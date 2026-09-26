@@ -189,14 +189,255 @@ function semanticSystem(role) {
   return base + ' 请形成可回原文核查的分析，不按固定字段、Phase或候选数量计算成立。';
 }
 
+function normalizeJsonEnvelope(text) {
+  return String(text == null ? '' : text).trim();
+}
+
+function jsonRepairPosition(message, pattern) {
+  const match = String(message || '').match(pattern);
+  if (!match) return null;
+  const position = Number(match[1]);
+  return Number.isInteger(position) && position >= 0 ? position : null;
+}
+
+function trailingCommaRepairPositions(body) {
+  const positions = [];
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (inString) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch !== ',') continue;
+    let next = i + 1;
+    while (next < body.length && /\s/.test(body[next])) next++;
+    if (body[next] === '}' || body[next] === ']') positions.push(i);
+  }
+  return positions;
+}
+
+function firstCompleteJsonObjectEnd(body) {
+  let inString = false;
+  let escaped = false;
+  const stack = [];
+  let started = false;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (!started) {
+      if (/\s/.test(ch)) continue;
+      if (ch !== '{') return null;
+      started = true;
+      stack.push('}');
+      continue;
+    }
+    if (inString) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{') { stack.push('}'); continue; }
+    if (ch === '[') { stack.push(']'); continue; }
+    if (ch === '}' || ch === ']') {
+      if (!stack.length || stack[stack.length - 1] !== ch) return null;
+      stack.pop();
+      if (!stack.length) return i + 1;
+    }
+  }
+  return null;
+}
+
+// Bounded structure-only recovery. Strict JSON parse is always attempted first.
+// Recovery accepts exactly one independently-valid object candidate from a finite,
+// semantics-preserving formatting class set; ambiguity, truncation and semantic invalidity fail closed.
+function repairStrictJsonSyntax(text, label) {
+  const raw = String(text == null ? '' : text);
+  const body = normalizeJsonEnvelope(raw);
+  try {
+    JSON.parse(body);
+    return { text: body, repaired: false, repair: null };
+  } catch (firstError) {
+    const parseError = String(firstError && firstError.message || '');
+    const candidates = [];
+    const seen = new Set();
+    const pushCandidate = (candidate, details) => {
+      candidate = String(candidate);
+      if (candidate === body || seen.has(candidate)) return;
+      seen.add(candidate);
+      let parsed;
+      try { parsed = JSON.parse(candidate); }
+      catch (_) { return; }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+      candidates.push({ text: candidate, details });
+    };
+
+    // Envelope-only recovery: exact single Markdown JSON fence, no surrounding prose.
+    const fence = String.fromCharCode(96).repeat(3);
+    const fenced = body.match(new RegExp('^' + fence + '(?:json)?\\s*([\\s\\S]*?)\\s*' + fence + '$', 'i'));
+    if (fenced) {
+      pushCandidate(String(fenced[1] || '').trim(), {
+        algorithm: 'unwrap-json-fence-v1',
+        operation: 'unwrap-envelope',
+        position: null,
+        token: fence
+      });
+    }
+
+    // Missing property-name colon.
+    const colonPosition = jsonRepairPosition(
+      parseError, /Expected ':' after property name in JSON at position\s+(\d+)/i);
+    if (colonPosition != null && colonPosition <= body.length) {
+      let previous = colonPosition - 1;
+      while (previous >= 0 && /\s/.test(body[previous])) previous--;
+      const next = body[colonPosition];
+      if (body[previous] === '"' && /[\\"{\[\-0-9tfn]/.test(String(next || ''))) {
+        pushCandidate(body.slice(0, colonPosition) + ':' + body.slice(colonPosition), {
+          algorithm: 'insert-missing-colon-v2',
+          operation: 'insert',
+          position: colonPosition,
+          token: ':'
+        });
+      }
+    }
+
+    // Missing comma after a complete object property value or array element.
+    const commaPosition = jsonRepairPosition(
+      parseError, /Expected ',' or '[}\]]' after (?:property value|array element) in JSON at position\s+(\d+)/i);
+    if (commaPosition != null && commaPosition <= body.length) {
+      pushCandidate(body.slice(0, commaPosition) + ',' + body.slice(commaPosition), {
+        algorithm: 'insert-missing-comma-v1',
+        operation: 'insert',
+        position: commaPosition,
+        token: ','
+      });
+    }
+
+    // Exactly one trailing structural comma may be removed. Multiple-defect inputs still fail
+    // because no single candidate can parse, and multiple independently-valid candidates are rejected.
+    for (const position of trailingCommaRepairPositions(body)) {
+      pushCandidate(body.slice(0, position) + body.slice(position + 1), {
+        algorithm: 'remove-trailing-comma-v1',
+        operation: 'remove',
+        position,
+        token: ','
+      });
+    }
+
+    // A model may occasionally emit one complete JSON object and then one unmatched closing
+    // delimiter. This is recoverable only when the prefix is structurally proven complete and
+    // the entire non-whitespace suffix is exactly one '}' or ']'. Any prose, second JSON value,
+    // multiple closers, truncation, or ambiguous structure remains fail-closed.
+    const completeObjectEnd = firstCompleteJsonObjectEnd(body);
+    if (completeObjectEnd != null) {
+      const suffix = body.slice(completeObjectEnd);
+      const trimmedSuffix = suffix.trim();
+      if (trimmedSuffix === '}' || trimmedSuffix === ']') {
+        const closerPosition = body.lastIndexOf(trimmedSuffix);
+        pushCandidate(body.slice(0, completeObjectEnd), {
+          algorithm: 'remove-single-trailing-unmatched-closer-v1',
+          operation: 'remove',
+          position: closerPosition,
+          token: trimmedSuffix
+        });
+      }
+    }
+
+    if (candidates.length !== 1) {
+      return {
+        text: body,
+        repaired: false,
+        repair: null,
+        error: firstError,
+        repairCandidateCount: candidates.length
+      };
+    }
+    const accepted = candidates[0];
+    return {
+      text: accepted.text,
+      repaired: true,
+      repair: {
+        schema: 'semantic-json-structure-repair-v2',
+        algorithm: accepted.details.algorithm,
+        operation: accepted.details.operation,
+        label: String(label || ''),
+        position: accepted.details.position,
+        token: accepted.details.token,
+        parseError,
+        candidateCount: 1,
+        originalSha256: sha256Text(raw),
+        normalizedInputSha256: sha256Text(body),
+        repairedSha256: sha256Text(accepted.text),
+        parseResult: 'valid-json-object'
+      }
+    };
+  }
+}
+
+function buildJsonRepairJournal(recovered, rawRef, requestRef) {
+  if (!recovered || recovered.repaired !== true || !recovered.repair) return null;
+  const repair = recovered.repair;
+  return {
+    schema: 'semantic-json-structure-repair-journal-v1',
+    label: String(repair.label || ''),
+    rawRef: rawRef || null,
+    requestRef: requestRef || null,
+    parseError: String(repair.parseError || ''),
+    repairAttempt: {
+      algorithm: repair.algorithm,
+      operation: repair.operation,
+      position: repair.position == null ? null : Number(repair.position),
+      token: repair.token == null ? null : String(repair.token),
+      candidateCount: Number(repair.candidateCount || 0)
+    },
+    originalSha256: repair.originalSha256,
+    normalizedInputSha256: repair.normalizedInputSha256,
+    repairedText: String(recovered.text),
+    repairedSha256: repair.repairedSha256,
+    parseResult: repair.parseResult,
+    semanticValidation: 'not_asserted_by_format_recovery'
+  };
+}
+
+const SEMANTIC_CONTRACT_RETRY_CODE_PREFIXES = Object.freeze([
+  'SEMANTIC_DECISION_',
+  'SEMANTIC_REVIEW_',
+  'SEMANTIC_FIDELITY_',
+  'SOURCE_EVIDENCE_'
+]);
+
+function isSemanticContractOutputError(error) {
+  const code = String(error && error.code || '');
+  return SEMANTIC_CONTRACT_RETRY_CODE_PREFIXES.some(prefix => code.startsWith(prefix));
+}
+
+function semanticContractRetryFeedback(stage, error) {
+  const code = String(error && error.code || 'UNCLASSIFIED_CONTRACT_ERROR');
+  const message = String(error && error.message || error || '').slice(0, 1200);
+  return [
+    '【上一份' + stage + '输出未通过机器可验证接口合同】',
+    '错误代码：' + code,
+    '错误信息：' + message,
+    '',
+    '这不是让你机械修补上一份文本，也不是要求迎合既有结论。',
+    '请重新依据完整原文和本请求中的被审语义/实际 projection，独立完成本阶段语义判断。',
+    '原结论可以保持，也可以在重新理解后改变；不要把上述机器错误本身当作语义证据。',
+    '只输出当前合同要求的一个完整 JSON 对象，JSON 前后不要附加解释。'
+  ].join('\n');
+}
+
 function parseStrictJsonObject(text, label) {
-  let body = String(text == null ? '' : text).trim();
-  const fenced = body.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  if (fenced) body = fenced[1].trim();
+  const recovered = repairStrictJsonSyntax(text, label);
   let doc;
-  try { doc = JSON.parse(body); }
+  try { doc = JSON.parse(recovered.text); }
   catch (e) {
-    const err = new Error('[semantic-workflow] ' + label + ' JSON invalid: ' + e.message);
+    const sourceError = recovered.error || e;
+    const err = new Error('[semantic-workflow] ' + label + ' JSON invalid: ' + sourceError.message);
     err.code = 'SEMANTIC_DECISION_INVALID';
     throw err;
   }
@@ -207,8 +448,7 @@ function parseStrictJsonObject(text, label) {
   }
   return doc;
 }
-
-const EVIDENCE_QUOTE_PROTOCOL = '【证据逐字硬约束】review/fidelity 的每个 evidence[].quote 必须是【原文】中的逐字符连续 exact substring。允许跨物理行，但只有在 quote 原样保留原文真实换行时成立；严禁把多行用空格、标点或其他规范化方式拼成新字符串，也严禁修正原文中的错别字、口语噪声、标点或空白。完整原文已经直接提供；请从原文复制证据，不要依赖第二份规范化/重排行索引。若一个理由依赖不连续的多处原文，拆成多个 evidence 项。任何给出的 quote 都必须可被机器在当前 source 中逐字定位，不得用近似引文。';
+const EVIDENCE_QUOTE_PROTOCOL = '【证据逐字硬约束】review/fidelity 的每个 evidence[].quote 必须是【原文】中的逐字符连续 exact substring。允许跨物理行，但只有在 quote 原样保留原文真实换行时成立；严禁把多行用空格、标点或其他规范化方式拼成新字符串，也严禁修正原文中的错别字、口语噪声、标点或空白。完整原文已经直接提供；请从原文复制证据，不要依赖第二份规范化/重排行索引。若一个理由依赖不连续的多处原文，拆成多个 evidence 项。quote 还必须能在当前 source 中唯一定位；若同一逐字片段出现多次，请扩展为包含必要上下文的更长连续原文片段，禁止让代码或你自己任意选择“第一次出现”。任何给出的 quote 都必须可被机器在当前 source 中逐字且唯一定位，不得用近似引文。';
 const V5_TOP_KEYS = Object.freeze(['decision', 'evidence', 'reason', 'net', 'replacement', 'semantic']);
 const V5_REPLACEMENT_KEYS = Object.freeze(['mode', 'standalone', 'depends_on_prior_semantic', 'authority_quote', 'net_quote']);
 const V5_REVIEW_FORMAT_PROTOCOL = [
@@ -262,6 +502,12 @@ function anchorEvidence(sourceText, evidence, opts) {
       err.code = 'SOURCE_EVIDENCE_MISMATCH';
       throw err;
     }
+    if (spans.length > 1) {
+      const err = new Error('[semantic-workflow] ' + label + '[' + index + '] quote matches multiple source spans; provide a longer exact quote that uniquely identifies the intended context');
+      err.code = 'SOURCE_EVIDENCE_AMBIGUOUS';
+      err.matchCount = spans.length;
+      throw err;
+    }
     const located = spans[0];
     return {
       quote: located.quote,
@@ -306,6 +552,11 @@ function softAnchorEvidence(sourceText, evidence, opts) {
     if (!spans.length) {
       return Object.assign(base, {
         provenance_error: label + '[' + index + '] quote is not an exact substring of current source'
+      });
+    }
+    if (spans.length > 1) {
+      return Object.assign(base, {
+        provenance_error: label + '[' + index + '] quote matches multiple source spans; locator intentionally left unresolved'
       });
     }
     const located = spans[0];
@@ -797,18 +1048,115 @@ function createWorkflow(capabilities) {
     const reviewExtra = '【被审语义】\n' + String(baseObj.content) +
       (input.issueText ? '\n\n【具体问题】\n' + String(input.issueText) : '') +
       '\n\n' + V5_REVIEW_FORMAT_PROTOCOL;
-    const reviewCall = await callAndPersist(sessionId, 'review', source, input.reviewPrompt || '', reviewExtra,
-      Object.assign({}, input, { requestId: prefix + '-review' }));
-    // The review model gets exactly one semantic decision opportunity. Invalid JSON/schema is
-    // a representation failure and fails closed; it must not trigger a same-run model repair.
+    let reviewCall;
+    if (input.resumeReviewRawRef) {
+      const recoveredRaw = await caps.readObject(input.resumeReviewRawRef);
+      const rm = recoveredRaw && recoveredRaw.metadata || {};
+      if (!input.resumeReviewRawRef || input.resumeReviewRawRef.kind !== 'raw' ||
+          rm.role !== 'review' || !rm.requestRef ||
+          rm.sourceSha256 !== source.sourceSha256 ||
+          (rm.contextSha256 || null) !== (source.contextSha256 || null)) {
+        const err = new Error('[semantic-workflow] resume review raw is not source-bound review evidence');
+        err.code = 'SEMANTIC_RECOVERY_RAW_INVALID';
+        throw err;
+      }
+      reviewCall = {
+        result: normalizeCompletion({
+          text: recoveredRaw.content,
+          completion_status: rm.completion_status || 'unknown',
+          completion_evidence: rm.completion_evidence || {},
+          diagnostics: Object.assign({}, rm.diagnostics || {}, { recovered_precurrent_review_raw: true })
+        }),
+        rawRef: input.resumeReviewRawRef,
+        requestRef: rm.requestRef
+      };
+      if (reviewCall.result.completion_status !== 'verified_complete') {
+        const err = new Error('[semantic-workflow] resume review raw completion is not verified');
+        err.code = 'SEMANTIC_RECOVERY_RAW_INCOMPLETE';
+        throw err;
+      }
+      await emitStage('review', 'active', { recovered: true });
+      await emitStage('review', 'response_received', { recovered: true });
+    } else {
+      reviewCall = await callAndPersist(sessionId, 'review', source, input.reviewPrompt || '', reviewExtra,
+        Object.assign({}, input, { requestId: prefix + '-review' }));
+    }
+    // Boundary rule:
+    // 1) uniquely provable punctuation/envelope noise is repaired mechanically;
+    // 2) anything that still fails the review contract is not guessed by code.
+    //    It receives at most one fresh LLM semantic re-review, grounded in the same source/candidate.
+    const V5Contract = require('./semantic-review-contract-v5.js');
+    const parseReviewOutput = call => V5Contract.parseV5ReviewDecision(
+      call.result.text,
+      source.sourceText,
+      String(baseObj.content),
+      { parseStrictJsonObject, parseReviewDecision }
+    );
+    let reviewDecision;
+    let reviewSemanticRetryOfRawRef = null;
+    let reviewSemanticRetryIssueRef = null;
+    try {
+      reviewDecision = parseReviewOutput(reviewCall);
+    } catch (reviewContractError) {
+      if (!isSemanticContractOutputError(reviewContractError)) throw reviewContractError;
+      reviewSemanticRetryOfRawRef = reviewCall.rawRef;
+      reviewSemanticRetryIssueRef = await caps.appendObject({
+        sessionId,
+        kind: 'issue',
+        content: JSON.stringify({
+          schema: 'semantic-contract-retry-v1',
+          stage: 'review',
+          code: String(reviewContractError.code || ''),
+          message: String(reviewContractError.message || reviewContractError),
+          previousRawRef: reviewCall.rawRef || null,
+          previousRequestRef: reviewCall.requestRef || null
+        }, null, 2),
+        metadata: {
+          repairTarget: 'semantic_contract_retry',
+          role: 'review',
+          rawRef: reviewCall.rawRef || null,
+          requestRef: reviewCall.requestRef || null,
+          sourceSha256: source.sourceSha256,
+          contextSha256: source.contextSha256 || null,
+          boundedRetry: 1
+        }
+      });
+      assertRef(reviewSemanticRetryIssueRef, 'review semantic retry issue');
+      const retryExtra = reviewExtra + '\n\n' + semanticContractRetryFeedback('review', reviewContractError);
+      reviewCall = await callAndPersist(sessionId, 'review', source, input.reviewPrompt || '', retryExtra,
+        Object.assign({}, input, { requestId: prefix + '-review-semantic-retry-1' }));
+      try {
+        reviewDecision = parseReviewOutput(reviewCall);
+      } catch (secondReviewError) {
+        secondReviewError.semanticRetryAttempted = true;
+        secondReviewError.semanticRetryOfRawRef = reviewSemanticRetryOfRawRef;
+        throw secondReviewError;
+      }
+    }
+
+    const reviewSyntax = repairStrictJsonSyntax(reviewCall.result.text, 'review decision');
+    let reviewRepairRef = null;
+    if (reviewSyntax.repaired) {
+      const journal = buildJsonRepairJournal(reviewSyntax, reviewCall.rawRef, reviewCall.requestRef);
+      reviewRepairRef = await caps.appendObject({
+        sessionId,
+        kind: 'issue',
+        content: JSON.stringify(journal, null, 2),
+        metadata: {
+          repairTarget: 'format_recovery',
+          repairSchema: journal.schema,
+          role: 'review',
+          rawRef: reviewCall.rawRef,
+          requestRef: reviewCall.requestRef,
+          sourceSha256: source.sourceSha256,
+          contextSha256: source.contextSha256 || null,
+          originalSha256: reviewSyntax.repair.originalSha256,
+          repairedSha256: reviewSyntax.repair.repairedSha256
+        }
+      });
+      assertRef(reviewRepairRef, 'review format repair journal');
+    }
     const reviewedStage = await validateStage('review', async () => {
-      const V5Contract = require('./semantic-review-contract-v5.js');
-      const reviewDecision = V5Contract.parseV5ReviewDecision(
-        reviewCall.result.text,
-        source.sourceText,
-        String(baseObj.content),
-        { parseStrictJsonObject, parseReviewDecision }
-      );
       const reviewRef = await caps.appendObject({
         sessionId,
         kind: 'review',
@@ -819,13 +1167,17 @@ function createWorkflow(capabilities) {
           rawRef: reviewCall.rawRef,
           issueRef: input.issueRef || null,
           sourceSha256: source.sourceSha256,
-          contextSha256: source.contextSha256 || null
+          contextSha256: source.contextSha256 || null,
+          formatRepair: reviewSyntax.repaired ? reviewSyntax.repair : null,
+          formatRepairRef: reviewRepairRef,
+          recoveredPrecurrentRaw: !!input.resumeReviewRawRef,
+          semanticRetryOfRawRef: reviewSemanticRetryOfRawRef,
+          semanticRetryIssueRef: reviewSemanticRetryIssueRef
         }
       });
       assertRef(reviewRef, 'publication review');
       return { reviewDecision, reviewRef };
     });
-    const reviewDecision = reviewedStage.reviewDecision;
     const reviewRef = reviewedStage.reviewRef;
 
     if (reviewDecision.decision === 'reject' || reviewDecision.decision === 'unresolved') {
@@ -894,10 +1246,76 @@ function createWorkflow(capabilities) {
     });
 
     const fidelityExtra = '【已审语义】\n' + reviewedContent + '\n\n【实际 projection】\n' + projectCall.result.text;
-    const fidelityCall = await callAndPersist(sessionId, 'fidelity', source, input.fidelityPrompt || '', fidelityExtra,
+    let fidelityCall = await callAndPersist(sessionId, 'fidelity', source, input.fidelityPrompt || '', fidelityExtra,
       Object.assign({}, input, { requestId: prefix + '-fidelity' }));
+
+    // A valid fidelity reject is a real semantic/representation verdict and is never retried merely to force approval.
+    // Retry is reserved for an output that cannot satisfy the machine-verifiable fidelity contract at all.
+    let fidelityDecision;
+    let fidelitySemanticRetryOfRawRef = null;
+    let fidelitySemanticRetryIssueRef = null;
+    try {
+      fidelityDecision = parseFidelityDecision(fidelityCall.result.text, source.sourceText);
+    } catch (fidelityContractError) {
+      if (!isSemanticContractOutputError(fidelityContractError)) throw fidelityContractError;
+      fidelitySemanticRetryOfRawRef = fidelityCall.rawRef;
+      fidelitySemanticRetryIssueRef = await caps.appendObject({
+        sessionId,
+        kind: 'issue',
+        content: JSON.stringify({
+          schema: 'semantic-contract-retry-v1',
+          stage: 'fidelity',
+          code: String(fidelityContractError.code || ''),
+          message: String(fidelityContractError.message || fidelityContractError),
+          previousRawRef: fidelityCall.rawRef || null,
+          previousRequestRef: fidelityCall.requestRef || null
+        }, null, 2),
+        metadata: {
+          repairTarget: 'semantic_contract_retry',
+          role: 'fidelity',
+          rawRef: fidelityCall.rawRef || null,
+          requestRef: fidelityCall.requestRef || null,
+          sourceSha256: source.sourceSha256,
+          contextSha256: source.contextSha256 || null,
+          boundedRetry: 1
+        }
+      });
+      assertRef(fidelitySemanticRetryIssueRef, 'fidelity semantic retry issue');
+      const retryExtra = fidelityExtra + '\n\n' + semanticContractRetryFeedback('fidelity', fidelityContractError);
+      fidelityCall = await callAndPersist(sessionId, 'fidelity', source, input.fidelityPrompt || '', retryExtra,
+        Object.assign({}, input, { requestId: prefix + '-fidelity-semantic-retry-1' }));
+      try {
+        fidelityDecision = parseFidelityDecision(fidelityCall.result.text, source.sourceText);
+      } catch (secondFidelityError) {
+        secondFidelityError.semanticRetryAttempted = true;
+        secondFidelityError.semanticRetryOfRawRef = fidelitySemanticRetryOfRawRef;
+        throw secondFidelityError;
+      }
+    }
+
+    const fidelitySyntax = repairStrictJsonSyntax(fidelityCall.result.text, 'fidelity decision');
+    let fidelityRepairRef = null;
+    if (fidelitySyntax.repaired) {
+      const journal = buildJsonRepairJournal(fidelitySyntax, fidelityCall.rawRef, fidelityCall.requestRef);
+      fidelityRepairRef = await caps.appendObject({
+        sessionId,
+        kind: 'issue',
+        content: JSON.stringify(journal, null, 2),
+        metadata: {
+          repairTarget: 'format_recovery',
+          repairSchema: journal.schema,
+          role: 'fidelity',
+          rawRef: fidelityCall.rawRef,
+          requestRef: fidelityCall.requestRef,
+          sourceSha256: source.sourceSha256,
+          contextSha256: source.contextSha256 || null,
+          originalSha256: fidelitySyntax.repair.originalSha256,
+          repairedSha256: fidelitySyntax.repair.repairedSha256
+        }
+      });
+      assertRef(fidelityRepairRef, 'fidelity format repair journal');
+    }
     const fidelityStage = await validateStage('fidelity', async () => {
-      const fidelityDecision = parseFidelityDecision(fidelityCall.result.text, source.sourceText);
       const fidelityRef = await caps.appendObject({
         sessionId,
         kind: 'fidelity',
@@ -908,13 +1326,16 @@ function createWorkflow(capabilities) {
           projectionRef,
           rawRef: fidelityCall.rawRef,
           sourceSha256: source.sourceSha256,
-          contextSha256: source.contextSha256 || null
+          contextSha256: source.contextSha256 || null,
+          formatRepair: fidelitySyntax.repaired ? fidelitySyntax.repair : null,
+          formatRepairRef: fidelityRepairRef,
+          semanticRetryOfRawRef: fidelitySemanticRetryOfRawRef,
+          semanticRetryIssueRef: fidelitySemanticRetryIssueRef
         }
       });
       assertRef(fidelityRef, 'publication fidelity');
       return { fidelityDecision, fidelityRef };
     });
-    const fidelityDecision = fidelityStage.fidelityDecision;
     const fidelityRef = fidelityStage.fidelityRef;
 
     const evidenceBundle = reviewDecision.evidence.map(x => Object.assign({ stage: 'review' }, x))
@@ -1037,6 +1458,8 @@ module.exports = {
   sha256Text,
   semanticSystem,
   parseStrictJsonObject,
+  repairStrictJsonSyntax,
+  buildJsonRepairJournal,
   EVIDENCE_QUOTE_PROTOCOL,
   V5_REVIEW_FORMAT_PROTOCOL,
   V5_TOP_KEYS,

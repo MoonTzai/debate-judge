@@ -29,6 +29,9 @@ function createEngine(bundle, hooks) {
   var tendency = load('tendency');
   var judgeContext = load('judgeContext');
   var core = load('core');   // W-T5：轮次表 ROUNDS + 断点内容级预估 isArtifactUsable（R21-1：现状未加载，不补则 ReferenceError）
+  var readerGuideContract = (host && typeof host.readerGuideContractIdentity === 'function')
+    ? host.readerGuideContractIdentity()
+    : null;
 
   // ---------- 自适应保险（对齐青春版机制 · web 层运行时 seam，不动内核） ----------
   // ① 输出截断（finish_reason=length）→ 自动提高 max_tokens 重试一次（上限 384K，与 api-provider DEFAULT_MAX_TOKENS 一致）
@@ -497,6 +500,227 @@ function createEngine(bundle, hooks) {
     }
     // 定点续跑失败时需要恢复到“进入本次 runSession 前”的完整内存现场，而不只是恢复被删文件。
     if (targetedResume) resumeEntrySnapshot = vfs.snapshot(workDir + '/');
+
+    // 2.5) Authority-aware postprocess resume.
+    // R7/R8 resume is deliberately intercepted before PC.runAll / roster / host.runPipeline, so a valid
+    // postprocess resume cannot even enter R5 checkpoint adoption. Core recomputation is only a fallback
+    // after zero-API same-version authority preflight proves the postprocess chain unusable.
+    if (targetedResume && (resumeStartNode === 'R7' || resumeStartNode === 'R8')) {
+      var ppPriorRun = opts.resumeRunModel && typeof opts.resumeRunModel === 'object' ? opts.resumeRunModel : null;
+      resumePlan = planResumeStart({
+        requestedNode: resumeStartNode,
+        runModel: ppPriorRun || buildRunModel(workDir, { plain: !!settings.plain }),
+        settings: settings
+      });
+      if (!resumePlan.allowed) {
+        removeSession(workDir);
+        restoreSession(resumeEntrySnapshot || {});
+        return { ok: false, semanticOk: null, resumeBlocked: true, error: resumePlan.blockingReason, workDir: workDir, results: [], resumePlan: resumePlan };
+      }
+      resumePlan.postprocessOnly = true;
+      resumePlan.authorityPreflightRequired = true;
+      var ppEntry = vfs.snapshot(workDir + '/');
+      var ppProof = null;
+      var ppR6PreflightPassed = false;
+      var ppBinding = null;
+      var ppCfg = buildApiCfg(settings);
+      var ppDict = plainDictPath(settings, log);
+      var ppR7Approved = settings.plain !== true;
+      var ppFallbackReason = null;
+
+      function mergePriorCoreRun(fresh, derivedStatus) {
+        if (!ppPriorRun || ppPriorRun.schema !== 'judge-web-run-v1') {
+          if (fresh && fresh.summary) fresh.summary.derivedStatus = derivedStatus;
+          return fresh;
+        }
+        fresh.rounds = JSON.parse(JSON.stringify(ppPriorRun.rounds || fresh.rounds || []));
+        fresh.events = JSON.parse(JSON.stringify(ppPriorRun.events || fresh.events || []));
+        fresh.batches = JSON.parse(JSON.stringify(ppPriorRun.batches || fresh.batches || []));
+        fresh.staleRounds = JSON.parse(JSON.stringify(ppPriorRun.staleRounds || fresh.staleRounds || {}));
+        // Core rounds are reused from the prior durable run. Recompute counters from that exact reused
+        // round projection instead of mixing a fresh file-derived summary with historical rounds. In particular,
+        // R6a may be intentionally ephemeral/missing on disk while its reused round status is already done.
+        var reusedSummary = Object.assign({}, fresh.summary || {}, ppPriorRun.summary || {});
+        reusedSummary.done = 0;
+        reusedSummary.skipped = 0;
+        reusedSummary.fail = 0;
+        reusedSummary.pending = 0;
+        reusedSummary.totalAttempts = 0;
+        reusedSummary.totalGateHits = 0;
+        reusedSummary.precheckSkipCount = 0;
+        (fresh.rounds || []).forEach(function (rr) {
+          var st = rr && rr.status || 'pending';
+          if (st !== 'done' && st !== 'skipped' && st !== 'fail' && st !== 'pending') st = 'pending';
+          reusedSummary[st]++;
+          if (rr && rr.attempts !== null && rr.attempts !== undefined) reusedSummary.totalAttempts += Number(rr.attempts) || 0;
+          if (rr && rr.gateHit) reusedSummary.totalGateHits++;
+          if (rr && (st === 'pending' || st === 'fail') && rr.precheckSkippable) reusedSummary.precheckSkipCount++;
+        });
+        reusedSummary.derivedStatus = derivedStatus;
+        reusedSummary.reportReady = true;
+        reusedSummary.plain = !!settings.plain;
+        reusedSummary.staleCount = Object.keys(fresh.staleRounds || {}).filter(function (k) { return fresh.staleRounds[k]; }).length;
+        fresh.summary = reusedSummary;
+        return fresh;
+      }
+      async function persistPostprocessTerminal(ok, postprocess, error) {
+        var model = buildRunModel(workDir, {
+          plain: !!settings.plain,
+          derivedStatus: ok ? 'done' : 'failed',
+          error: error ? { aborted: false, postprocess: postprocess, message: String(error.message || error) } : null
+        });
+        model = mergePriorCoreRun(model, ok ? 'done' : 'failed');
+        if (typeof opts.persist === 'function') {
+          await persistRequired(ok ? 'pipeline-done' : 'pipeline-error', {
+            workDir: workDir,
+            ok: !!ok,
+            error: error ? String(error.message || error) : null,
+            aborted: false,
+            runModel: model
+          }, ok ? 'FINAL/postprocess success' : 'FINAL/postprocess failure');
+        }
+        return model;
+      }
+
+      try {
+        // A. R6 semantic + provenance + bound consumer views must be current before any postprocess reuse.
+        ppProof = proveTestSessionAuthority(workDir);
+        ppBinding = JSON.parse(JSON.stringify(ppProof.provenance.consumerBinding));
+        host.renderReport(workDir, { consumerBinding: ppBinding });
+        ppBinding = host.consumerBindingFromProducedViews(workDir, ppBinding, { report: 'report.html' });
+        ppR6PreflightPassed = true;
+
+        // B. R7 proof preflight is strict 0-API. Failure means "resume R7", not "rewind core".
+        if (settings.plain === true) {
+          try {
+            var replay = await host.rebuildApprovedPlainReport(workDir, ppCfg, ppDict, { consumerBinding: ppBinding });
+            ppBinding = replay && replay.consumerBinding || ppBinding;
+            ppR7Approved = true;
+            log('[judge-web TEST] R7 authority preflight PASS：approved proof/cache + same-version binding，0 API');
+          } catch (r7PreflightError) {
+            ppR7Approved = false;
+            log('[judge-web TEST] R7 authority preflight 未成立；保留 R6 authority，转入 R7 postprocess resume：' +
+              String(r7PreflightError && r7PreflightError.message || r7PreflightError));
+          }
+        }
+
+        // If the requested R8 depends on PLAIN but R7 proof is not valid, resume from R7 inside this same
+        // postprocess-only lane. No R5/R6 model adoption is visited.
+        var ppEffective = (resumeStartNode === 'R7' || (settings.plain === true && !ppR7Approved)) ? 'R7' : 'R8';
+        resumePlan.effectiveStartNode = ppEffective;
+        resumePlan.effectiveNodes = ppEffective === 'R7' && settings.readerGuide === true ? ['R7','R8'] : [ppEffective];
+        resumePlan.invalidatedNodes = resumePlan.effectiveNodes.slice();
+        log('[judge-web TEST] postprocess-only 续跑：请求 ' + resumeStartNode + ' → 实际 ' + ppEffective +
+          '；core staleRounds 已解耦；R5 adoption path=unreachable');
+
+        // BASE/CAS durability barrier must precede any possible paid postprocess request.
+        await persistRequired('pipeline-start', { workDir: workDir, resumePlan: resumePlan }, 'BASE/postprocess resume');
+
+        if (ppEffective === 'R7') {
+          if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R7', state: 'active', postprocess: true }); } catch (_) {} }
+          var semanticBeforeR7 = host.readTestSemanticCurrent(workDir);
+          var plainResult = await host.applyPlain(workDir, ppCfg, log, ppDict, {
+            cache: true,
+            onBatchCheckpoint: function (info) { queueBatchCheckpoint(info); },
+            requestCompletion: apiStubWrap,
+            consumerBinding: ppBinding
+          });
+          if (plainResult && plainResult.consumerBinding) ppBinding = plainResult.consumerBinding;
+          host.assertSemanticIdentityUnchanged(semanticBeforeR7, host.readTestSemanticCurrent(workDir), 'R7 postprocess resume');
+          host.updateTestProvenance(workDir, testSemanticAuthority, ppBinding, {
+            plain: true, readerGuide: false, semanticIdentityPreserved: true
+          });
+          queueSemanticCheckpoint('after-r7-postprocess-resume');
+          await requireDurability();
+          ppR7Approved = true;
+          if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R7', state: 'done', postprocess: true }); } catch (_) {} }
+        }
+
+        if (settings.readerGuide === true) {
+          if (!ppR7Approved && settings.plain === true) throw new Error('[judge-web TEST] R8 前 R7 authority 未成立');
+          if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R8', state: 'active', postprocess: true }); } catch (_) {} }
+          var semanticBeforeR8Resume = host.readTestSemanticCurrent(workDir);
+          var guideResult = await host.applyReaderGuide(workDir, ppCfg, log, {
+            cache: true,
+            requestCompletion: apiStubWrap,
+            onBatchCheckpoint: function (info) { queueBatchCheckpoint(info); },
+            consumerBinding: ppBinding
+          });
+          if (guideResult && guideResult.consumerBinding) ppBinding = guideResult.consumerBinding;
+          host.assertSemanticIdentityUnchanged(semanticBeforeR8Resume, host.readTestSemanticCurrent(workDir), 'R8 postprocess resume');
+          host.updateTestProvenance(workDir, testSemanticAuthority, ppBinding, {
+            plain: !!settings.plain, readerGuide: true, semanticIdentityPreserved: true
+          });
+          queueSemanticCheckpoint('after-r8-postprocess-resume');
+          await requireDurability();
+          if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R8', state: 'done', postprocess: true }); } catch (_) {} }
+        }
+
+        // postprocess-only exits before the generic terminal readback below, so it must return the
+        // canonical presentation artifacts itself. Otherwise UI sees ok=true but reportHtml=null even though
+        // R8 has just embedded and durably persisted report.html.
+        var ppReportHtml = readReportHtml(workDir);
+        if (!ppReportHtml) throw new Error('[judge-web TEST] postprocess-only success missing report.html');
+        var ppReportPlain = vfs.existsSync(workDir + '/report-plain.html')
+          ? vfs.readFileSync(workDir + '/report-plain.html', 'utf-8')
+          : null;
+        var ppSuccessRun = await persistPostprocessTerminal(true, null, null);
+        return {
+          ok: true, semanticOk: true, workDir: workDir, results: [], runModel: ppSuccessRun,
+          reportHtml: ppReportHtml,
+          reportPlain: ppReportPlain,
+          reportFile: settings.plain && ppReportPlain ? 'report-plain.html' : 'report.html',
+          readerGuideApplied: settings.readerGuide === true,
+          semanticFirstMode: semanticFirstMode,
+          semanticRoute: 'PRODUCTION_ACTIVE',
+          semanticProvenance: host.readTestProvenance(workDir),
+          resumePlan: resumePlan, postprocessOnly: true, consumerBinding: ppBinding
+        };
+      } catch (ppError) {
+        // A failed R6/provenance preflight is the only reason to leave the postprocess lane and allow core fallback.
+        // R7/R8 execution failures stay postprocess failures; retrying core would be over-recompute.
+        if (!ppR6PreflightPassed) {
+          vfs.removeTree(workDir);
+          vfs.restore(ppEntry);
+          ppFallbackReason = String(ppError && ppError.message || ppError);
+          // R6 authority 未证明时，generic legacy auto 不是合法退路。显式交给 core dependency planner：
+          // 以 R6 为最窄 fallback seed，只有 stale/dependency graph 证明需要时才向 R5/更早层扩张。
+          var fallbackRunModel = ppPriorRun || buildRunModel(workDir, { plain: !!settings.plain });
+          var coreFallbackPlan = planResumeStart({
+            requestedNode: 'R6',
+            runModel: fallbackRunModel,
+            settings: settings
+          });
+          if (!coreFallbackPlan.allowed) {
+            return {
+              ok: false, semanticOk: null, resumeBlocked: true,
+              error: '[judge-web TEST] R6 authority preflight 失败且 core fallback planner 拒绝：' +
+                String(coreFallbackPlan.blockingReason || ppFallbackReason),
+              workDir: workDir, results: [], resumePlan: coreFallbackPlan, postprocessOnly: false
+            };
+          }
+          coreFallbackPlan.taskClass = 'core_authority_fallback';
+          coreFallbackPlan.reasons = ['R6 same-version authority preflight 未成立：' + ppFallbackReason].concat(coreFallbackPlan.reasons || []);
+          log('[judge-web TEST] R6 authority preflight 未成立；显式交 core planner：R6 → ' +
+            String(coreFallbackPlan.effectiveStartNode || 'R6') + '；不得裸降 legacy auto');
+          resumeStartNode = 'R6';
+          targetedResume = true;
+          resumePlan = coreFallbackPlan;
+        } else {
+          var failedPost = (resumePlan && resumePlan.effectiveStartNode === 'R7' && !ppR7Approved) ? 'R7' : 'R8';
+          if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: failedPost, state: 'fail', postprocess: true, errors: [String(ppError && ppError.message || ppError)] }); } catch (_) {} }
+          var ppDurabilityError = await durabilityBarrierError();
+          var finalError = ppDurabilityError || ppError;
+          var ppFailedRun = null;
+          try { ppFailedRun = await persistPostprocessTerminal(false, failedPost, finalError); } catch (persistErr) { finalError = persistErr; }
+          return {
+            ok: false, semanticOk: ppDurabilityError ? null : false, persistenceFailed: !!ppDurabilityError,
+            error: String(finalError && finalError.message || finalError), workDir: workDir, results: [],
+            runModel: ppFailedRun, resumePlan: resumePlan, postprocessOnly: true
+          };
+        }
+      }
+    }
 
     // 3) prompt 生成（runAll；与 CLI 同源）
     PC.runAll(speechPath, {
@@ -1032,6 +1256,64 @@ function createEngine(bundle, hooks) {
     var staleCount = 0;
     for (var sk in staleRounds) { if (staleRounds[sk]) staleCount++; }
     summary.staleCount = staleCount;
+
+    // R8 resume authority v1: durable postprocess state is a classifier hint, never reuse authority.
+    // Legacy sessions can be classified from proof/checkpoint files, but every resume path must re-verify
+    // semantic/provenance/consumerBinding and the relevant R7/R8 proof before any paid request.
+    function readJsonFile(rel) {
+      var key = base + '/' + rel;
+      if (files[key] === undefined || files[key] === null) return null;
+      try { return JSON.parse(String(files[key])); } catch (e) { return null; }
+    }
+    var pp = {};
+    // Postprocess status is a projection from durable proof/checkpoint artifacts; it is never a second authority file.
+    // In particular, do not trust an unbound ".tmp-postprocess-resume-state.json" supplied by history/import data.
+    if (!pp.R7) {
+      var r7Proof = readJsonFile('.tmp-plain-review.json');
+      if (r7Proof && r7Proof.state === 'approved') pp.R7 = { state: 'approved', evidence: 'legacy-approved-proof-hint' };
+      else if (r7Proof) pp.R7 = { state: 'checkpoint', evidence: 'legacy-review-proof-hint' };
+    }
+    var r8Review = readJsonFile('.tmp-reader-guide-review.json');
+    var r8Cache = readJsonFile('.tmp-reader-guide-cache.json');
+    var r8Provenance = readJsonFile('semantic-first-provenance.json');
+    var hasR8Public = ['reader-guide-input.json','reader-guide.json','reader-guide-plain.json','reader-guide.html'].every(function (name) {
+      return files[base + '/' + name] !== undefined && files[base + '/' + name] !== null;
+    });
+    var r8Views = r8Provenance && r8Provenance.consumerBinding && r8Provenance.consumerBinding.views || {};
+    var r8PresentationDone = !!(r8Provenance && r8Provenance.presentation &&
+      r8Provenance.presentation.readerGuide === true && r8Views.readerGuide && r8Views.readerGuideHtml);
+    var r8CurrentContract = !!(readerGuideContract && r8Review && r8Cache &&
+      r8Review.reviewPromptVersion === readerGuideContract.reviewPromptVersion &&
+      r8Cache.reviewPromptVersion === readerGuideContract.reviewPromptVersion &&
+      r8Review.guide && r8Review.guide.promptVersion === readerGuideContract.promptVersion &&
+      r8Cache.guide && r8Cache.guide.promptVersion === readerGuideContract.promptVersion &&
+      r8Review.classificationPending !== true && !r8Review.reopenNode &&
+      (!Array.isArray(r8Review.reopenNodes) || r8Review.reopenNodes.length === 0));
+    if (r8Review && r8Review.disposition === 'upstream_review') {
+      pp.R8 = { state: 'upstream_review', reopenNodes: Array.isArray(r8Review.reopenNodes) ? r8Review.reopenNodes.slice() : [], evidence: 'review-journal-hint' };
+    } else if (hasR8Public && r8PresentationDone && r8CurrentContract) {
+      // This is still only a planner projection. resumeSession verifies the complete semantic/provenance
+      // authority before this model is consumed. Requiring current contract identity prevents an old R8
+      // journal from becoming a no-op after the reviewer contract changes.
+      pp.R8 = { state: 'done', evidence: 'validated-provenance-current-r8-contract' };
+    } else if (!pp.R8) {
+      if (hasR8Public && files[base + '/.tmp-reader-guide-cache.json'] !== undefined) {
+        // 文件齐全但 current-contract/provenance proof 不齐，只能作为 checkpoint；真正复用进入 preflight。
+        pp.R8 = { state: 'checkpoint', evidence: 'public-artifact-hint-needs-preflight' };
+      } else if (['.tmp-reader-guide-cache.json','.tmp-reader-guide-draft.json','.tmp-reader-guide-plain-draft.json','.tmp-reader-guide-review.json'].some(function (name) {
+        return files[base + '/' + name] !== undefined && files[base + '/' + name] !== null;
+      })) {
+        pp.R8 = { state: 'checkpoint', evidence: 'private-checkpoint-hint' };
+      }
+    }
+    var terminalPost = canonicalResumeNode(opts.error && opts.error.postprocess || '');
+    if (terminalPost === 'R7' && (!pp.R7 || pp.R7.state !== 'approved')) {
+      pp.R7 = Object.assign({}, pp.R7 || {}, { state: 'failed', terminalError: true });
+    }
+    if (terminalPost === 'R8' && (!pp.R8 || pp.R8.state !== 'upstream_review')) {
+      pp.R8 = Object.assign({}, pp.R8 || {}, { state: 'failed', terminalError: true });
+    }
+
     var model = {
       schema: 'judge-web-run-v1',
       generatedAt: new Date().toISOString(),   // R14-1：全量构建时点
@@ -1040,6 +1322,7 @@ function createEngine(bundle, hooks) {
       events: events,
       batches: batches,          // W-PH：批次档案（随 files 快照同构读入）
       staleRounds: staleRounds,  // W-PH：失配轮映射 { R1: true }
+      postprocess: pp,
       summary: summary
     };
     if (opts.error) model.error = opts.error;   // R16-3：仅 pipeline-error 时点落盘，其余缺省不写
@@ -1166,6 +1449,178 @@ function createEngine(bundle, hooks) {
     }
   }
 
+  var CORE_EXECUTION_ARTIFACTS = [
+    'P1.md','P2.md','P2.5.md','P3.md','structure.json','adjudication.json',
+    '.tmp-r5-half-A.md','.tmp-r5-half-B.md','.tmp-r6a-out.html','report.html'
+  ];
+  function existingCoreExecutionArtifacts(base) {
+    var root = posixOf(base || '').replace(/\/+$/, '');
+    return CORE_EXECUTION_ARTIFACTS.filter(function (name) { return vfs.existsSync(root + '/' + name); });
+  }
+  // A published global semantic current may legitimately exist before SC / source-anchor binding finishes.
+  // This is not pre-current staging and must never be downgraded to it. It is safely recoverable only while
+  // no core R1-R6 artifact exists; then unbound control caches can be discarded and regenerated from .tmp-debate.txt.
+  function proveRecoverablePublishedPreCoreSession(base) {
+    var root = posixOf(base || '').replace(/\/+$/, '');
+    if (!vfs.existsSync(root + '/.tmp-debate.txt')) {
+      throw new Error('[judge-web TEST] published-pre-core recovery 缺少 .tmp-debate.txt');
+    }
+    var proof = proveTestSessionAuthority(root);
+    var coreArtifacts = existingCoreExecutionArtifacts(root);
+    if (coreArtifacts.length) {
+      throw new Error('[judge-web TEST] published semantic 已有 core artifacts，禁止把未绑定 control cache 当作可重建 pre-core 状态: ' + coreArtifacts.join(','));
+    }
+    return {
+      authorityState: 'published-pre-core',
+      resumeClass: 'published-pre-core-semantic',
+      canResume: true,
+      published: true,
+      recoverable: true,
+      verified: true,
+      proof: proof,
+      revision: proof && proof.current && proof.current.revision || null,
+      coreArtifacts: coreArtifacts,
+      unboundControlCandidates: ['source-anchor.json','source-anchor-exemptions.json'].filter(function (name) {
+        return vfs.existsSync(root + '/' + name);
+      })
+    };
+  }
+  function discardPublishedPreCoreControlCaches(base, state) {
+    var root = posixOf(base || '').replace(/\/+$/, '');
+    var removed = [];
+    (state && state.unboundControlCandidates || []).forEach(function (name) {
+      var file = root + '/' + name;
+      if (vfs.existsSync(file)) {
+        vfs.unlinkSync(file);
+        removed.push(name);
+      }
+    });
+    return removed;
+  }
+
+  function proveRecoverablePrecurrentSession(base) {
+    var root = posixOf(base || '').replace(/\/+$/, '');
+    var debate = root + '/.tmp-debate.txt';
+    if (!vfs.existsSync(debate)) throw new Error('[judge-web TEST] pre-current recovery 缺少 .tmp-debate.txt');
+    // Never downgrade a snapshot that already claims published provenance. A broken published authority
+    // must be repaired/audited as published authority, not reclassified as harmless staging.
+    if (vfs.existsSync(root + '/semantic-first-provenance.json')) {
+      throw new Error('[judge-web TEST] snapshot 含 published semantic provenance；禁止降级为 pre-current staging');
+    }
+    var snap = vfs.snapshot(root + '/');
+    var keys = Object.keys(snap);
+    var semanticPrefix = root + '/.semantic-first-production-v1/';
+    var semanticFiles = keys.filter(function (k) { return k.indexOf(semanticPrefix) === 0; });
+    return {
+      authorityState: semanticFiles.length ? 'staging' : 'source-only',
+      published: false,
+      recoverable: true,
+      semanticFileCount: semanticFiles.length,
+      hasReport: vfs.existsSync(root + '/report.html')
+    };
+  }
+
+  function restoreRecoverableTestSession(files, workDir) {
+    var base = posixOf(workDir || '').replace(/\/+$/, '');
+    var before = vfs.snapshot(base + '/');
+    vfs.removeTree(base);
+    try {
+      restoreSessionScoped(files, base);
+      try {
+        var proof = proveExternalSessionControlFiles(base, proveTestSessionAuthority(base));
+        return {
+          authorityState: 'published',
+          resumeClass: 'published-authority',
+          canResume: true,
+          published: true,
+          recoverable: true,
+          verified: true,
+          proof: proof,
+          revision: proof && proof.current && proof.current.revision || null
+        };
+      } catch (publishedError) {
+        try {
+          var preCore = proveRecoverablePublishedPreCoreSession(base);
+          preCore.discardedUnboundControls = discardPublishedPreCoreControlCaches(base, preCore);
+          preCore.controlRefreshRequired = preCore.discardedUnboundControls.length > 0;
+          preCore.authorityError = String(publishedError && publishedError.message || publishedError);
+          return preCore;
+        } catch (preCoreError) {
+          var staging = proveRecoverablePrecurrentSession(base);
+          return Object.assign({
+            resumeClass: staging.authorityState === 'staging' ? 'pre-current-semantic' : 'fresh-semantic-from-history',
+            canResume: !!staging.recoverable,
+            authorityError: String(publishedError && publishedError.message || publishedError),
+            publishedPreCoreError: String(preCoreError && preCoreError.message || preCoreError)
+          }, staging);
+        }
+      }
+    } catch (e) {
+      vfs.removeTree(base);
+      vfs.restore(before);
+      throw new Error('[judge-web TEST] recoverable session restore failed: ' + (e && e.message ? e.message : String(e)));
+    }
+  }
+
+  function verifyRecoverableTestSessionFiles(files, workDir) {
+    var base = posixOf(workDir || '').replace(/\/+$/, '');
+    var before = vfs.snapshot(base + '/');
+    vfs.removeTree(base);
+    try {
+      restoreSessionScoped(files, base);
+      try {
+        return proveRecoverablePublishedPreCoreSession(base);
+      } catch (preCoreError) {
+        var staging = proveRecoverablePrecurrentSession(base);
+        staging.publishedPreCoreError = String(preCoreError && preCoreError.message || preCoreError);
+        return staging;
+      }
+    } finally {
+      vfs.removeTree(base);
+      vfs.restore(before);
+    }
+  }
+
+  function classifySessionFilesForExport(files, workDir) {
+    try {
+      var proof = verifyTestSessionFiles(files, workDir, []);
+      return {
+        authorityState: 'published', resumeClass: 'published-authority', canResume: true,
+        published: true, recoverable: true, verified: true,
+        revision: proof && proof.current && proof.current.revision || null,
+        authorityError: null, fileCount: Object.keys(files || {}).length
+      };
+    } catch (publishedError) {
+      try {
+        var recovery = verifyRecoverableTestSessionFiles(files, workDir);
+        var recoveryClass = recovery.resumeClass ||
+          (recovery.authorityState === 'staging' ? 'pre-current-semantic' : 'fresh-semantic-from-history');
+        return Object.assign({
+          resumeClass: recoveryClass,
+          canResume: !!recovery.recoverable,
+          verified: recovery.verified !== false,
+          authorityError: String(publishedError && publishedError.message || publishedError),
+          fileCount: Object.keys(files || {}).length
+        }, recovery);
+      } catch (stagingError) {
+        return {
+          authorityState: 'incomplete-unverified',
+          resumeClass: 'evidence-only',
+          canResume: false,
+          published: false,
+          recoverable: false,
+          verified: false,
+          authorityError: String(publishedError && publishedError.message || publishedError),
+          recoveryError: String(stagingError && stagingError.message || stagingError),
+          fileCount: Object.keys(files || {}).length
+        };
+      }
+    }
+  }
+  function inspectSessionFilesForEvidenceExport(files, workDir) {
+    return classifySessionFilesForExport(files, workDir);
+  }
+
   function removeSession(workDir) {
     vfs.removeTree(String(workDir).replace(/\\/g, '/'));
   }
@@ -1285,6 +1740,10 @@ function createEngine(bundle, hooks) {
     proveTestSessionAuthority: proveTestSessionAuthority,
     restoreVerifiedTestSession: restoreVerifiedTestSession,
     verifyTestSessionFiles: verifyTestSessionFiles,
+    restoreRecoverableTestSession: restoreRecoverableTestSession,
+    verifyRecoverableTestSessionFiles: verifyRecoverableTestSessionFiles,
+    classifySessionFilesForExport: classifySessionFilesForExport,
+    inspectSessionFilesForEvidenceExport: inspectSessionFilesForEvidenceExport,
     removeSession: removeSession,
     buildRunModel: buildRunModel,                 // W-T5（E6）
     buildRunModelFromFiles: buildRunModelFromFiles,   // W-T5（E6）

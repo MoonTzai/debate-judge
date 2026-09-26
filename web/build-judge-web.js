@@ -2,7 +2,7 @@
 // build-judge-web.js — Judge 网页版单文件构建器（W1）
 // 输入（只读）：根目录 install-skill.js 的 BLOCKS 单一事实源派生浏览器 runtime 闭包；
 //   Skill-Judge.md / Debate-Judge.md 作为镜像种子固定内嵌。
-// 输入（只读）：web/src/{engine,tendency,history-governance,flight-recorder,flight-export,ui}.js、web/src/app.css
+// 输入（只读）：web/src/{engine,tendency,history-governance,flight-recorder,flight-export,ui-locales,ui-i18n,ui}.js、web/src/app.css
 // 输出：web/dist/judge-semantic-first-e2e-TEST.html + web/dist/judge-semantic-first-e2e-TEST-bundle.js。
 // 这是独立 TEST builder；绝不写 production web/judge.html。
 // ============================================================
@@ -52,6 +52,8 @@ const MODULES = RUNTIME_BLOCKS
     ['/web/flight-export.js', path.join(WEB, 'src', 'flight-export.js')],
     ['/web/judge-host-io.js', path.join(WEB, 'src', 'judge-host-io.js')],
     ['/web/report-host.js', path.join(WEB, 'src', 'report-host.js')],
+    ['/web/ui-locales.js', path.join(WEB, 'src', 'ui-locales.js')],
+    ['/web/ui-i18n.js', path.join(WEB, 'src', 'ui-i18n.js')],
     ['/web/ui.js', path.join(WEB, 'src', 'ui.js')]
   ]);
 
@@ -545,6 +547,7 @@ var BUNDLE = {
     flightExport: function () { return loadModule('/web/flight-export.js'); },
     judgeHostIO: function () { return loadModule('/web/judge-host-io.js'); },
     reportHost: function () { return loadModule('/web/report-host.js'); },
+    uiI18n: function () { return loadModule('/web/ui-i18n.js'); },
     ui: function () { return loadModule('/web/ui.js'); }
   }
 };

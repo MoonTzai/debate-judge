@@ -108,6 +108,96 @@ function planResumeStart(input) {
   const active = {};
   order.forEach(n => { active[n] = true; });
   if (requested === 'auto') {
+    const runModel = input.runModel && typeof input.runModel === 'object' ? input.runModel : {};
+    const pp = runModel.postprocess && typeof runModel.postprocess === 'object' ? runModel.postprocess : {};
+    const r7 = pp.R7 && typeof pp.R7 === 'object' ? pp.R7 : {};
+    const r8 = pp.R8 && typeof pp.R8 === 'object' ? pp.R8 : {};
+    const terminalPostprocess = canonicalResumeNode(runModel.error && runModel.error.postprocess || '');
+    const postPlan = function (node, why) {
+      const invalidated = node === 'R7'
+        ? order.filter(n => n === 'R7' || n === 'R8')
+        : order.filter(n => n === 'R8');
+      return {
+        requestedNode: 'auto',
+        effectiveStartNode: node,
+        effectiveNodes: invalidated.slice(),
+        invalidatedNodes: invalidated,
+        preservedNodes: order.filter(n => !invalidated.includes(n)),
+        staleExpansion: [],
+        reasons: [why, 'postprocess authority 先行；core staleRounds 不参与本次起点分类'],
+        requirePlainCacheHit: node === 'R8' && settings.plain === true,
+        allowed: true,
+        blockingReason: null,
+        taskClass: 'postprocess_authority_resume',
+        postprocessOnly: true,
+        authorityPreflightRequired: true,
+        ignoreCoreStale: true,
+        semanticInvalidated: false,
+        preserveSemanticCurrent: true
+      };
+    };
+
+    // R8 reviewer 明确要求回查上游时，普通“继续最后断点”必须 fail-close。
+    // upstream_review 的 reopenNodes 是 semantic/CAS workflow 的输入，不是 generic resume 的重算指令；
+    // 否则会把 reviewer 的语义异议偷换成普通 core rewind，并绕过原生 semantic revision authority。
+    if (r8.state === 'upstream_review' && Array.isArray(r8.reopenNodes) && r8.reopenNodes.length) {
+      const reopenNodes = r8.reopenNodes.map(canonicalResumeNode).filter(n => RESUME_NODE_ORDER_BASE.includes(n));
+      const why = 'R8 durable upstream_review 要求进入原生 semantic/CAS reopen' +
+        (reopenNodes.length ? '：' + reopenNodes.join('、') : '');
+      return {
+        requestedNode: 'auto',
+        effectiveStartNode: null,
+        effectiveNodes: [],
+        invalidatedNodes: [],
+        preservedNodes: order.slice(),
+        staleExpansion: [],
+        reasons: [why, 'generic auto resume 不得把 upstream_review 降格为普通 R8 retry 或 core rewind'],
+        requirePlainCacheHit: false,
+        allowed: false,
+        blockingReason: why,
+        taskClass: 'semantic_review_required',
+        upstreamReviewRequired: true,
+        reopenNodes,
+        postprocessOnly: false,
+        authorityPreflightRequired: true,
+        ignoreCoreStale: true,
+        semanticInvalidated: false,
+        preserveSemanticCurrent: true
+      };
+    }
+
+    // Terminal postprocess failure is a classification hint only. Actual reuse is gated later by zero-API
+    // semantic/provenance/consumerBinding + R7/R8 proof preflight.
+    // R8 依赖 R7 approved proof：plain 开启时，R7 未 approved 必须先续 R7，
+    // 即使 terminal error 记录的是 R8，也不能让 UI/planner 先报 R8 再由 engine 暗中降级。
+    if (settings.plain === true && String(r7.state || '') !== 'approved') {
+      return postPlan('R7', 'R8 chain 需要先重建/验证 R7 approved proof');
+    }
+    if (settings.readerGuide === true &&
+        (terminalPostprocess === 'R8' || ['failed','active','checkpoint'].includes(String(r8.state || '')))) {
+      return postPlan('R8', '检测到 R8 未完成/失败的 durable postprocess 状态');
+    }
+    if (settings.plain === true &&
+        (terminalPostprocess === 'R7' || ['failed','active','checkpoint'].includes(String(r7.state || '')))) {
+      return postPlan('R7', '检测到 R7 未完成/失败的 durable postprocess 状态');
+    }
+    if (settings.readerGuide === true && String(r7.state || '') === 'approved' && String(r8.state || '') !== 'done') {
+      return postPlan('R8', 'R7 durable approved，R8 尚未完成');
+    }
+
+    const coreSettled = Array.isArray(runModel.rounds) && runModel.rounds.length > 0 &&
+      runModel.rounds.every(r => r && (r.status === 'done' || r.status === 'skipped'));
+    const postSettled = (settings.plain !== true || String(r7.state || '') === 'approved' || String(r7.state || '') === 'done') &&
+      (settings.readerGuide !== true || String(r8.state || '') === 'done');
+    if (coreSettled && postSettled) {
+      return {
+        requestedNode: 'auto', effectiveStartNode: null, effectiveNodes: [], invalidatedNodes: [],
+        preservedNodes: order.slice(), staleExpansion: [], reasons: ['core 与所需 postprocess 均已有 durable 完成态'],
+        requirePlainCacheHit: false, allowed: true, blockingReason: null, taskClass: 'resume_complete',
+        postprocessOnly: false, authorityPreflightRequired: false, ignoreCoreStale: true, noOp: true,
+        semanticInvalidated: false, preserveSemanticCurrent: true
+      };
+    }
     return { requestedNode: 'auto', effectiveStartNode: 'auto', effectiveNodes: [], invalidatedNodes: [], preservedNodes: order.slice(), staleExpansion: [], reasons: [], requirePlainCacheHit: false, allowed: true, blockingReason: null, taskClass: 'legacy_auto_resume', semanticInvalidated: false, preserveSemanticCurrent: true };
   }
   const aggregateR5 = requested === 'R5';

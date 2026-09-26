@@ -423,8 +423,10 @@ function dictHintsForText(text, dict) {
   return hints;
 }
 
-// A2：语义白话的术语要求以“可译正文的阅读顺序”为唯一事实源；首现处才要求解释。
-function annotateSemanticRequirements(units, dict) {
+// Legacy first-seen glossary metadata. Live PLAIN v4 may pass these meanings as cognition hints,
+// but must never treat exact glossary wording or first-occurrence parentheses as approval authority.
+function annotateSemanticRequirements(units, dict, options) {
+  options = options || {};
   const seen = new Set();
   const requirements = [];
   for (const u of units || []) {
@@ -437,7 +439,14 @@ function annotateSemanticRequirements(units, dict) {
       own.push(req);
       requirements.push(req);
     }
-    if (own.length) u.requiredGlosses = own;
+    if (own.length) u.semanticHints = own;
+    else delete u.semanticHints;
+    if (options.legacyFixed === true) {
+      if (own.length) u.requiredGlosses = own;
+      else delete u.requiredGlosses;
+    } else {
+      delete u.requiredGlosses;
+    }
   }
   return requirements;
 }
@@ -449,7 +458,9 @@ function isReportUiUnit(u) {
     /(?:^|\s)theme-bar\b|(?:^|\s)api-config-wrap\b|(?:^|\s)plain-toggle\b/.test(cls);
 }
 
-function checkRequiredGlosses(units, textForUnit) {
+// Historical legacy-v3 template-fidelity check only.
+// This intentionally checks the old exact “term（gloss）” rendering contract and is NOT semantic review.
+function checkLegacyFixedGlossaryTemplate(units, textForUnit) {
   const missing = [];
   for (const u of units || []) {
     const text = String(textForUnit(u.id) || '');
@@ -465,12 +476,14 @@ function comparableUnits(html) {
   return extractUnits(parseHtml(html)).filter(u => !isReportUiUnit(u));
 }
 
-function checkSemanticPlain(origHtml, plainHtml, dict) {
+// Historical legacy-v3 full-report template-fidelity check only.
+// Live v4 readability/meaning authority belongs to the independent semantic reviewer.
+function checkLegacyFixedGlossaryReport(origHtml, plainHtml, dict) {
   const origAll = extractUnits(parseHtml(origHtml));
   const plainAll = extractUnits(parseHtml(plainHtml));
   const orig = origAll.filter(u => !isReportUiUnit(u));
   const plain = plainAll.filter(u => !isReportUiUnit(u));
-  const requirements = annotateSemanticRequirements(origAll, dict);
+  const requirements = annotateSemanticRequirements(origAll, dict, { legacyFixed: true });
   const indexById = new Map(orig.map((u, i) => [u.id, i]));
   const missing = [];
   for (const req of requirements) {
@@ -685,7 +698,7 @@ async function processReportAsync(html, opts = {}) {
     // 字典上下文提示（阶段 3）：命中术语附到单元上，供 LLM 参考；缺省无字典时零开销
     if (opts.dict) {
       for (const u of toTranslate) u.dictHints = dictHintsForText(u.text, opts.dict);
-      annotateSemanticRequirements(toTranslate, opts.dict);
+      annotateSemanticRequirements(toTranslate, opts.dict, { legacyFixed: opts.legacyFixedGlossary === true });
     }
     const res = await opts.translateUnits(toTranslate, {
       html,
@@ -791,8 +804,11 @@ module.exports = {
   mergePlainIntoOriginal,
   dictHintsForText,
   annotateSemanticRequirements,
-  checkRequiredGlosses,
-  checkSemanticPlain,
+  checkLegacyFixedGlossaryTemplate,
+  checkLegacyFixedGlossaryReport,
+  // Deprecated compatibility aliases. New live-v4 code must not use these as semantic authority.
+  checkRequiredGlosses: checkLegacyFixedGlossaryTemplate,
+  checkSemanticPlain: checkLegacyFixedGlossaryReport,
   isReportUiUnit,
   checkPlainContract: HC.checkPlainContract,
   loadPlainEnums,
