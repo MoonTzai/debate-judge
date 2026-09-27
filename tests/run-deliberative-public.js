@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const FROZEN_HTML_SHA256 = 'd6bed878193682bc4a8142af7b72f17cdb197d52fda07d5af4562eb3baef9e1a';
+const FROZEN_HTML_SHA256 = '0b710d9a22dffb4f623f603f08c80691d9a1df8e7b44a921d206c0721084c806';
 const HTML = path.join(ROOT, 'web', 'judge.html');
 
 function shaBytes(bytes) {

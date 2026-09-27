@@ -205,11 +205,12 @@ test('fresh SC current self-proves and same-version resume spends zero model cal
   assert.equal(resumed.provenance.revision, 1);
 });
 
-test('SC projection-only failure resumes staged reviewed semantic without repeating discovery/review', async t => {
+test('SC projection-only representation failure re-projects in-place without repeating semantic stages', async t => {
   const workDir = tempDir(t);
   const global = fakeGlobal(workDir, GLOBAL);
   const base = responder(authority(), null, 'initial');
   const roles = [];
+  const projectPrompts = [];
   let breakFirstProjection = true;
   const apiStub = async (cfg, messages, opts) => {
     const system = String(opts && opts.system || '');
@@ -221,8 +222,47 @@ test('SC projection-only failure resumes staged reviewed semantic without repeat
     else if (system.includes('标准表示投影器')) role = 'sc-project';
     else if (system.includes('SC authority fidelity reviewer')) role = 'sc-fidelity';
     roles.push(role);
+    if (role === 'sc-project') projectPrompts.push(String((messages && messages[0] && messages[0].content) || ''));
     if (role === 'sc-project' && breakFirstProjection) {
       breakFirstProjection = false;
+      const broken = authority();
+      broken.sides.affirmative.candidates[0].composition_chain[0].quote =
+        '我承认夜间公交需要财政支出。';
+      return { text: JSON.stringify(broken), completion_status: 'verified_complete' };
+    }
+    return base.apiStub(cfg, messages, opts);
+  };
+
+  const result = await Host.prepareTestScAuthority(workDir, global, {
+    cfg: { provider: 'mock', model: 'mock' }, apiStub
+  });
+  assert.equal(result.current.revision, 1);
+  assert.deepEqual(roles, [
+    'sc-inventory-discover', 'sc-inventory-review', 'sc-analyze', 'sc-review',
+    'sc-project', 'sc-project', 'sc-fidelity'
+  ], 'representation retry must repeat only sc-project before fidelity');
+  assert.equal(projectPrompts.length, 2);
+  assert.match(projectPrompts[1], /deterministic representation re-projection 1\/3/);
+  assert.match(projectPrompts[1], /exact-source quote must be an exact contiguous substring/);
+  assert.match(projectPrompts[1], /优先返回 source_span/);
+});
+
+test('SC projection representation retry budget remains fail-closed and never republishes semantic as current', async t => {
+  const workDir = tempDir(t);
+  const global = fakeGlobal(workDir, GLOBAL);
+  const base = responder(authority(), null, 'initial');
+  const roles = [];
+  const apiStub = async (cfg, messages, opts) => {
+    const system = String(opts && opts.system || '');
+    let role = 'unknown';
+    if (system.includes('candidate inventory 发现器')) role = 'sc-inventory-discover';
+    else if (system.includes('candidate inventory reviewer')) role = 'sc-inventory-review';
+    else if (system.includes('专职 SC')) role = 'sc-analyze';
+    else if (system.includes('source-grounded SC semantic reviewer')) role = 'sc-review';
+    else if (system.includes('标准表示投影器')) role = 'sc-project';
+    else if (system.includes('SC authority fidelity reviewer')) role = 'sc-fidelity';
+    roles.push(role);
+    if (role === 'sc-project') {
       const broken = authority();
       broken.sides.affirmative.candidates[0].composition_chain[0].quote =
         '我承认夜间公交需要财政支出。';
@@ -237,19 +277,14 @@ test('SC projection-only failure resumes staged reviewed semantic without repeat
     }),
     /exact-source quote must be an exact contiguous substring/
   );
+  assert.equal(roles.filter(role => role === 'sc-project').length, 4,
+    'initial projection + three bounded representation retries only');
+  assert.equal(roles.filter(role => role === 'sc-fidelity').length, 0,
+    'fidelity must never run on an invalid projection');
+  assert.equal(roles.filter(role => role === 'sc-analyze').length, 1);
+  assert.equal(roles.filter(role => role === 'sc-review').length, 1);
   const afterFailure = Store.createProductionSemanticStore(workDir).readCurrent('sc-v10-authority');
-  assert.equal(afterFailure.revision, 0, 'representation failure must not publish staged semantic as current authority');
-  assert.deepEqual(roles, [
-    'sc-inventory-discover', 'sc-inventory-review', 'sc-analyze', 'sc-review', 'sc-project'
-  ]);
-
-  roles.length = 0;
-  const retried = await Host.prepareTestScAuthority(workDir, global, {
-    cfg: { provider: 'mock', model: 'mock' }, apiStub
-  });
-  assert.equal(retried.current.revision, 1);
-  assert.deepEqual(roles, ['sc-project', 'sc-fidelity'],
-    'same-input retry must reuse independently reviewed staged semantic and rerun representation only');
+  assert.equal(afterFailure.revision, 0, 'exhausted representation retries must not publish current authority');
 });
 
 test('same-revision tampered frozen inventory fails closed before reuse', async t => {

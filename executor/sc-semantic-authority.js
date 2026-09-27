@@ -840,24 +840,74 @@ function mergeProjectionRepresentation(semanticAuthority, projectionRaw) {
   return merged;
 }
 
+function buildProjectionRetryPrompt(basePrompt, error, retryIndex, maxRetries) {
+  const message = String(error && error.message ? error.message : error || '').slice(0, 2400);
+  return basePrompt + '\n\n【deterministic representation re-projection ' + retryIndex + '/' + maxRetries + '】\n' +
+    '上一版只是在标准表示校验中失败；reviewed semantic authority、frozen inventory、candidate identity 与全部 semantic fields 继续冻结，禁止重新判断或改写。\n' +
+    '只重新执行 representation/provenance 投影。若错误涉及 quote/source_span，不得猜测、拼接、规范化或同义改写原文；优先返回 source_span={start_line,end_line}，让 host 从当前 source 机械复制 exact bytes。\n' +
+    '仍须返回一个完整严格 JSON authority；不得只返回 patch、解释或第二个对象。\n' +
+    'deterministic gate error: ' + message;
+}
+
 async function runFidelityClosure(input) {
   const semanticAuthority = parseSemanticAuthority(input.authority);
   if (input.inventory) assertAuthorityInventoryCoverage(semanticAuthority, input.inventory);
 
-  const projectionRaw = await callText(
-    input.callModel,
-    'sc-project',
-    PROJECT_SYSTEM,
-    buildProjectPrompt(input.sourceText, input.globalSemantic, semanticAuthority, input.inventory),
-    input.onStage
+  const baseProjectPrompt = buildProjectPrompt(
+    input.sourceText, input.globalSemantic, semanticAuthority, input.inventory
   );
-  const authority = await validateStage(input.onStage, 'sc-project', () => {
-    const representationOnly = mergeProjectionRepresentation(semanticAuthority, projectionRaw);
-    const materialized = materializeProjectionEvidence(representationOnly, input.sourceText);
-    const parsed = parseAuthority(materialized, input.sourceText);
-    if (input.inventory) assertAuthorityInventoryCoverage(parsed, input.inventory);
-    return parsed;
-  });
+  const maxProjectionRetries = 3;
+  let projectionRaw = '';
+  let authority = null;
+  let lastProjectionError = null;
+
+  for (let attempt = 0; attempt <= maxProjectionRetries; attempt++) {
+    const projectPrompt = attempt === 0
+      ? baseProjectPrompt
+      : buildProjectionRetryPrompt(baseProjectPrompt, lastProjectionError, attempt, maxProjectionRetries);
+    projectionRaw = await callText(
+      input.callModel,
+      'sc-project',
+      PROJECT_SYSTEM,
+      projectPrompt,
+      input.onStage
+    );
+    await emitStage(input.onStage, 'sc-project', 'validating', {
+      attempt: attempt + 1,
+      maxAttempts: maxProjectionRetries + 1
+    });
+    try {
+      const representationOnly = mergeProjectionRepresentation(semanticAuthority, projectionRaw);
+      const materialized = materializeProjectionEvidence(representationOnly, input.sourceText);
+      const parsed = parseAuthority(materialized, input.sourceText);
+      if (input.inventory) assertAuthorityInventoryCoverage(parsed, input.inventory);
+      authority = parsed;
+      lastProjectionError = null;
+      await emitStage(input.onStage, 'sc-project', 'complete', {
+        attempt: attempt + 1,
+        maxAttempts: maxProjectionRetries + 1
+      });
+      break;
+    } catch (e) {
+      lastProjectionError = e;
+      if (attempt >= maxProjectionRetries) {
+        await emitStage(input.onStage, 'sc-project', 'failed', {
+          attempt: attempt + 1,
+          maxAttempts: maxProjectionRetries + 1,
+          error: e && e.message ? e.message : String(e)
+        });
+        throw e;
+      }
+      await emitStage(input.onStage, 'sc-project', 'retrying', {
+        attempt: attempt + 1,
+        nextAttempt: attempt + 2,
+        maxAttempts: maxProjectionRetries + 1,
+        error: e && e.message ? e.message : String(e)
+      });
+    }
+  }
+
+  if (!authority) throw lastProjectionError || new Error('SC standard projection failed without authority');
   const projection = JSON.stringify(authority, null, 2);
 
   const fidelityRaw = await callText(input.callModel, 'sc-fidelity', FIDELITY_SYSTEM,
