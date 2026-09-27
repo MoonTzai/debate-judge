@@ -1,0 +1,19 @@
+name: Deliberative Edition CI
+on:
+  push:
+    branches: [deliberative-edition]
+  pull_request:
+    branches: [deliberative-edition]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tests/run-deliberative-public.js
+      - run: node scripts/secret-scan.js
+      - run: node scripts/generate-manifest.js
+      - run: git diff --exit-code -- MANIFEST.sha256

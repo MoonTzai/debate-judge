@@ -12,11 +12,11 @@ Debate-Judge is an open research-software project. Contributions should improve 
 
 ## Verification
 
-A release-quality contribution should preserve `Skill-Judge.md` as the single canonical Skill, the `install-skill.js::BLOCKS` closure, and generated-Web/source relationships. Run the project tests applicable to the changed area and report failures or skipped tests exactly. Passing software tests is not evidence that an adjudication is scientifically correct.
+A release-quality contribution should preserve `Skill-Judge.md` as the single editable canonical Skill, keep `Debate-Judge.md` byte-identical as the frozen Deliberative mirror unless the mirror contract is deliberately migrated, preserve the `install-skill.js::BLOCKS` closure, and preserve generated-Web/source relationships. Run the project tests applicable to the changed area and report failures or skipped tests exactly. Passing software tests is not evidence that an adjudication is scientifically correct.
 
 ## Rights and licensing
 
-Repository content is governed by the MIT License and `THIRD_PARTY_NOTICES.md`. Material visible only in private development workspaces is outside this public license boundary and must not be copied into the repository without separate provenance and rights review.
+Project code and engineering documentation are governed by the MIT License; the frozen Skill text and its exact mirror retain their embedded `CC BY-NC-SA 4.0` notice. `THIRD_PARTY_NOTICES.md` records the file-level boundary. Material visible only in private development workspaces is outside this public license boundary and must not be copied into the repository without separate provenance and rights review.
 
 ## Conduct and support
 

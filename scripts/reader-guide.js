@@ -6,8 +6,9 @@ const readerGuideSchema = require('../schemas/reader-guide.schema.json');
 
 const SCHEMA_VERSION = 'r8-reader-guide-v2';
 const PROMPT_VERSION = 'r8-reader-guide-prompt-v2';
+const REVIEW_PROMPT_VERSION = 'r8-reader-guide-review-prompt-v3';
 const PLAIN_SCHEMA_VERSION = 'r8-reader-guide-plain-v1';
-const PLAIN_PROMPT_VERSION = 'r8-reader-guide-plain-prompt-v3';
+const PLAIN_PROMPT_VERSION = 'r8-reader-guide-plain-prompt-v4';
 const SECTION_IDS = Array.from({ length: 12 }, (_, i) => 'C' + (i + 1));
 const GUIDE_OUTPUT_SCHEMA = readerGuideSchema.definitions.readerGuide;
 
@@ -249,18 +250,18 @@ function guardTokens(text) {
   // token 层只保护原子数字/ID/主体/胜负词；比分的有序关系由 scorePairClaims +
   // factRelationshipErrors 独立硬门负责。这样结构化“正方4/反方6”可以合法见证 4:6，
   // 又不会因要求来源文本逐字出现“4:6”而产生假阴性。
-  const matches = src.match(/\d+|(?:N\d+|M-[A-Z0-9-]+|CP-\d+)|(?:正方|反方|获胜|胜方|胜出|胜利|落败|败北)/g) || [];
+  const matches = src.match(/(?:N\d+|M-[A-Z0-9-]+|CP-\d+)|(?:正方|反方|获胜|胜方|胜出|胜利|落败|败北)/g) || [];
   return Array.from(new Set(matches.map(x => x.replace(/\s+/g, ''))));
 }
 
 const CHINESE_DIGITS = { '零': 0, '〇': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
 const CHINESE_UNITS = { '十': 10, '百': 100, '千': 1000, '万': 10000 };
-const SCORE_NUMBER = '(?:\\d+|[零〇一二两三四五六七八九十百千万]+)';
+const SCORE_NUMBER = '(?:[+-]?\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千万]+)';
 const COUNT_CATEGORY = { '位': 'person', '人': 'person', '名': 'person', '次': 'occurrence', '轮': 'round', '分': 'score', '票': 'vote', '项': 'item', '条': 'item' };
 
 function numericValue(raw) {
   const value = String(raw || '').trim();
-  if (/^\d+$/.test(value)) return Number(value);
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(value)) return Number(value);
   let total = 0;
   let current = 0;
   for (const char of value) {
@@ -347,7 +348,7 @@ function sourceCountWitnesses(section, evidence) {
     if (/人数|人员|评委|辩手/.test(field)) witnesses.push({ value, category: 'person', ordinal: false, side: sideMatch ? sideMatch[1] : null });
     if (/次数/.test(field)) witnesses.push({ value, category: 'occurrence', ordinal: false });
     if (/轮次/.test(field)) witnesses.push({ value, category: 'round', ordinal: false });
-    if (/得分|评分|分数/.test(field)) witnesses.push({ value, category: 'score', ordinal: false });
+    if (/得分|评分|分数|加权/.test(field)) witnesses.push({ value, category: 'score', ordinal: false });
     if (/票数/.test(field)) witnesses.push({ value, category: 'vote', ordinal: false });
     if (/数量|项目|条目/.test(field)) witnesses.push({ value, category: 'item', ordinal: false });
   }
@@ -515,6 +516,10 @@ function validateGuide(input, guide) {
     const cardText = ['what', 'why', 'conclusion'].map(k => card && card[k]).join('\n');
     const missingTokens = guardTokens(cardText).filter(token => !corpus.replace(/\s+/g, '').includes(token));
     if (missingTokens.length) errors.push(card.sectionId + ' 含来源外事实 token: ' + missingTokens.join(','));
+    const factModule = require('./plain-comprehension.js');
+    const corpusFacts = new Set(factModule.factIdentities(corpus));
+    const missingFacts = factModule.factIdentities(cardText).filter(atom => !corpusFacts.has(atom));
+    if (missingFacts.length) errors.push(card.sectionId + ' 含来源外事实 identity: ' + missingFacts.join(','));
     // 计数事实门逐字段执行：严格度与整卡扫描相同，但错误必须指出 what/why/conclusion，
     // 这样 R8 白话定点修复能冻结同卡其余已合格字段，而不是把整张卡交给模型重写。
     for (const field of ['what', 'why', 'conclusion']) {
@@ -525,9 +530,43 @@ function validateGuide(input, guide) {
   return { ok: errors.length === 0, errors };
 }
 
+function semanticIssueText(issue) {
+  if (!issue || typeof issue !== 'object' || Array.isArray(issue)) return '';
+  // Free-text meaning is not tied to one magic key. Historical/model outputs have used
+  // issue/reason/message as well as summary/detail. Reading explicit text is not semantic
+  // inference; the program still never guesses action or targetRound from the prose.
+  const parts = [];
+  for (const key of ['issue', 'reason', 'message', 'summary', 'detail']) {
+    const value = issue[key];
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const text = value.trim();
+    if (!parts.includes(text)) parts.push(text);
+  }
+  return parts.join('\n');
+}
+
 function validateReview(input, guide, review) {
   const errors = [];
   if (!review || review.approved !== true) errors.push('R8 独立复核未批准');
+  // 语义异议的影响和责任由 reviewer 明确分类；程序不根据关键词、数量或发现章节猜责任轮。
+  const notes = [], upstreamIssues = [], classificationErrors = [];
+  const reviewStages = ['R1','R2','R2.5','R3','R4','R4.5','R5A','R5B','R6'];
+  const issues = review && review.semanticIssues;
+  if (issues !== undefined && !Array.isArray(issues)) classificationErrors.push('semanticIssues 必须为数组');
+  for (const issue of Array.isArray(issues) ? issues : []) {
+    const detail = semanticIssueText(issue);
+    if (!detail) {
+      classificationErrors.push('异议须有自由文字说明');
+      continue;
+    }
+    if (issue.action === 'note') notes.push(issue);
+    else if (issue.action === 'upstream_review' && reviewStages.includes(issue.targetRound)) upstreamIssues.push(issue);
+    else classificationErrors.push('请说明异议处置：action=note，或 action=upstream_review 并给出 targetRound；程序不自动猜责任轮');
+  }
+  errors.push(...classificationErrors);
+  if (upstreamIssues.length) {
+    errors.push('R8 发现上游语义问题，需回查 ' + [...new Set(upstreamIssues.map(i => i.targetRound))].join('、') + '；保留异议，不在导览层改判');
+  }
   const checks = new Map(((review && review.cardChecks) || []).map(c => [c && c.sectionId, c]));
   for (const id of SECTION_IDS) {
     const c = checks.get(id);
@@ -535,7 +574,12 @@ function validateReview(input, guide, review) {
   }
   const guideCheck = validateGuide(input, guide);
   if (!guideCheck.ok) errors.push.apply(errors, guideCheck.errors);
-  return { ok: errors.length === 0, errors };
+  const reopenNodes = reviewStages.filter(stage => upstreamIssues.some(issue => issue.targetRound === stage));
+  return { ok: errors.length === 0, errors, notes, upstreamIssues, reopenNodes, needsClarification: classificationErrors.length > 0 };
+}
+
+function upstreamReviewIssues(review) {
+  return ((review && review.semanticIssues) || []).filter(issue => issue && issue.action === 'upstream_review');
 }
 
 function validatePlainGuide(input, guide, plainGuide) {
@@ -652,13 +696,13 @@ function buildGuideRepairPrompt(input, guide, errors, sectionIds) {
 }
 
 function buildReviewPrompt(input, guide) {
-  return '你是 R8 独立事实复核器。只依据 guide-input 检查 reader-guide：每卡是否没有新增裁决/事实，所有数字、主体、胜负、评分、ID 与结论都可由该卡 evidence 回指；数字必须是已选 evidence 的直接数值（不得数姓名表或相加），主体/胜负词不得同义改写；且 anchors 项逐字等于已选 `SPEECH:` 来源的 sourceId、speaker、stage、quote；C3 与 C7 是否各有同一 CP 的攻击和回应一对锚点。输出且只输出 JSON：' +
-    '{"approved":true,"cardChecks":[{"sectionId":"C1","noNewJudgment":true,"factsConsistent":true,"anchorsConsistent":true}]}' +
+  return '你是 R8 独立语义与事实复核器。只依据 guide-input、原始来源和完整卡片上下文检查 reader-guide：每卡是否没有新增裁决/事实，数值含义、主体、胜负、评分关系、证据引用与结论是否一致；数字允许等价自然表达和同值复述，但不得引入新值、改值、换主体/单位/关系。anchors 必须与对应 SPEECH 来源身份一致。不要以词面差异或机械门通过代替语义判断。如果只是导览自身表述失真，在对应 cardChecks 标 false；如果发现问题其实来自上游报告/裁决/事实而不能在导览层修正，写入 semanticIssues。每条 semanticIssue 必须明确 action=upstream_review 或 action=note，并提供 summary 和 detail 两段自由文字；upstream_review 还必须给出最早相关 targetRound（R1/R2/R2.5/R3/R4/R4.5/R5A/R5B/R6）。summary 用一句话说明冲突，detail 说明具体证据、影响以及为什么导览层不能修；程序不会从文字自动猜 action/责任轮。特别注意 authority 层级：题头/裁判倾向中的“三维权重=0/0/0（中立·自动）”表示用户没有预设三维侧重、由比赛内容自行选择判准框架，并不表示最终裁决的三维权重必须为零；R6/报告中基于本场内容给出的组合判准比例或重要性说明不与该 auto 状态天然冲突。只有两个来源在同一 authority 层、对同一个语义变量给出互不相容的事实/裁决时，才可标 upstream_review；配置偏好、自动模式、派生判准和报告解释不得仅因数字不同就互判冲突。approved=true 不能消除 upstream_review。若没有异议，semanticIssues 可省略或为空数组。输出且只输出 JSON：' +
+    '{"approved":true,"cardChecks":[{"sectionId":"C1","noNewJudgment":true,"factsConsistent":true,"anchorsConsistent":true}],"semanticIssues":[{"action":"upstream_review","targetRound":"R4.5","sectionId":"C1","summary":"一句话说明上游冲突","detail":"说明冲突证据、影响与为何需上游回查"}]}' +
     '\n\nguide-input:\n' + JSON.stringify(input) + '\n\nreader-guide:\n' + JSON.stringify(guide);
 }
 
 function buildPlainGuideReviewPrompt(guide, plainGuide) {
-  return '你是 R8 章节导览白话层的独立语义复核器。按 C1—C12 每张卡的完整 what/why/conclusion 上下文比较原 guide 与 plain guide；不要把三个字段拆成彼此无关的孤句。白话只能降低表达门槛，绝不能改变或省略原文中的主体、胜负、因果方向、否定/保留条件、责任归属、程度、数字、评分、ID、判决或任何限定。N/M/CP/B0/Q/Phase/Lv/路径号等内部 ID 必须原样、原次数保留，但它们可以只是 locator：如果同卡或邻句已经把事件/判断说明白，不要求逐个解释 ID；关键是忽略定位码后仍能理解判断，不得把自然文本改造成机器说明书。逐章检查 semanticEquivalent、noJudgmentChange、factsConsistent、zeroBackgroundReadable、naturalReadable、noLocatorDependency 六项。任一实质性压缩、因果替换、否定丢失、判断强化/弱化、黑箱表达或编号依赖都必须 false。输出且只输出 JSON：' +
+  return '你是 R8 章节导览白话层的独立语义复核器。按 C1—C12 每张卡的完整 what/why/conclusion 上下文比较原 guide 与 plain guide；不要把三个字段拆成彼此无关的孤句。白话只能降低表达门槛，绝不能改变或省略原文中的主体、胜负、因果方向、否定/保留条件、责任归属、程度、数值含义、评分关系、证据引用、判决或任何限定。这里的零背景读者具备普通中文阅读能力，但没有 Debate-Judge、辩论理论或本报告内部方法背景；不得假设其查过术语表、看过前章或理解任何内部框架名。一张卡只有在 what/why/conclusion 合起来能够让这类读者直接知道“本章具体在检查/比较什么 → 为什么这会影响理解或裁决 → 本章最后判到了哪里”时，zeroBackgroundReadable 才能为 true；三个字段可以互相补充，不要求机械重复。N/M/CP/S 等证据定位 ID 必须保持同一 identity；B0/B\'/B\'\'/SC/Phase/Q/Lv/场C 等框架标签按语义理解，不要求字符串或次数一致。已有数值可以为自然解释而复述，同一个 0.5、2/2、4 等重复出现本身不是 factsConsistent=false 的理由；真正要检查的是有没有引入新数值、删掉关键数值、改变数值对应主体/单位/关系，或把原本的加权、比分、计数解释成别的事实。只做同义词换词、用一个内部概念解释另一个、把多个陌生概念堆在一句里、只说“重要/有影响/收束/完成”却不说明具体关系、或必须依赖其它章节才能看懂，都必须把 zeroBackgroundReadable 判为 false。逐章检查 semanticEquivalent、noJudgmentChange、factsConsistent、zeroBackgroundReadable、naturalReadable、noLocatorDependency 六项。任一实质性压缩、因果替换、否定丢失、判断强化/弱化、黑箱表达、跨章理解依赖或编号依赖都必须 false。输出且只输出 JSON：' +
     '{"approved":true,"cardChecks":[{"sectionId":"C1","semanticEquivalent":true,"noJudgmentChange":true,"factsConsistent":true,"zeroBackgroundReadable":true,"naturalReadable":true,"noLocatorDependency":true}]}' +
     '\n\nreader-guide:\n' + JSON.stringify(guide) + '\n\nreader-guide-plain:\n' + JSON.stringify(plainGuide);
 }
@@ -678,11 +722,11 @@ function buildPlainGuideRepairPrompt(guide, plainGuide, review, sectionIds) {
   const originals = (guide && guide.cards || []).filter(card => selected.has(card.sectionId));
   const candidates = (plainGuide && plainGuide.cards || []).filter(card => selected.has(card.sectionId));
   const targetIds = wanted.flatMap(sectionId => ['what','why','conclusion'].map(field => 'R8P:' + sectionId + ':' + field));
-  return '你是 R8 白话导览定点语义修复器。只允许修改失败卡；同卡 what/why/conclusion 全部作为语义 context halo 提供，未点名卡被冻结。术语表不是固定括号模板；内部编号可以只是 locator，不要求逐个解释，但忽略编号后仍应能理解事件和判断。必须保持原卡全部事实、主体、胜负、数字、因果、否定、限定、责任、程度与结论强度，且不新增任何事实 token。输出必须且只能是 {"units":[{"id":"R8P:C1:what","text":"..."}]}，并恰好覆盖 targetIds。' +
+  return '你是 R8 白话导览定点语义修复器。只允许修改失败卡；同卡 what/why/conclusion 全部作为语义 context halo 提供，未点名卡被冻结。目标读者没有 Debate-Judge 或辩论理论背景。若某卡的 zeroBackgroundReadable/naturalReadable/noLocatorDependency 失败，优先把整卡重新组织为：what 说清具体在检查/比较什么，why 说清为什么它会影响理解或裁决，conclusion 说清最后判到了哪里；三个字段互相补足，不要把同一说明机械重复三遍。术语表不是固定括号模板；保留必要术语时必须说明它在本场具体指什么或做什么，不得用另一个内部术语解释。N/M/CP/S 等证据定位 ID 要保持同一 identity；B0/B\'/B\'\'/SC/Phase/Q/Lv/场C 等框架标签按语义自然处理。必须保持原卡全部事实、主体、胜负、数值含义、数值对应主体/单位/关系、因果、否定、限定、责任、程度与结论强度。为了自然解释，可以复述原卡已经存在的同一数值（例如把“各+0.5”解释成“各得+0.5，也就是各增加0.5”）；这种复述不是新增事实。但不得引入原卡没有的新数值、改变数值、改换单位/主体/关系或把加权说成另一种事实。输出必须且只能是 {"units":[{"id":"R8P:C1:what","text":"..."}]}，并恰好覆盖 targetIds。' +
     '\n\ntargetIds=' + JSON.stringify(targetIds) +
     '\n\nreview=' + JSON.stringify(review) +
     '\n\noriginalCards=' + JSON.stringify(originals) +
     '\n\ncurrentPlainCards=' + JSON.stringify(candidates);
 }
 
-module.exports = { SCHEMA_VERSION, PROMPT_VERSION, PLAIN_SCHEMA_VERSION, PLAIN_PROMPT_VERSION, SECTION_IDS, stableJson, hashGuideInput, hashPlainGuideSource, parseSpeechAnchors, buildGuideInput, cacheKey, validateGuide, validateReview, validatePlainGuide, validatePlainGuideReview, parseJson, buildGuidePrompt, guideRepairSectionIds, buildGuideRepairPrompt, buildReviewPrompt, buildPlainGuideReviewPrompt, plainGuideReviewFailedSections, buildPlainGuideRepairPrompt };
+module.exports = { SCHEMA_VERSION, PROMPT_VERSION, REVIEW_PROMPT_VERSION, PLAIN_SCHEMA_VERSION, PLAIN_PROMPT_VERSION, SECTION_IDS, stableJson, hashGuideInput, hashPlainGuideSource, parseSpeechAnchors, buildGuideInput, cacheKey, validateGuide, semanticIssueText, validateReview, upstreamReviewIssues, validatePlainGuide, validatePlainGuideReview, parseJson, buildGuidePrompt, guideRepairSectionIds, buildGuideRepairPrompt, buildReviewPrompt, buildPlainGuideReviewPrompt, plainGuideReviewFailedSections, buildPlainGuideRepairPrompt };

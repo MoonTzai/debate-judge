@@ -242,6 +242,7 @@ function createFlightRecorder(options) {
     currentRun = {
       id: id,
       workDir: String(meta.workDir || ''),
+      historyInstanceId: String(meta.historyInstanceId || ''),
       provider: String(meta.provider || ''),
       baseUrl: String(meta.baseUrl || ''),
       model: String(meta.model || ''),

@@ -14,6 +14,26 @@ const DEFAULT_MAX_TOKENS = 384000;
 // 单请求超时：长输入（full-data 全量注入）+ 长输出（最高 384K tokens 的理论时长）放宽到 2 小时，避免误杀导致重试/妥协
 const DEFAULT_TIMEOUT_MS = 7200000;
 
+// OpenAI-compatible 可选 thinking 开关：未配置时不注入请求，保持既有 provider 默认行为。
+// 配置内部规范化为 'enabled' | 'disabled'；发往 Chat Completions 时转换为官方 thinking:{type} 对象。
+function resolveThinkingMode(env, fileCfg) {
+  let raw;
+  if (fileCfg && Object.prototype.hasOwnProperty.call(fileCfg, 'thinking')) raw = fileCfg.thinking;
+  else raw = env && env.EXECUTOR_THINKING;
+  if (raw == null || raw === '') return undefined;
+  if (raw && typeof raw === 'object') raw = raw.type;
+  const mode = String(raw || '').trim().toLowerCase();
+  if (!['enabled', 'disabled'].includes(mode)) {
+    throw new Error('[executor] thinking 仅支持 enabled/disabled');
+  }
+  return mode;
+}
+
+function withOptionalThinking(body, cfg) {
+  if (!cfg || cfg.thinking == null) return body;
+  return Object.assign({}, body, { thinking: { type: cfg.thinking } });
+}
+
 // A8-ERR-1：配置文件合并（前端面板导出的 .api-config.json；fileCfg 字段显式覆盖 env，provider 未显式时按 fileCfg → env → auto）
 function resolveConfig(env, fileCfg) {
   env = env || {};
@@ -65,7 +85,8 @@ function resolveConfig(env, fileCfg) {
     model: (fileCfg && fileCfg.model) || env.EXECUTOR_MODEL || env.OPENAI_MODEL || 'gpt-5',
     timeoutMs: parseInt(env.EXECUTOR_TIMEOUT_MS || String(DEFAULT_TIMEOUT_MS), 10),
     maxTokens: (fileCfg && fileCfg.maxTokens) || parseInt(env.EXECUTOR_MAX_TOKENS || env.OPENAI_MAX_TOKENS || env.ANTHROPIC_MAX_TOKENS || String(DEFAULT_MAX_TOKENS), 10),
-    temperature: parseFloat((fileCfg && fileCfg.temperature) || env.EXECUTOR_TEMPERATURE || '0.3')
+    temperature: parseFloat((fileCfg && fileCfg.temperature) || env.EXECUTOR_TEMPERATURE || '0.3'),
+    thinking: resolveThinkingMode(env, fileCfg)
   };
 }
 
@@ -75,6 +96,25 @@ function normalizeMessages(messages) {
 
 // A8-ERR-1：格式遵守强化 system 提示（对齐 Claude 客户端调用方式；格式任务低温度）
 const FORMAT_SYSTEM = '你是辩论裁判引擎。你必须严格、逐字遵守用户指令中的所有输出格式要求（S 标记、### 结论 子块、DATA 标记、表格、INSERT 占位、JSON 结构）。每个 S 段必须在 [S_START] 后立即以 "### 结论" 标题开头。输出必须是完整且可机械校验的产物；不得省略、不得解释、不得输出额外内容。';
+
+function completionResult(text, completionStatus, completionEvidence, diagnostics, opts) {
+  const envelope = {
+    text: String(text),
+    completion_status: ['verified_complete', 'known_incomplete', 'unknown'].includes(completionStatus)
+      ? completionStatus : 'unknown',
+    completion_evidence: completionEvidence || {},
+    diagnostics: diagnostics || {}
+  };
+  return opts && opts.returnEnvelope === true ? envelope : envelope.text;
+}
+
+function attachPartialEvidence(err, text, evidence, diagnostics) {
+  if (!err || typeof err !== 'object' || !text) return err;
+  if (typeof err.partialText !== 'string') err.partialText = String(text);
+  if (!err.completion_evidence) err.completion_evidence = evidence || {};
+  if (!err.diagnostics) err.diagnostics = diagnostics || {};
+  return err;
+}
 
 // ---- B 方案（260812）：SSE 流式解析（OpenAI 兼容端点；零依赖，Node/browser 通用）----
 // 流式 = 传输层细节：单次请求，响应分批到达；机械累积 delta → 完整文本。
@@ -221,6 +261,183 @@ async function requestCompletionStream(baseUrl, apiKey, body, opts) {
   }
 }
 
+// S4A-I1 shadow-only detailed transport: completion evidence + partial body preservation.
+// Legacy/Web continues through the untouched requestCompletionStream above so build-time patch anchors remain stable.
+async function requestCompletionStreamEnvelope(baseUrl, apiKey, body, opts) {
+  opts = opts || {};
+  const attempt = async (signal) => {
+    const res = await fetch(baseUrl.replace(/\/+$/, '') + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify(Object.assign({ stream: true }, body)),
+      signal
+    });
+    if (!res.ok) throw new Error('[executor] API ' + res.status + ' ' + (await res.text()).slice(0, 300));
+    if (!res.body || typeof res.body.getReader !== 'function')
+      throw new Error('[executor] 流式响应无 body（ReadableStream）——端点不支持 stream 或网关异常');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let text = '';
+    let finishReason = null;
+    let streamEnded = false;
+    let reasonChars = 0;
+    let progressFrames = 0;
+    let lastProgressAt = 0;
+    const progressT0 = Date.now();
+    const fireProgress = (final) => {
+      const now = Date.now();
+      if (!final && now - lastProgressAt < 200) return;
+      lastProgressAt = now;
+      if (typeof opts.onProgress === 'function') {
+        try {
+          opts.onProgress({
+            chars: text.length,
+            reasonChars,
+            frames: progressFrames,
+            elapsedMs: now - progressT0,
+            final: !!final
+          });
+        } catch (_) {}
+      }
+    };
+    const consumeFrames = (b, final) => {
+      // ② 帧分隔三种合法形态（\r\n\r\n | \r\r | \n\n）在原始 buffer 上识别
+      const sepRe = /\r\n\r\n|\r\r|\n\n/;
+      let rest = b;
+      let m;
+      while ((m = sepRe.exec(rest)) !== null) {
+        const frame = rest.slice(0, m.index);
+        rest = rest.slice(m.index + m[0].length);
+        processFrame(frame);                                    // ⑬ 不再因 streamEnded break——[DONE] 后帧仍处理（⑩ 守卫）
+      }
+      // ⑨ EOF：final 时剩余残帧按完整帧处理（无结尾 \n\n 的末帧/小流；streamEnded 后残帧仍处理——收 finish_reason）
+      if (final && rest) processFrame(rest);
+      return rest;
+    };
+    const processFrame = (frame) => {
+      // ④ 帧提取后行尾归一
+      const norm = frame.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      // ① 帧内多行 data: 合并（SSE 规范：连续 data 行以 \n 拼接为单一 payload）
+      const dataLines = norm.split('\n').filter(l => l.startsWith('data:'));
+      if (!dataLines.length) return;                       // 注释/事件/retry 帧忽略
+      const payload = dataLines.map(l => l.slice(5).replace(/^ /, '')).join('\n');   // ⑧ 仅剥单空格
+      if (!payload) return;
+      if (payload === '[DONE]') { streamEnded = true; return; }
+      let j;
+      try { j = JSON.parse(payload); } catch (e) { console.warn('[executor] 流式脏帧跳过: ' + e.message); return; }   // ⑫ 可观测
+      if (j.error) throw new Error('[executor] 流中错误帧: ' + (j.error.message || JSON.stringify(j.error)).slice(0, 300));   // ⑦
+      const choice = j.choices && j.choices[0];
+      if (!choice) return;                                     // [DONE] 后元帧（choices:[]）安全跳过
+      const delta = choice.delta || {};
+      // ⑩ [DONE] 后（streamEnded）不再追加 content（防 post-DONE 帧污染），finish_reason 仍采纳
+      if (typeof delta.content === 'string' && !streamEnded) text += delta.content;   // reasoning_content 交错出现时忽略（只取 content）
+      if (typeof delta.reasoning_content === 'string') reasonChars += delta.reasoning_content.length;
+      progressFrames++;
+      fireProgress(false);
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+    };
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;                                       // ⑬ EOF 才是终止点——[DONE] 后继续读流
+        buffer += decoder.decode(value, { stream: true });
+        buffer = consumeFrames(buffer, false);
+        // ⑤ 缓冲上限（v6：consume 后残留超限 = 脏流无分隔符；合法大帧已被 consume 消费，不误杀）
+        if (buffer.length > SSE_BUFFER_LIMIT)
+          throw new Error('[executor] 流式缓冲超限（' + SSE_BUFFER_LIMIT + 'B）——网关帧异常或无 \\n\\n 分隔，已中止');
+      }
+      buffer += decoder.decode();                              // ⑨ decoder flush（流尾多字节字符）
+      buffer = consumeFrames(buffer, true);                    // ⑨ 残帧处理
+    } catch (e) {
+      attachPartialEvidence(e, text, {
+        provider: 'openai-compatible',
+        finish_reason: finishReason,
+        stream_done: streamEnded,
+        eof: false
+      }, { transport_interrupted_after_partial: !!text });
+      throw e;
+    } finally {
+      try { reader.releaseLock && reader.releaseLock(); } catch (e) {}
+    }
+    if (finishReason === 'length') {
+      const err = new Error('[executor] 输出达到 max_tokens 上限被截断（finish_reason=length）——已停止且未落盘。请提高 max_tokens（当前 ' + (body.max_tokens || '网关默认上限') + '）后重试，禁止使用截断产物。');
+      attachPartialEvidence(err, text, {
+        provider: 'openai-compatible',
+        finish_reason: finishReason,
+        stream_done: streamEnded,
+        eof: true
+      }, { truncated: true });
+      throw err;
+    }
+    // ③ 收紧：done 且全程无 finish_reason → 截断/异常流
+    if (!finishReason) {
+      const err = new Error('[executor] 流式响应未收到 finish_reason（流被截断或网关异常）——已停止且未落盘，禁止使用部分产物。');
+      attachPartialEvidence(err, text, {
+        provider: 'openai-compatible',
+        finish_reason: null,
+        stream_done: streamEnded,
+        eof: true
+      }, { truncated_or_gateway_abnormal: true });
+      throw err;
+    }
+    if (!text) {
+      const err = new Error('[executor] 流式响应无内容（choices 空或全程无 delta.content）');
+      err.code = 'EMPTY_COMPLETION';
+      throw err;
+    }
+    fireProgress(true);
+    return completionResult(
+      text,
+      finishReason === 'stop' ? 'verified_complete' : 'unknown',
+      {
+        provider: 'openai-compatible',
+        finish_reason: finishReason,
+        stream_done: streamEnded,
+        eof: true
+      },
+      {},
+      opts
+    );
+  };
+  // ⑥ 网络失败自动重试 1 次（退避 2s）：非 [executor] 前缀 且 非 AbortError；每次尝试独立 AbortController
+  const runWithTimeout = async () => {
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), opts.timeoutMs != null ? opts.timeoutMs : DEFAULT_TIMEOUT_MS) : null;   // ⑪
+    const externalSignal = opts.signal || null;
+    let onExternalAbort = null;
+    if (ctrl && externalSignal) {
+      onExternalAbort = () => ctrl.abort();
+      if (externalSignal.aborted) ctrl.abort();
+      else if (typeof externalSignal.addEventListener === 'function') externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+    try { return await attempt(ctrl ? ctrl.signal : externalSignal || undefined); }
+    finally {
+      if (timer) clearTimeout(timer);
+      if (externalSignal && onExternalAbort && typeof externalSignal.removeEventListener === 'function') {
+        try { externalSignal.removeEventListener('abort', onExternalAbort); } catch (_) {}
+      }
+    }
+  };
+  try {
+    return await runWithTimeout();
+  } catch (e) {
+    const retryableEmpty = !!(e && e.code === 'EMPTY_COMPLETION');
+    if (e && e.name === 'AbortError') throw e;                  // 自身超时 abort：不重试（最坏时长不翻倍）
+    // S4A-I1：一旦本 attempt 已获得正文，必须把 partial 原样交给 host 先持久化；
+    // 禁止 provider 内部静默重试覆盖第一次 partial 证据。零正文网络失败仍保留原 1 次内部重试。
+    if (e && typeof e.partialText === 'string' && e.partialText.length > 0) throw e;
+    if (e && e.message && e.message.indexOf('[executor]') === 0 && !retryableEmpty) throw e;
+    if (retryableEmpty) {
+      console.warn('[executor] 流式响应无内容，1 次后重试: finish_reason=stop 但无 delta.content');
+    } else {
+      console.warn('[executor] 流式请求网络失败，1 次后重试: ' + e.message);   // 重试可观测性（首轮路1）
+    }
+    await new Promise(r => setTimeout(r, 2000));
+    return await runWithTimeout();
+  }
+}
+
 async function requestCompletion(cfg, messages, opts) {
   opts = opts || {};
   const msgs = normalizeMessages(messages);
@@ -228,8 +445,10 @@ async function requestCompletion(cfg, messages, opts) {
   const system = opts.system || FORMAT_SYSTEM;
   if (!cfg || !cfg.provider) throw new Error('[executor] provider 配置缺失');
   if (cfg.provider === 'mock') {
-    if (typeof opts.mockResponder === 'function') return String(opts.mockResponder(msgs));
-    return '<!-- mock 响应 · ' + String(msgs[msgs.length - 1].content).slice(0, 80) + ' -->';
+    const text = typeof opts.mockResponder === 'function'
+      ? String(opts.mockResponder(msgs))
+      : '<!-- mock 响应 · ' + String(msgs[msgs.length - 1].content).slice(0, 80) + ' -->';
+    return completionResult(text, 'verified_complete', { provider: 'mock', synthetic: true }, {}, opts);
   }
   if (cfg.provider === 'unavailable') {
     throw new Error('[executor] ' + (cfg.error || '未探测到可用 API 凭据'));
@@ -239,16 +458,30 @@ async function requestCompletion(cfg, messages, opts) {
     try {
       // B 方案（260812）：SSE 流式（机械解析；协议路径与会话界面一致，规避网关非流式 ~300s 断连）
       // 网络失败自动重试 1 次在 requestCompletionStream 内部（⑥）；HTTP/截断/配置错误不重试
-      return await requestCompletionStream(cfg.baseUrl, cfg.apiKey, {
+      if (opts.returnEnvelope === true) {
+        return await requestCompletionStreamEnvelope(cfg.baseUrl, cfg.apiKey, withOptionalThinking({
+          model: cfg.model,
+          messages: [{ role: 'system', content: system }].concat(msgs),
+          temperature: cfg.temperature !== undefined ? cfg.temperature : 0.3,
+          max_tokens: cfg.maxTokens || DEFAULT_MAX_TOKENS
+        }, cfg), { timeoutMs: cfg.timeoutMs, onProgress: opts.onProgress, signal: opts.signal, returnEnvelope: true });
+      }
+      return await requestCompletionStream(cfg.baseUrl, cfg.apiKey, withOptionalThinking({
         model: cfg.model,
         messages: [{ role: 'system', content: system }].concat(msgs),
         temperature: cfg.temperature !== undefined ? cfg.temperature : 0.3,
         max_tokens: cfg.maxTokens || DEFAULT_MAX_TOKENS   // 批 5（260812 P0-3）：补发 max_tokens（此前配置死旋钮）
-      }, { timeoutMs: cfg.timeoutMs, signal: opts.signal });
+      }, cfg), { timeoutMs: cfg.timeoutMs, signal: opts.signal });
     } catch (e) {
       if (e && e.name === 'AbortError') throw e;
       if (e && e.message && e.message.indexOf('[executor]') === 0) throw e;
-      throw new Error('[executor] openai-compatible 网络请求失败: ' + e.message + ' @ ' + cfg.baseUrl);
+      const wrapped = new Error('[executor] openai-compatible 网络请求失败: ' + e.message + ' @ ' + cfg.baseUrl);
+      if (e && typeof e.partialText === 'string') {
+        wrapped.partialText = e.partialText;
+        wrapped.completion_evidence = e.completion_evidence || {};
+        wrapped.diagnostics = e.diagnostics || {};
+      }
+      throw wrapped;
     }
   }
   if (cfg.provider === 'anthropic-compatible') {
@@ -278,7 +511,13 @@ async function requestCompletion(cfg, messages, opts) {
       if (json.stop_reason === 'max_tokens') {
         throw new Error('[executor] 输出达到 max_tokens 上限被截断（stop_reason=max_tokens）——已停止且未落盘。请提高 max_tokens（当前 ' + cfg.maxTokens + '）后重试，禁止使用截断产物。');
       }
-      return text;
+      return completionResult(
+        text,
+        json.stop_reason === 'end_turn' || json.stop_reason === 'stop_sequence' ? 'verified_complete' : 'unknown',
+        { provider: 'anthropic-compatible', stop_reason: json.stop_reason || null },
+        {},
+        opts
+      );
     } catch (e) {
       if (e.message && e.message.indexOf('[executor]') === 0) throw e;
       throw new Error('[executor] anthropic-compatible 网络请求失败: ' + e.message + ' @ ' + cfg.baseUrl);
@@ -288,13 +527,15 @@ async function requestCompletion(cfg, messages, opts) {
   }
   if (cfg.provider === 'claude-task') {
     if (typeof opts.taskRunner !== 'function') throw new Error('[executor] claude-task provider 需宿主注入 taskRunner（Claude Task 工具不在通用 fetch 域）');
-    return String(await opts.taskRunner(msgs));
+    const text = String(await opts.taskRunner(msgs));
+    return completionResult(text, 'unknown', { provider: 'claude-task', finish_reason: null }, { completion_reason_unavailable: true }, opts);
   }
   if (cfg.provider === 'codex-cli') {
     if (typeof opts.codexRunner !== 'function') throw new Error('[executor] codex-cli provider 需 Node 宿主注入 runner');
-    return String(await opts.codexRunner(cfg, msgs, { system }));
+    const text = String(await opts.codexRunner(cfg, msgs, { system }));
+    return completionResult(text, 'unknown', { provider: 'codex-cli', finish_reason: null }, { completion_reason_unavailable: true }, opts);
   }
   throw new Error('[executor] 未知 provider: ' + cfg.provider);
 }
 
-module.exports = { resolveConfig, requestCompletion };
+module.exports = { resolveConfig, requestCompletion, requestCompletionStream, requestCompletionStreamEnvelope, FORMAT_SYSTEM, completionResult, resolveThinkingMode, withOptionalThinking };

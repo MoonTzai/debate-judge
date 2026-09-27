@@ -17,19 +17,83 @@ function toTypedIssue(record) {
     : { rule: '', severity: 'BLOCKING', message: String(record) };
   const severity = String(r.severity || 'BLOCKING');
   const blocking = severity === 'BLOCKING';
+  const rule = String(r.rule || '');
+  const authorityClass = String(r.authorityClass || '');
+  const localRepresentationRules = new Set(['A1', 'A2', 'A3', 'V-S17H']);
+  const factIdentityRules = new Set(['D1', 'D2', 'V10-FINAL-S15']);
+  let failureClass = r.failureClass || (blocking ? 'representation_global' : 'observation');
+  let owner = r.owner || (blocking ? 'model' : 'none');
+  let repairMode = r.repairMode || (blocking ? 'round_regenerate' : 'none');
+  let repairScope = r.repairScope || (blocking ? 'round' : 'none');
+  let retryable = Object.prototype.hasOwnProperty.call(r, 'retryable') ? !!r.retryable : blocking;
+
+  if (blocking && localRepresentationRules.has(rule)) {
+    failureClass = 'representation_local';
+    repairMode = 'bounded_repair';
+    repairScope = r.repairScope || 'artifact_block';
+  }
+  if (blocking && factIdentityRules.has(rule)) {
+    failureClass = 'fact_identity';
+    repairMode = 'bounded_repair';
+    repairScope = r.repairScope || 'fact_claim';
+  }
+  if (blocking && authorityClass === 'consumer_contract') {
+    failureClass = 'consumer_contract';
+    repairScope = r.repairScope || 'consumer_projection';
+  }
+  if (blocking && authorityClass === 'authority_integrity') {
+    failureClass = 'authority_integrity';
+    owner = 'host';
+    repairMode = 'fail_closed';
+    repairScope = 'authority';
+    retryable = false;
+  }
+
+  const issueType = blocking ? 'representation_blocker'
+    : (severity === 'WARNING' ? 'representation_warning' : 'observation');
   return {
-    rule: r.rule || '',
+    rule,
     severity,
     message: r.message || r.reason || String(record || ''),
-    issueType: blocking ? 'representation_blocker' : (severity === 'WARNING' ? 'representation_warning' : 'observation'),
+    authorityClass: authorityClass || null,
+    issueType,
     blockingScope: blocking ? 'representation' : 'none',
     repairTarget: blocking ? 'representation' : null,
+    failureClass,
+    owner,
+    repairMode,
+    repairScope,
+    retryable,
+    issueSignature: [rule || 'UNRULED', failureClass, owner, repairMode, repairScope].join('|'),
     semanticInvalid: false,
     semanticReviewAuthority: false
   };
 }
 function toTypedIssues(records) {
   return (records || []).map(toTypedIssue);
+}
+
+// V10 semantic-first boundary: these legacy rules do not merely verify syntax or
+// duplicate representation. They derive one semantic conclusion from other legacy
+// S8/S11 fields. Once reviewed semantic authority is bound, they may remain useful
+// diagnostics, but they must not become a second semantic authority or trigger a
+// retry that pressures the model to conform to the old matrix.
+const LEGACY_SEMANTIC_DERIVATION_RULES = new Set([
+  'H5', 'V-S8A', 'V-S8B', 'V3', 'V6',
+  'C1', 'C4', 'C7', 'C9a', 'C9b', 'C10b', 'C14', 'C15', 'C16',
+  'P1', 'P2', 'S8C-L1', 'S8C-R', 'V2-55'
+]);
+function applySemanticAuthorityBoundary(records, options) {
+  if (!options || options.semanticAuthorityBoundary !== 'semantic-first-v10') return records || [];
+  return (records || []).map(record => {
+    if (!record || record.severity !== 'BLOCKING' || !LEGACY_SEMANTIC_DERIVATION_RULES.has(record.rule) ||
+        record.authorityClass === 'representation_contract') return record;
+    return Object.assign({}, record, {
+      severity: 'WARNING',
+      authorityBoundary: 'semantic-first-v10',
+      message: '[legacy semantic advisory; reviewed authority controls truth] ' + String(record.message || '')
+    });
+  });
 }
 
 function validate(md, round, options = {}) {
@@ -43,8 +107,10 @@ function validate(md, round, options = {}) {
   if (options.p1Data) Object.assign(allData, options.p1Data);
   if (options.p2Data) Object.assign(allData, options.p2Data);
   if (options.p25Data) Object.assign(allData, options.p25Data);
-  // 260810 批次3：方向派生注入（字段缺失时；已存在→WARNING 回放标注）
-  applyDerivations(allData, errors);
+  // 260810 批次3：方向派生注入（字段缺失时；已存在→WARNING 回放标注）。
+  // V10 semantic-first 已有 reviewed authority 时，不再让 legacy completion 矩阵
+  // 机械注入语义方向；缺失/冲突只作为下方 advisory 被观察。
+  if (options.semanticAuthorityBoundary !== 'semantic-first-v10') applyDerivations(allData, errors);
 
   // === 类别F：文件完整性（始终执行） ===
   checkF1_F5(md, errors, round, isFinal);
@@ -74,7 +140,7 @@ function validate(md, round, options = {}) {
     }
   }
   if (round === 'R2') {
-    checkS8(allData, errors, md, options.anchor, options.sourceAnchorExemptions);
+    checkS8(allData, errors, md, options.anchor, options.sourceAnchorExemptions, options);
     // C9a/C9b 的前置门禁只依赖 P2 的 Phase III 与 P1 的 S7 致命计数；
     // 不提前执行完整 C1-C7，避免 R2 因缺少 P3/最终数据产生跨轮误报。
     if (options.p1Data) checkC9FatalReview(data, errors, options.p1Data);
@@ -88,10 +154,10 @@ function validate(md, round, options = {}) {
   }  // 新增
   if (round === 'R3') checkS15(allData, errors, false);
   if (round === 'R4') { const cs = checkStructure(md); errors.push(...cs.errors, ...cs.warnings); }
-  if (isFinal) { checkS1_S7(allData, errors); checkS7Contract(md, allData, errors); checkS8(allData, errors, md, options.anchor, options.sourceAnchorExemptions); checkS17Table(md, errors); checkS15(allData, errors, true); }
+  if (isFinal) { checkS1_S7(allData, errors); checkS7Contract(md, allData, errors); checkS8(allData, errors, md, options.anchor, options.sourceAnchorExemptions, options); checkS17Table(md, errors); checkS15(allData, errors, true); }
 
   // === 类别V：值域（始终执行） ===
-  checkV1_V6(allData, errors);
+  checkV1_V6(allData, errors, options);
 
   // === 类别C：跨步骤一致性（仅最终验证或全部数据可用时） ===
   if (isFinal || hasP1P2P3) checkC1_C7(allData, errors, { adjudicatedDims: options.adjudicatedDims, adjudicatedDimsInfo: options.adjudicatedDimsInfo });
@@ -103,7 +169,7 @@ function validate(md, round, options = {}) {
     // 260810 P1-B 修订：newContract 三来源（显式参数 > md 文本 > tfPath）
     // ——R2/final 门禁的 md 文本无 S7 段（S7 在 P1.md），由 host-node 探测 P1 后显式透传
     const newContract = !!(options.newContract || detectNewContractFromText(md) || detectNewContract(options.tfPath));
-    checkP1_P3(allData, errors, newContract);
+    checkP1_P3(allData, errors, { newContract, semanticBound: options.semanticAuthorityBoundary === 'semantic-first-v10' });
   }
   // 260811 批甲 D（A2）：V-C9 模板污染检测（WARNING 不阻断；必须 !isFinal——final 为全键合并校验，merged 全键合法）
   if (!isFinal && (round === 'R2.5' || round === 'R3')) {
@@ -119,16 +185,17 @@ function validate(md, round, options = {}) {
   // 260814 待修项批：契约↔产物形态断言（仅 final——merged 含 P1/P2/P3 全文；WARNING 级不阻断旧场次）
   if (isFinal) checkOutputShape(md, errors);
 
-  const blocking = errors.filter(e => e.severity === 'BLOCKING');
-  const warnings = errors.filter(e => e.severity === 'WARNING');
-  const infos = errors.filter(e => e.severity === 'INFO');
+  const boundedErrors = applySemanticAuthorityBoundary(errors, options);
+  const blocking = boundedErrors.filter(e => e.severity === 'BLOCKING');
+  const warnings = boundedErrors.filter(e => e.severity === 'WARNING');
+  const infos = boundedErrors.filter(e => e.severity === 'INFO');
 
   return {
     passed: blocking.length === 0,
     blocking,
     warnings,
     infos,
-    issues: toTypedIssues(errors)
+    issues: toTypedIssues(boundedErrors)
   };
 }
 
@@ -365,7 +432,8 @@ function checkCompletionMatrix(md, data, errors) {
 // 签名：(data, errors, md, anchor)——md/anchor 为源锚层 v1（N-1 桥接）V-S8E 表级锚的数据依赖；
 // md 缺省 → 表级跳过；anchor 缺省/未抽取 → 锚 2 仍可解析时执行（D-2 守卫分域），锚 3 跳过。
 
-function checkS8(data, errors, md, anchor, sourceAnchorExemptions) {
+function checkS8(data, errors, md, anchor, sourceAnchorExemptions, options) {
+  const semanticBound = !!(options && options.semanticAuthorityBoundary === 'semantic-first-v10');
   if (data['S8.第一层完成'] !== '是') errors.push({ rule: 'S8', severity: 'BLOCKING', message: 'S8第一层未完成' });
   if (data['S8.第二层完成'] !== '是') errors.push({ rule: 'S8', severity: 'BLOCKING', message: 'S8第二层未完成(诊断层被跳过)' });
   // V-S8D-R（260809 Q4）：S8.PhaseII 四键必出（键存在即可，空值允许）——缺失 = 键漂移（S8.2.*）或未输出，BLOCKING 归因 R2
@@ -386,8 +454,8 @@ function checkS8(data, errors, md, anchor, sourceAnchorExemptions) {
     errors.push({ rule: 'H5', severity: 'BLOCKING', message: '④或⑤不通过但PhaseIII已结晶（假结晶·须改判未结晶）' });
   }
   // ⑥-b 字段层（260810）：⑥=独立平行 → PhaseIII 必须=未结晶（L2620 明文）；完成度层豁免见 S8C 矩阵
-  if (_d6 === '独立平行' && data['S8.PhaseIII.状态'] === '已结晶') {
-    errors.push({ rule: 'H5', severity: 'BLOCKING', message: '⑥=独立平行但PhaseIII已结晶（⑥-b：比赛层面未结晶）' });
+  if (!semanticBound && _d6 === '独立平行' && data['S8.PhaseIII.状态'] === '已结晶') {
+    errors.push({ rule: 'H5', severity: 'BLOCKING', message: 'legacy ⑥=独立平行但PhaseIII已结晶（历史⑥-b兼容门）' });
   }
   checkS8Coherence(data, errors);
   // V-S8D（260808）：S8 锚点自洽——每方 有效数 == |节点列表| 基数 + 元素合法性（意见 4-2 + 意见 5-2）
@@ -521,9 +589,12 @@ function checkS15(data, errors, isFinal) {
 function check55Guard(md, data, errors) {
   if (data['S15.正方得分'] !== 5 || data['S15.反方得分'] !== 5) return;   // 仅 5:5
   const body = extractAdjudicationReason(String(md || ''));
-  if (body.length < 10) {
-    errors.push({ rule: 'V2-55', severity: 'BLOCKING', message: '5:5判胜·S15.2判准应用推理缺失或<10字（5:5须附判准裁定理由）' });
+  if (!body.length) {
+    errors.push({ rule: 'V2-55', severity: 'BLOCKING', authorityClass: 'representation_contract', message: '5:5判胜·S15.2判准应用推理缺失（5:5须附判准裁定理由）' });
     return;
+  }
+  if (body.length < 10) {
+    errors.push({ rule: 'V2-55', severity: 'BLOCKING', message: '5:5判胜·S15.2判准应用推理<10字（长度仅是旧质量启发式）' });
   }
   if (body.length < R5_WARN_MIN_LEN) {
     errors.push({ rule: 'V2-55W', severity: 'WARNING', message: '5:5判胜·判准裁定理由偏短·报告标注' });
@@ -542,7 +613,9 @@ function checkS102Overstrict(data, errors) {
 // 单一事实源 = S8.4 规则表第 3 列（Skill-Judge L2645-2651）：完成→1型/未完成→2b/半完成→2b/启动未推进→2a/未启动→2c/不存在→0
 // 变更须同步规则表 + 本表 + batch3 规则表映射一致性断言（P2-3 终审）
 
-function checkV1_V6(data, errors) {
+function checkV1_V6(data, errors, options) {
+  options = options || {};
+  const semanticBound = options.semanticAuthorityBoundary === 'semantic-first-v10';
   // V1: 枚举有效性
   let v1enums;
   try { v1enums = getEnums(SKILL_PATH); } catch (e) { v1enums = {}; }
@@ -555,18 +628,18 @@ function checkV1_V6(data, errors) {
     const combinable = key.endsWith('分论点结构');
     let ok;
     if (combinable) {
-      const parts = raw.split('+').map(p => normalizeEnumValue(p) || p.trim());
+      const parts = raw.split('+').map(p => semanticBound ? p.trim() : (normalizeEnumValue(p) || p.trim()));
       ok = parts.length >= 1 && parts.every(p => allowed.includes(p)) && new Set(parts).size === parts.length;
     } else {
       ok = allowed.includes(raw);
-      if (!ok) {
+      if (!ok && !semanticBound) {
         const norm = normalizeEnumValue(raw);
         ok = norm !== null && allowed.includes(norm);
       }
     }
     if (!ok) {
       const hint = combinable ? '（分论点结构允许组合，如 并集式+价值补强式）' : '';
-      errors.push({ rule: 'V1', severity: 'BLOCKING', message: `${key}="${raw}"不在允许值[${allowed}]中${hint}` });
+      errors.push({ rule: 'V1', severity: 'BLOCKING', authorityClass: 'representation_contract', message: `${key}="${raw}"不在允许值[${allowed}]中${hint}` });
     }
   }
   // V2: 比分绝对坐标校验（V6.8 升级 · 260810 5:5 判胜合法化：比分差≥2 时胜方得分必须更高；5:5 由 check55Guard 护栏）
@@ -647,16 +720,20 @@ function checkC9FatalReview(data, errors, s7Data) {
   if (c9Status !== '已结晶' || !c9Party || c9Party === '无') return;
 
   const source = s7Data || data;
-  const oppSide = c9Party === '正方' ? '反方' : '正方';
-  const oppFatal = Number(source[`S7.${oppSide}赢.致命`] || 0);
-  if (oppFatal < 2) return;
+  const completedSides = c9Party === '双方' ? ['正方', '反方'] : [c9Party];
+  const triggered = completedSides.map(side => {
+    const oppSide = side === '正方' ? '反方' : '正方';
+    return { side, oppSide, oppFatal:Number(source[`S7.${oppSide}赢.致命`] || 0) };
+  }).filter(row => row.oppFatal >= 2);
+  if (!triggered.length) return;
+  const fatalSummary = triggered.map(row => row.side + '完成时对方(' + row.oppSide + ')致命赢=' + row.oppFatal).join('；');
 
   // C9a：④(d) 未执行 → 数据源缺失，需重跑 R2。
   if (!c9Review || c9Review === '不适用') {
     errors.push({
       rule: 'C9a',
       severity: 'BLOCKING',
-      message: `SC完成方=${c9Party}，对方致命赢=${oppFatal}≥2，但④致命交锋复核未执行。` +
+      message: `SC完成方=${c9Party}，${fatalSummary}，但④致命交锋复核未执行。` +
                `数据源在 P2（R2 产出），请重跑 R2 补全 ④(d) 数据。`
     });
   }
@@ -667,7 +744,7 @@ function checkC9FatalReview(data, errors, s7Data) {
     errors.push({
       rule: 'C9b',
       severity: 'BLOCKING',
-      message: `SC完成方=${c9Party}，对方致命赢=${oppFatal}≥2，存在 ${uncovered} 项未被微消化覆盖的致命交锋。` +
+      message: `SC完成方=${c9Party}，${fatalSummary}，存在 ${uncovered} 项未被微消化覆盖的致命交锋。` +
                `P2 数据完整，请重跑 R3，重新检查 S8.3 ④(d) 数据并修正 S11 判定。`
     });
   }
@@ -708,7 +785,7 @@ function checkC1_C7(data, errors, opts) {
   if (finalDiagC4 === '各跑各的' && TYPE1.includes(String(data['S11.类型']))) {
     errors.push({ rule: 'C4', severity: 'BLOCKING', message: '碰撞终判=各跑各的但S11=1型·SC不可能完成' });
   } else if (finalDiagC4 === undefined && data['S4.碰撞诊断'] === '各跑各的' && TYPE1.includes(String(data['S11.类型']))) {
-    errors.push({ rule: 'C4', severity: 'BLOCKING', message: '缺少 S8.碰撞终判（旧产物）·需重跑 R2 后再终判' });
+    errors.push({ rule: 'C4', severity: 'BLOCKING', authorityClass: 'representation_contract', message: '缺少 S8.碰撞终判（旧产物）·需重跑 R2 后再终判' });
   }
   // C5: S7↔S8双向
   const s7Push = data['S7.SC角色.推进节点数'];
@@ -740,13 +817,13 @@ function checkC1_C7(data, errors, opts) {
   // C16：非 1d 时禁止出现；C17：与 structure 首序聚合单元 producer 一致性（DATA 权威，结构回读 WARNING）
   const coveredParty = String(data['S8.PhaseIII.被覆盖完成方'] || '').trim();
   if (s11type === '1d' && coveredParty === '') {
-    errors.push({ rule: 'C14', severity: 'BLOCKING', message: 'S11类型=1d但S8.PhaseIII.被覆盖完成方缺失·1d必出先完成方' });
+    errors.push({ rule: 'C14', severity: 'BLOCKING', authorityClass: 'representation_contract', message: 'S11类型=1d但S8.PhaseIII.被覆盖完成方缺失·1d必出先完成方' });
   }
   if (s11type === '1d' && coveredParty !== '' && coveredParty === phase3Party) {
     errors.push({ rule: 'C15', severity: 'BLOCKING', message: `S11类型=1d但被覆盖完成方=${coveredParty}=完成方·双SC完成方不可能同一方` });
   }
   if (s11type !== '1d' && coveredParty !== '') {
-    errors.push({ rule: 'C16', severity: 'BLOCKING', message: `S11类型=${s11type}但S8.PhaseIII.被覆盖完成方=${coveredParty}·该字段仅1d有效` });
+    errors.push({ rule: 'C16', severity: 'BLOCKING', authorityClass: 'representation_contract', message: `S11类型=${s11type}但S8.PhaseIII.被覆盖完成方=${coveredParty}·该字段仅1d有效` });
   }
   // C8: 预判方向vs实际
   if (data['S2.预判SC方向'] === '无向' && data['S8.PhaseIII.完成方'] !== '无') {
@@ -835,7 +912,9 @@ function checkC1_C7(data, errors, opts) {
 // S7 表头含 CP-ID+靶心+削弱指向 = 新合同（260806 后靶心格式）；否则旧合同。
 // 判据分级（S8C-R）、V-B6e、host-node P1 探测共用本判定核心。
 
-function checkP1_P3(data, errors, newContract) {
+function checkP1_P3(data, errors, opts) {
+  const newContract = typeof opts === 'object' ? !!opts.newContract : !!opts;
+  const semanticBound = !!(opts && typeof opts === 'object' && opts.semanticBound);
   // P1: Phase I→II
   for (const side of ['正方','反方']) {
     const ph1 = data[`S8.PhaseI.${side}`];
@@ -847,13 +926,14 @@ function checkP1_P3(data, errors, newContract) {
   // P2: Phase III→II
   if (data['S8.PhaseIII.状态'] === '已结晶') {
     const side = data['S8.PhaseIII.完成方'];
-    if (side && side !== '无') {
-      const eff = data[`S8.PhaseII.${side}.有效数`] || 0;
-      if (eff < 1) errors.push({ rule: 'P2', severity: 'BLOCKING', message: `${side} PhaseIII已结晶但PhaseII有效=0` });
+    const completedSides = side === '双方' ? ['正方', '反方'] : (side && side !== '无' ? [side] : []);
+    for (const completedSide of completedSides) {
+      const eff = data[`S8.PhaseII.${completedSide}.有效数`] || 0;
+      if (eff < 1) errors.push({ rule: 'P2', severity: 'BLOCKING', message: `${completedSide} PhaseIII已结晶但PhaseII有效=0` });
     }
   }
-  // P3（260810 重写）：L1 定义自洽 BLOCKING + L2 结构期望 WARNING + 判据检查（S8C 段）
-  checkCompletionConsistency(data, errors, { newContract });
+  // P3：legacy lane 保留历史⑥-b；semantic-bound lane 以 current SC authority 的 formed 事实为先。
+  checkCompletionConsistency(data, errors, { newContract, semanticBound });
 }
 
 // ==================== S8C 完成度一致性（260810·批次3：L1 定义自洽 + L2 结构期望 + 判据） ====================
@@ -868,20 +948,22 @@ function checkP1_P3(data, errors, newContract) {
 //   全局格1（R6）：⑥=独立平行 且 PhaseII=0（⑥ 仅双方有结晶候选时触发·L2612）
 
 function checkCompletionConsistency(data, errors, opts) {
-  for (const h of getCompletionHardConflicts(data)) {
+  for (const h of getCompletionHardConflicts(data, opts)) {
     errors.push({ rule: 'S8C-L1', severity: 'BLOCKING', message: `完成度=${h.value} 与定义冲突: ${h.reason}` });
   }
-  const expected = deriveCompletionExpected(data);
+  const expected = deriveCompletionExpected(data, opts);
   if (expected && data['S8.SC完成度'] && expected !== data['S8.SC完成度']) {
     errors.push({ rule: 'S8C-L2', severity: 'WARNING', message: `完成度判定=${data['S8.SC完成度']} 与结构期望=${expected} 存在分歧（LLM 语义判定·报告标注，非错误提示）` });
   }
   const rationale = String(data['S8.SC完成度.判据'] || '').trim();
   const newContract = !!(opts && opts.newContract);
-  if (rationale.length < 10) {
+  if (!rationale.length) {
     const sev = newContract ? 'BLOCKING' : 'WARNING';
-    errors.push({ rule: 'S8C-R', severity: sev, message: newContract
-      ? '完成度判据（S8.SC完成度.判据）缺失或<10字·必出（≤40字，回引Phase/④⑤⑥或场感描述）'
+    errors.push({ rule: 'S8C-R', severity: sev, authorityClass: newContract ? 'representation_contract' : undefined, message: newContract
+      ? '完成度判据（S8.SC完成度.判据）缺失·必出'
       : '完成度判据缺失（旧合同·不阻断·建议补充）' });
+  } else if (rationale.length < 10) {
+    errors.push({ rule: 'S8C-R', severity: newContract ? 'BLOCKING' : 'WARNING', message: '完成度判据<10字（长度仅是旧质量启发式）' });
   }
 }
 
@@ -901,7 +983,7 @@ function checkR5Contract(narrative, registry, opts) {
   const allNames = (narrative.match(/<!--INSERT_(C\d+_[A-Z0-9_]+)-->/g) || [])
     .map(m => m.replace('<!--INSERT_', '').replace('-->', ''));
   const unregistered = [...new Set(allNames.filter(n => !regNames.has(n)))];
-  for (const n of unregistered) errors.push({ rule: 'A2', severity: 'BLOCKING', message: '未注册INSERT名: ' + n });
+  for (const n of unregistered) errors.push({ rule: 'A2', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: n, message: '未注册INSERT名: ' + n });
 
   const parts = narrative.replace(/\r\n/g, '\n').split(/^##\s*C(\d{1,2})\b[^\n]*\n?/gm);
   const sections = {};
@@ -910,11 +992,11 @@ function checkR5Contract(narrative, registry, opts) {
   for (const ch of chapters) {
     const sec = sections[ch];
     if (sec === undefined) {
-      errors.push({ rule: 'A1', severity: 'BLOCKING', message: ch + ' 章节缺失' });
+      errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch, message: ch + ' 章节缺失' });
       continue;
     }
     const xp = sec.match(/<!--XP:([\s\S]*?)-->/);
-    if (!xp || !xp[1].trim()) errors.push({ rule: 'A3', severity: 'BLOCKING', message: ch + ' 缺少非空 <!--XP:...-->' });
+    if (!xp || !xp[1].trim()) errors.push({ rule: 'A3', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch + ':XP', message: ch + ' 缺少非空 <!--XP:...-->' });
     const chInserts = registry.inserts.filter(r => r.ch === ch && r.consumer === 'R6b' &&
       (r.producer === 'R5' || (ch === 'C8' && r.producer === 'R2.5')));
     for (const r of chInserts) {
@@ -924,14 +1006,14 @@ function checkR5Contract(narrative, registry, opts) {
           ? opts.s4DefTrigger : (opts.data ? opts.data[key] : undefined);
         if (actual === val) {
           if (!insertSlotHasContent(sec, r.name))
-            errors.push({ rule: 'A1', severity: 'BLOCKING', message: '条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
+            errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch + ':' + r.name, message: '条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
         } else if (actual !== undefined && sec.includes('<!--INSERT_' + r.name + '-->')) {
           warnings.push({ rule: 'A1W', severity: 'WARNING', message: '条件不满足仍输出 ' + r.name + '（' + ch + '，条件 ' + r.condition + '）' });
         }
         continue;
       }
       if (!insertSlotHasContent(sec, r.name))
-        errors.push({ rule: 'A1', severity: 'BLOCKING', message: '无条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
+        errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch + ':' + r.name, message: '无条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
     }
     // R5 规范要求纯 Markdown；C1 诗评若携带 HTML 容器，R6a 的诗行装配会将其误判为空。
     // 在半区门禁前置反馈，避免把可修正的格式问题推迟到最终 HTML 门禁。
@@ -939,7 +1021,7 @@ function checkR5Contract(narrative, registry, opts) {
       const poemMatch = sec.match(/<!--INSERT_C1_01_POEM-->([\s\S]*?)(?=<!--INSERT_C\d+_[A-Z0-9_]+-->|$)/);
       const poem = poemMatch ? poemMatch[1] : '';
       if (/<\/?[A-Za-z][^>]*>/.test(poem)) {
-        errors.push({ rule: 'A1', severity: 'BLOCKING', message: 'C1_01_POEM 诗评必须保持纯 Markdown，禁止 HTML 容器（如 <div>），否则 R6a 无法装配 .po' });
+        errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: 'C1:C1_01_POEM', message: 'C1_01_POEM 诗评必须保持纯 Markdown，禁止 HTML 容器（如 <div>），否则 R6a 无法装配 .po' });
       }
     }
   }
@@ -1283,12 +1365,17 @@ function checkStructure(jsonPath, opts) {
   opts = opts || {};
   const errors = [];
   const warnings = [];
+  const semanticBound = opts.semanticAuthorityBoundary === 'semantic-first-v10';
   let data;
   try { data = parseStructureJson(fs.readFileSync(jsonPath, 'utf-8')); }
   catch (e) { errors.push({ rule: 'S0', severity: 'BLOCKING', message: `structure.json 解析失败: ${e.message}` }); return { passed: false, errors, warnings }; }
 
   if (!data.meta || !data.layers || !data.cross_reference) {
     errors.push({ rule: 'S1', severity: 'BLOCKING', message: '缺少顶层字段' }); return { passed: false, errors, warnings };
+  }
+  if (semanticBound && data.meta && data.meta.type_override) {
+    errors.push({ rule: 'V-B7-PROJECTION', severity: 'BLOCKING', authorityClass: 'consumer_contract',
+      message: 'semantic-bound R4 只允许忠实结构投影；meta.type_override 不得绕过 semantic review/CAS 改写 S11 类型' });
   }
   // G0-1 提前到 R4 门禁（2026-08-05 实测发现）：meta.s11_original_type 必须与 transition-final 的 S11.类型 一致，
   // 否则渲染端 G0 会阻断——让 R4 轮带反馈重试，而不是在 R6 才暴露
@@ -1307,19 +1394,23 @@ function checkStructure(jsonPath, opts) {
   // 不能因 type 缺失在 startsWith 上抛异常，遮蔽可重试反馈。
   const layerType = layer => layer && typeof layer.type === 'string' ? layer.type : '';
   // V-B1（F3 修正）：0型（s11_original_type 或 type_override=0）允许 layers=1；其余 2-4
-  const isZero = (data.meta && (data.meta.s11_original_type === '0' || data.meta.type_override === '0'));
+  const isZero = (data.meta && (data.meta.s11_original_type === '0' || (!semanticBound && data.meta.type_override === '0')));
   const minLayers = isZero ? 1 : 2;
-  if (!Array.isArray(layers) || layers.length < minLayers || layers.length > 4)
-    errors.push({ rule: 'V-B1', severity: 'BLOCKING', message: `layers长度=${layers?.length}·预期${minLayers}-4` });
+  if (!Array.isArray(layers) || layers.length === 0) {
+    errors.push({ rule: 'V-B1', severity: 'BLOCKING', authorityClass: 'representation_contract', message: 'layers 必须是非空数组' });
+  } else if (layers.length < minLayers || layers.length > 4) {
+    errors.push({ rule: 'V-B1', severity: semanticBound ? 'WARNING' : 'BLOCKING', message: `layers长度=${layers.length}·旧投影启发式预期${minLayers}-4` });
+  }
 
   if (layers?.length > 0) {
+    const topologySeverity = semanticBound ? 'WARNING' : 'BLOCKING';
     if (layerType(layers[0]) !== '框架铺设')
-      errors.push({ rule: 'V-B2', severity: 'BLOCKING', message: `layers[0].type≠框架铺设` });
+      errors.push({ rule: 'V-B2', severity: topologySeverity, message: `layers[0].type≠框架铺设（旧固定拓扑启发式）` });
     if (!layerType(layers[layers.length - 1]).startsWith('收束'))
-      errors.push({ rule: 'V-B3', severity: 'BLOCKING', message: `layers[-1].type不以收束开头` });
+      errors.push({ rule: 'V-B3', severity: topologySeverity, message: `layers[-1].type不以收束开头（旧固定拓扑启发式）` });
     for (let i=1; i<layers.length-1; i++)
       if (layerType(layers[i]) !== 'SC推进')
-        errors.push({ rule: 'V-B4', severity: 'BLOCKING', message: `layers[${i}].type≠SC推进` });
+        errors.push({ rule: 'V-B4', severity: topologySeverity, message: `layers[${i}].type≠SC推进（旧固定拓扑启发式）` });
 
     // V-B5a: 枚举合法
     const validRels = ['上位覆盖','独立并列','同层加固'];
@@ -1327,10 +1418,15 @@ function checkStructure(jsonPath, opts) {
       if (layers[i].relation_to_prev && !validRels.includes(layers[i].relation_to_prev))
         errors.push({ rule: 'V-B5a', severity: 'BLOCKING', message: `layers[${i}].relation非法` });
 
-    // V-B5b: 上位覆盖/同层加固必须有citation_basis且≥10字
-    for (let i=1; i<layers.length; i++)
-      if (['上位覆盖','同层加固'].includes(layers[i].relation_to_prev) && (!layers[i].citation_basis || layers[i].citation_basis.length < 10))
-        errors.push({ rule: 'V-B5b', severity: 'BLOCKING', message: `layers[${i}]上位/同层但citation_basis缺失或<10字` });
+    // V-B5b: citation_basis 非空是表示/来源合同；字符数只保留为旧质量启发式。
+    for (let i=1; i<layers.length; i++) {
+      if (!['上位覆盖','同层加固'].includes(layers[i].relation_to_prev)) continue;
+      if (!layers[i].citation_basis) {
+        errors.push({ rule: 'V-B5b', severity: 'BLOCKING', authorityClass: 'representation_contract', message: `layers[${i}]上位/同层但citation_basis缺失` });
+      } else if (layers[i].citation_basis.length < 10) {
+        errors.push({ rule: 'V-B5b', severity: semanticBound ? 'WARNING' : 'BLOCKING', message: `layers[${i}] citation_basis<10字（长度仅是旧质量启发式）` });
+      }
+    }
 
     // V-B5c【V3.0新增·评审意见机制盲区2】: citation_basis必须含推进层ID或M-ID
     for (const layer of layers) {
@@ -1480,8 +1576,10 @@ function checkStructure(jsonPath, opts) {
 
 // V3.0新增：表格自动修复 —— 在 validate-final 中调用，修复合并后过渡文件中的表格格式问题
 
-function checkEffectiveType(data, structure, presentation) {
+function checkEffectiveType(data, structure, presentation, options) {
+  options = options || {};
   const errors = [];
+  const semanticBound = options.semanticAuthorityBoundary === 'semantic-first-v10';
   const s11 = data && data['S11.类型'];
   if (!s11) errors.push({ rule: 'G0-0', severity: 'BLOCKING', message: 'S11.类型 DATA 缺失' });
 
@@ -1492,11 +1590,16 @@ function checkEffectiveType(data, structure, presentation) {
 
   let effectiveType = s11;
   if (meta.type_override) {
-    if (!['2b', '2c', '0'].includes(meta.type_override))
-      errors.push({ rule: 'G0-2a', severity: 'BLOCKING', message: `type_override非法: ${meta.type_override}` });
-    if (!meta.override_reason)
-      errors.push({ rule: 'G0-2b', severity: 'BLOCKING', message: 'type_override非空但override_reason为空' });
-    effectiveType = meta.type_override;
+    if (semanticBound) {
+      errors.push({ rule: 'G0-2-PROJECTION', severity: 'BLOCKING', authorityClass: 'consumer_contract',
+        message: 'semantic-bound structure.type_override 无 semantic revision 权限；effectiveType 必须保持当前 S11.类型' });
+    } else {
+      if (!['2b', '2c', '0'].includes(meta.type_override))
+        errors.push({ rule: 'G0-2a', severity: 'BLOCKING', message: `type_override非法: ${meta.type_override}` });
+      if (!meta.override_reason)
+        errors.push({ rule: 'G0-2b', severity: 'BLOCKING', message: 'type_override非空但override_reason为空' });
+      effectiveType = meta.type_override;
+    }
   }
 
   // G0-4：presentation 模板族一致
@@ -2078,7 +2181,8 @@ function normalizeEnumValue(raw) {
 // T2：写盘前确定性回写——把“归一化后精确命中枚举”的脏 DATA 行替换为规范值，并留日志。
 // 必须与 checkV1_V6 使用同一 normalizeEnumValue，避免“校验放行但报告显示脏值”。
 
-function deriveCompletionExpected(data) {
+function deriveCompletionExpected(data, opts) {
+  const semanticBound = !!(opts && opts.semanticBound);
   const ph3 = data['S8.PhaseIII.状态'];
   const d4 = data['S8.PhaseIII.④容纳自洽'];
   const d5 = data['S8.PhaseIII.⑤价值深度'];
@@ -2086,7 +2190,7 @@ function deriveCompletionExpected(data) {
   const eff = (data['S8.PhaseII.正方.有效数'] || 0) + (data['S8.PhaseII.反方.有效数'] || 0);
   const ph1ok = data['S8.PhaseI.正方'] === '完成' || data['S8.PhaseI.反方'] === '完成';
   const s3 = data['S3.交锋点总数'];
-  if (d6 === '独立平行') return '半完成';                              // ①⑥-b 定序首位
+  if (!semanticBound && d6 === '独立平行') return '半完成';            // legacy ⑥-b only
   if (ph3 === '已结晶') {
     if (d4 === '不通过' || d5 === '不通过') return null;               // ③H5 字段层拦截域：不产期望
     return '完成';                                                     // ②
@@ -2099,7 +2203,8 @@ function deriveCompletionExpected(data) {
 
 // 完成度一致性总入口（替代原 P3 期望比对；L1 BLOCKING / L2 WARNING / 判据分级）
 
-function getCompletionHardConflicts(data) {
+function getCompletionHardConflicts(data, opts) {
+  const semanticBound = !!(opts && opts.semanticBound);
   const c = data['S8.SC完成度'];
   const ph3 = data['S8.PhaseIII.状态'];
   const d4 = data['S8.PhaseIII.④容纳自洽'];
@@ -2109,6 +2214,7 @@ function getCompletionHardConflicts(data) {
   const ph1ok = data['S8.PhaseI.正方'] === '完成' || data['S8.PhaseI.反方'] === '完成';
   const s3 = data['S3.交锋点总数'];
   const independent = d6 === '独立平行';
+  const legacyIndependentRule = independent && !semanticBound;
   const out = [];
   const A = (cond, reason) => { if (cond) out.push({ value: c, reason }); };
   if (c === '完成') {
@@ -2116,14 +2222,14 @@ function getCompletionHardConflicts(data) {
     A(d4 === '不通过', '完成但④不通过');
     A(d5 === '不通过', '完成但⑤不通过');
     A(eff === 0, '完成但PhaseII有效=0');
-    A(independent, '完成但⑥=独立平行（⑥-b强制半完成）');
+    A(legacyIndependentRule, 'legacy 完成但⑥=独立平行（历史⑥-b强制半完成）');
   } else if (c === '未完成') {
     A(eff === 0, '未完成但PhaseII有效=0（无推进则应为启动未推进）');
     A(ph3 === '已结晶', '未完成但PhaseIII已结晶（V-S8B兜底：已结晶⇒完成度=完成，双层闭合）');
-    A(independent, '未完成但⑥=独立平行（⑥-b强制半完成）');
+    A(legacyIndependentRule, 'legacy 未完成但⑥=独立平行（历史⑥-b强制半完成）');
   } else if (c === '半完成') {
     A(eff === 0, '半完成但PhaseII有效=0（无推进则应为启动未推进）');
-    A(ph3 === '已结晶' && !independent, '半完成但PhaseIII已结晶（非⑥-b例外）');
+    A(ph3 === '已结晶' && !legacyIndependentRule, '半完成但PhaseIII已结晶');
   } else if (c === '启动未推进') {
     A(eff > 0, '启动未推进但PhaseII有效>0');
     A(ph3 === '已结晶', '启动未推进但PhaseIII已结晶');
@@ -2432,4 +2538,4 @@ function isNewContractHeader(hdrLine) {
   return !!(hdrLine && hdrLine.includes('CP-ID') && hdrLine.includes('靶心') && hdrLine.includes('削弱指向'));
 }
 
-module.exports = { validate, toTypedIssue, toTypedIssues, checkNarrative, checkHtml, checkStructure, getEnums, checkTerminology, checkTerminologyContent, checkEffectiveType, parseSMarkers, parseSMarkerDetail, sectionOfStep, checkR5Contract, checkVerdictConsistency, checkCompletionMatrix, checkS7Contract, normalizeEnumValue, TYPE1, TYPE2, checkV1_V6, checkC1_C7, checkS8Coherence, parseS82Table, checkS82Anchors, matchTurnToRoster, checkSideTriplet, normalizeRoleTag, W2_MIN_UNRESOLVABLE, W2_RATIO, checkS8, checkS17Table, checkOutputShape, checkCompletionConsistency, detectNewContract, detectNewContractFromText, deriveDirection, applyDerivations, check55Guard, checkS102Overstrict, normalizeForCompare, CROSS_FORMAT_COMPARE_POINTS, R2_5_DOMAIN_RE, R3_DOMAIN_RE, LENGTH_GATE_RULES, checkC7DataContract, isNewContractHeader };
+module.exports = { validate, toTypedIssue, toTypedIssues, applySemanticAuthorityBoundary, LEGACY_SEMANTIC_DERIVATION_RULES, checkNarrative, checkHtml, checkStructure, getEnums, checkTerminology, checkTerminologyContent, checkEffectiveType, parseSMarkers, parseSMarkerDetail, sectionOfStep, checkR5Contract, checkVerdictConsistency, checkCompletionMatrix, checkS7Contract, normalizeEnumValue, TYPE1, TYPE2, checkV1_V6, checkC1_C7, checkS8Coherence, parseS82Table, checkS82Anchors, matchTurnToRoster, checkSideTriplet, normalizeRoleTag, W2_MIN_UNRESOLVABLE, W2_RATIO, checkS8, checkS17Table, checkOutputShape, checkCompletionConsistency, detectNewContract, detectNewContractFromText, deriveDirection, applyDerivations, check55Guard, checkS102Overstrict, normalizeForCompare, CROSS_FORMAT_COMPARE_POINTS, R2_5_DOMAIN_RE, R3_DOMAIN_RE, LENGTH_GATE_RULES, checkC7DataContract, isNewContractHeader };

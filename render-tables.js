@@ -173,15 +173,11 @@ function renderTable(block) {
         }
       }
 
-      // Integrity 状态 emoji
+      // Representation only: decorate complete status values, never infer a
+      // result from substrings inside negation, qualification, or ordinary prose.
       if (j === integrityColIdx) {
-        if (cell.includes('通过')) {
-          cell = cell.replace('通过', '🟢 通过');
-        } else if (cell.includes('不通过')) {
-          cell = cell.replace('不通过', '🔴 不通过');
-        } else if (cell.includes('警告')) {
-          cell = cell.replace('警告', '🟡 警告');
-        }
+        const badges = { '通过': '🟢', '不通过': '🔴', '警告': '🟡' };
+        if (Object.prototype.hasOwnProperty.call(badges, cell)) cell = badges[cell] + ' ' + cell;
       }
 
       html += `<td>${cell}</td>`;

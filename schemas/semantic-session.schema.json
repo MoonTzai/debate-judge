@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Debate-Judge S3 Semantic Session Container",
+  "description": "Host record/container schema only. It does not define which SC facts must exist.",
+  "type": "object",
+  "required": ["schema_version", "session_id", "source", "current", "objects"],
+  "properties": {
+    "schema_version": { "const": "semantic-session-v1" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "source": {
+      "type": "object",
+      "required": ["source_ref", "source_sha256"],
+      "properties": {
+        "source_ref": { "type": "string" },
+        "source_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "context_ref": { "type": ["string", "null"] },
+        "context_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": true
+    },
+    "current": {
+      "type": "object",
+      "required": ["revision", "semanticRef", "semanticReviewPending", "projectionRef", "projectionState"],
+      "properties": {
+        "revision": { "type": "integer", "minimum": 0 },
+        "semanticRef": { "type": ["object", "null"] },
+        "semanticReviewPending": { "type": "boolean" },
+        "projectionRef": { "type": ["object", "null"] },
+        "projectionState": { "type": "string" },
+        "sourceSha256": { "type": ["string", "null"] },
+        "contextSha256": { "type": ["string", "null"] },
+        "commitId": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["objectId", "kind", "sha256", "path"],
+        "properties": {
+          "objectId": { "type": "string" },
+          "kind": { "type": "string", "enum": ["source", "context", "request", "raw", "semantic", "review", "projection", "fidelity", "issue", "commit"] },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "path": { "type": "string" },
+          "metadataPath": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

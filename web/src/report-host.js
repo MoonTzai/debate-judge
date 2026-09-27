@@ -143,9 +143,27 @@ function createReportHost(options) {
     if (!frame || !current || current.trust !== 'internal') return;
     try {
       var doc = frame.contentDocument;
-      if (!doc || !doc.documentElement) return;
-      var h = Math.max(600, doc.documentElement.scrollHeight || 0, doc.body ? doc.body.scrollHeight : 0);
-      frame.style.height = (h + 8) + 'px';
+      if (!doc || !doc.documentElement || !doc.body) return;
+
+      // Measure actual content geometry directly. Chromium may keep iframe viewport metrics
+      // (scrollHeight/offsetHeight/body rect) stale within the same synchronous turn after a resize,
+      // but element geometry for the real top-level content remains stable. Use the furthest bottom
+      // edge among body children as the canonical internal Report extent.
+      var bodyTop = 0;
+      try {
+        var bodyRect = doc.body.getBoundingClientRect && doc.body.getBoundingClientRect();
+        bodyTop = bodyRect && Number.isFinite(bodyRect.top) ? bodyRect.top : 0;
+      } catch (_) {}
+      var contentBottom = 0;
+      var children = doc.body.children || [];
+      for (var i = 0; i < children.length; i++) {
+        try {
+          var rect = children[i] && children[i].getBoundingClientRect && children[i].getBoundingClientRect();
+          if (rect && Number.isFinite(rect.bottom)) contentBottom = Math.max(contentBottom, rect.bottom - bodyTop);
+        } catch (_) {}
+      }
+      var h = Math.max(600, Math.ceil(contentBottom));
+      frame.style.height = h + 'px';
     } catch (e) {}
   }
 
@@ -157,9 +175,11 @@ function createReportHost(options) {
     try {
       var doc = frame.contentDocument;
       var WinResizeObserver = frame.contentWindow && frame.contentWindow.ResizeObserver;
-      if (doc && doc.documentElement && WinResizeObserver) {
+      if (doc && doc.body && WinResizeObserver) {
         resizeObserver = new WinResizeObserver(function () { syncInternalHeight(); });
-        resizeObserver.observe(doc.documentElement);
+        // Observe the actual content box rather than documentElement, whose height follows
+        // the iframe viewport and can otherwise retrigger runaway auto-height growth.
+        resizeObserver.observe(doc.body);
       }
     } catch (e) {}
     if (typeof options.onReady === 'function') {

@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use Debate-Judge Deliberative Edition in research, please cite the repository and the specific branch/commit."
+title: "Debate-Judge: Deliberative Edition"
+version: "2026.09.24"
+date-released: 2026-09-24
+authors:
+  - name: "MoonTzai"
+repository-code: "https://github.com/MoonTzai/debate-judge"
+url: "https://github.com/MoonTzai/debate-judge/tree/deliberative-edition"
+keywords:
+  - argumentation
+  - debate
+  - deliberation
+  - semantic reasoning
+  - provenance
+  - LLM evaluation
+license: "MIT AND CC-BY-NC-SA-4.0"

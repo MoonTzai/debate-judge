@@ -11,6 +11,10 @@ node_modules/
 *.tmp
 *.zip
 
+# Quarantined UI artwork is intentionally excluded from Deliberative Edition.
+web/assets/sanctum-dark.webp
+web/assets/sanctum-light.webp
+
 # Local-only evaluation data must never enter the public repository.
 local-data/
 local-test-data/
