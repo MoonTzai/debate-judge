@@ -17,13 +17,54 @@ function toTypedIssue(record) {
     : { rule: '', severity: 'BLOCKING', message: String(record) };
   const severity = String(r.severity || 'BLOCKING');
   const blocking = severity === 'BLOCKING';
+  const rule = String(r.rule || '');
+  const authorityClass = String(r.authorityClass || '');
+  const localRepresentationRules = new Set(['A1', 'A2', 'A3', 'V-S17H']);
+  const factIdentityRules = new Set(['D1', 'D2', 'V10-FINAL-S15']);
+  let failureClass = r.failureClass || (blocking ? 'representation_global' : 'observation');
+  let owner = r.owner || (blocking ? 'model' : 'none');
+  let repairMode = r.repairMode || (blocking ? 'round_regenerate' : 'none');
+  let repairScope = r.repairScope || (blocking ? 'round' : 'none');
+  let retryable = Object.prototype.hasOwnProperty.call(r, 'retryable') ? !!r.retryable : blocking;
+
+  if (blocking && localRepresentationRules.has(rule)) {
+    failureClass = 'representation_local';
+    repairMode = 'bounded_repair';
+    repairScope = r.repairScope || 'artifact_block';
+  }
+  if (blocking && factIdentityRules.has(rule)) {
+    failureClass = 'fact_identity';
+    repairMode = 'bounded_repair';
+    repairScope = r.repairScope || 'fact_claim';
+  }
+  if (blocking && authorityClass === 'consumer_contract') {
+    failureClass = 'consumer_contract';
+    repairScope = r.repairScope || 'consumer_projection';
+  }
+  if (blocking && authorityClass === 'authority_integrity') {
+    failureClass = 'authority_integrity';
+    owner = 'host';
+    repairMode = 'fail_closed';
+    repairScope = 'authority';
+    retryable = false;
+  }
+
+  const issueType = blocking ? 'representation_blocker'
+    : (severity === 'WARNING' ? 'representation_warning' : 'observation');
   return {
-    rule: r.rule || '',
+    rule,
     severity,
     message: r.message || r.reason || String(record || ''),
-    issueType: blocking ? 'representation_blocker' : (severity === 'WARNING' ? 'representation_warning' : 'observation'),
+    authorityClass: authorityClass || null,
+    issueType,
     blockingScope: blocking ? 'representation' : 'none',
     repairTarget: blocking ? 'representation' : null,
+    failureClass,
+    owner,
+    repairMode,
+    repairScope,
+    retryable,
+    issueSignature: [rule || 'UNRULED', failureClass, owner, repairMode, repairScope].join('|'),
     semanticInvalid: false,
     semanticReviewAuthority: false
   };
@@ -942,7 +983,7 @@ function checkR5Contract(narrative, registry, opts) {
   const allNames = (narrative.match(/<!--INSERT_(C\d+_[A-Z0-9_]+)-->/g) || [])
     .map(m => m.replace('<!--INSERT_', '').replace('-->', ''));
   const unregistered = [...new Set(allNames.filter(n => !regNames.has(n)))];
-  for (const n of unregistered) errors.push({ rule: 'A2', severity: 'BLOCKING', message: '未注册INSERT名: ' + n });
+  for (const n of unregistered) errors.push({ rule: 'A2', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: n, message: '未注册INSERT名: ' + n });
 
   const parts = narrative.replace(/\r\n/g, '\n').split(/^##\s*C(\d{1,2})\b[^\n]*\n?/gm);
   const sections = {};
@@ -951,11 +992,11 @@ function checkR5Contract(narrative, registry, opts) {
   for (const ch of chapters) {
     const sec = sections[ch];
     if (sec === undefined) {
-      errors.push({ rule: 'A1', severity: 'BLOCKING', message: ch + ' 章节缺失' });
+      errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch, message: ch + ' 章节缺失' });
       continue;
     }
     const xp = sec.match(/<!--XP:([\s\S]*?)-->/);
-    if (!xp || !xp[1].trim()) errors.push({ rule: 'A3', severity: 'BLOCKING', message: ch + ' 缺少非空 <!--XP:...-->' });
+    if (!xp || !xp[1].trim()) errors.push({ rule: 'A3', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch + ':XP', message: ch + ' 缺少非空 <!--XP:...-->' });
     const chInserts = registry.inserts.filter(r => r.ch === ch && r.consumer === 'R6b' &&
       (r.producer === 'R5' || (ch === 'C8' && r.producer === 'R2.5')));
     for (const r of chInserts) {
@@ -965,14 +1006,14 @@ function checkR5Contract(narrative, registry, opts) {
           ? opts.s4DefTrigger : (opts.data ? opts.data[key] : undefined);
         if (actual === val) {
           if (!insertSlotHasContent(sec, r.name))
-            errors.push({ rule: 'A1', severity: 'BLOCKING', message: '条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
+            errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch + ':' + r.name, message: '条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
         } else if (actual !== undefined && sec.includes('<!--INSERT_' + r.name + '-->')) {
           warnings.push({ rule: 'A1W', severity: 'WARNING', message: '条件不满足仍输出 ' + r.name + '（' + ch + '，条件 ' + r.condition + '）' });
         }
         continue;
       }
       if (!insertSlotHasContent(sec, r.name))
-        errors.push({ rule: 'A1', severity: 'BLOCKING', message: '无条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
+        errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch + ':' + r.name, message: '无条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
     }
     // R5 规范要求纯 Markdown；C1 诗评若携带 HTML 容器，R6a 的诗行装配会将其误判为空。
     // 在半区门禁前置反馈，避免把可修正的格式问题推迟到最终 HTML 门禁。
@@ -980,7 +1021,7 @@ function checkR5Contract(narrative, registry, opts) {
       const poemMatch = sec.match(/<!--INSERT_C1_01_POEM-->([\s\S]*?)(?=<!--INSERT_C\d+_[A-Z0-9_]+-->|$)/);
       const poem = poemMatch ? poemMatch[1] : '';
       if (/<\/?[A-Za-z][^>]*>/.test(poem)) {
-        errors.push({ rule: 'A1', severity: 'BLOCKING', message: 'C1_01_POEM 诗评必须保持纯 Markdown，禁止 HTML 容器（如 <div>），否则 R6a 无法装配 .po' });
+        errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: 'C1:C1_01_POEM', message: 'C1_01_POEM 诗评必须保持纯 Markdown，禁止 HTML 容器（如 <div>），否则 R6a 无法装配 .po' });
       }
     }
   }

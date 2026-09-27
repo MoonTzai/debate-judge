@@ -1318,23 +1318,38 @@ function planResumeStart(input) {
         preserveSemanticCurrent: true
       };
     };
+
+    // R8 reviewer 明确要求回查上游时，普通“继续最后断点”必须 fail-close。
+    // upstream_review 的 reopenNodes 是 semantic/CAS workflow 的输入，不是 generic resume 的重算指令；
+    // 否则会把 reviewer 的语义异议偷换成普通 core rewind，并绕过原生 semantic revision authority。
     if (r8.state === 'upstream_review' && Array.isArray(r8.reopenNodes) && r8.reopenNodes.length) {
-      const reopen = r8.reopenNodes.map(canonicalResumeNode).find(n => RESUME_NODE_ORDER_BASE.includes(n));
-      if (reopen) {
-        const upstreamPlan = planResumeStart({ requestedNode: reopen, runModel, settings });
-        upstreamPlan.requestedNode = 'auto';
-        upstreamPlan.taskClass = 'semantic_review_required';
-        upstreamPlan.allowed = false;
-        upstreamPlan.effectiveStartNode = null;
-        upstreamPlan.effectiveNodes = [];
-        upstreamPlan.invalidatedNodes = [];
-        upstreamPlan.upstreamReviewRequired = true;
-        upstreamPlan.blockingReason = 'R8 upstream_review 必须进入原生 semantic/CAS reopen；generic resume 不得自动重算';
-        upstreamPlan.reasons = ['R8 durable upstream_review 明确要求回查 ' + reopen].concat(upstreamPlan.reasons || []);
-        upstreamPlan.autoClassifiedFrom = 'R8_UPSTREAM_REVIEW';
-        return upstreamPlan;
-      }
+      const reopenNodes = r8.reopenNodes.map(canonicalResumeNode).filter(n => RESUME_NODE_ORDER_BASE.includes(n));
+      const why = 'R8 durable upstream_review 要求进入原生 semantic/CAS reopen' +
+        (reopenNodes.length ? '：' + reopenNodes.join('、') : '');
+      return {
+        requestedNode: 'auto',
+        effectiveStartNode: null,
+        effectiveNodes: [],
+        invalidatedNodes: [],
+        preservedNodes: order.slice(),
+        staleExpansion: [],
+        reasons: [why, 'generic auto resume 不得把 upstream_review 降格为普通 R8 retry 或 core rewind'],
+        requirePlainCacheHit: false,
+        allowed: false,
+        blockingReason: why,
+        taskClass: 'semantic_review_required',
+        upstreamReviewRequired: true,
+        reopenNodes,
+        postprocessOnly: false,
+        authorityPreflightRequired: true,
+        ignoreCoreStale: true,
+        semanticInvalidated: false,
+        preserveSemanticCurrent: true
+      };
     }
+
+    // Terminal postprocess failure is a classification hint only. Actual reuse is gated later by zero-API
+    // semantic/provenance/consumerBinding + R7/R8 proof preflight.
     // R8 依赖 R7 approved proof：plain 开启时，R7 未 approved 必须先续 R7，
     // 即使 terminal error 记录的是 R8，也不能让 UI/planner 先报 R8 再由 engine 暗中降级。
     if (settings.plain === true && String(r7.state || '') !== 'approved') {
@@ -1351,6 +1366,7 @@ function planResumeStart(input) {
     if (settings.readerGuide === true && String(r7.state || '') === 'approved' && String(r8.state || '') !== 'done') {
       return postPlan('R8', 'R7 durable approved，R8 尚未完成');
     }
+
     const coreSettled = Array.isArray(runModel.rounds) && runModel.rounds.length > 0 &&
       runModel.rounds.every(r => r && (r.status === 'done' || r.status === 'skipped'));
     const postSettled = (settings.plain !== true || String(r7.state || '') === 'approved' || String(r7.state || '') === 'done') &&
@@ -3404,10 +3420,13 @@ function validateHalf(content, label, opts) {
   opts = opts || {};
   const errors = [];
   const warnings = [];
+  const records = [];
   const otherRange = label === 'A' ? /<!--INSERT_(C[8-9]|C1[0-2])_/g : /<!--INSERT_(C[1-7])_/g;
   const invalid = content.match(otherRange) || [];
   if (invalid.length > 0) {
-    errors.push('包含不应处理的INSERT: ' + invalid.join(', '));
+    const rec = { rule: 'A4', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: label === 'A' ? 'R5A' : 'R5B', message: '包含不应处理的INSERT: ' + invalid.join(', ') };
+    records.push(rec);
+    errors.push(rec.rule + ': ' + rec.message);
   }
   // A4：半区正向约束——本半区无条件 INSERT 全覆盖 + 注册名校验 + XP（C4 条件项按 S4 豁免）
   let registry = opts.registry || null;
@@ -3423,16 +3442,20 @@ function validateHalf(content, label, opts) {
       s4DefTrigger: opts.s4DefTrigger,
       data: opts.data
     });
-    for (const e of cr.errors) errors.push(e.rule + ': ' + e.message);
+    for (const e of cr.errors) { records.push(e); errors.push(e.rule + ': ' + e.message); }
     for (const w of cr.warnings) warnings.push(w.rule + ': ' + w.message);
   }
   // L2/C7（260808）：R5A 输出契约在轮门禁强制——5 个 C7 DATA 标记存在性 + 标记间一致性，
   // 缺失/矛盾 → 门禁失败携带反馈重试（此前仅 R5-FINAL 检查，重试反馈够不到）
   if (label === 'A') {
-    for (const e of validator.checkC7DataContract(content, { s8: opts.data })) errors.push(e);
+    for (const e of validator.checkC7DataContract(content, { s8: opts.data })) {
+      const rec = { rule: 'C7-DATA', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: 'C7', message: String(e) };
+      records.push(rec);
+      errors.push(String(e));
+    }
   }
-  if (errors.length > 0) return { passed: false, reason: errors.join('; '), warnings };
-  return { passed: true, warnings };
+  if (errors.length > 0) return { passed: false, reason: errors.join('; '), errors, warnings, records, issues: validator.toTypedIssues(records.length ? records : errors) };
+  return { passed: true, warnings, records: [], issues: [] };
 }
 
 // R7 阶段 2：--plain 三层开关解析（CLI > .api-config.json plain 字段 > 默认 false）
@@ -10065,6 +10088,8 @@ function mergeProjectionRepresentation(semanticAuthority, projectionRaw) {
       ? JSON.parse(JSON.stringify(projected.relation.evidence)) : []
   });
 
+  // Semantic identity is now guaranteed by construction; keep the assertion as a
+  // defensive invariant against future edits to the merge seam.
   assertProjectionSemanticIdentity(truth, merged);
   return merged;
 }
@@ -10346,6 +10371,86 @@ function checkR2Alignment(p2Text, current) {
   return { ok: errors.length === 0, errors };
 }
 
+function canonicalBindingMarker(current) {
+  const authority = current && current.authority;
+  const revision = Number(current && current.revision);
+  if (!authority || !Number.isInteger(revision) || revision < 1) {
+    throw new Error('SC canonical binding requires current authority');
+  }
+  return '<!--SC_AUTHORITY_BINDING revision=' + revision +
+    ' affirmative=' + authority.sides.affirmative.phase_iii +
+    ' negative=' + authority.sides.negative.phase_iii +
+    ' relation=' + authority.relation.type +
+    ' dominant=' + authority.relation.dominant_side + ' -->';
+}
+
+function stripBindingMarkers(text) {
+  return String(text || '')
+    .replace(/<!--SC_AUTHORITY_BINDING\s+revision=\d+\s+affirmative=(?:formed|not_formed|uncertain)\s+negative=(?:formed|not_formed|uncertain)\s+relation=(?:none|single_side|parallel_independent|higher_order_cover|apparent_double_actual_single|mutual_partial|other_evidenced_relation)\s+dominant=(?:affirmative|negative|none|both|uncertain)\s*-->/g, '')
+    .replace(/^\s+/, '');
+}
+
+function injectCanonicalBinding(text, current) {
+  const body = stripBindingMarkers(text);
+  return canonicalBindingMarker(current) + (body ? '\n\n' + body : '\n');
+}
+
+function extractProjectionData(text) {
+  const out = {};
+  const re = /<!--DATA:\s*([^=\n]+)=([\s\S]*?)-->/g;
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) out[String(m[1] || '').trim()] = String(m[2] || '').trim();
+  return out;
+}
+
+function checkR2Projection(p2Text, current) {
+  const authority = current && current.authority;
+  if (!authority || !authority.sides || !authority.sides.affirmative || !authority.sides.negative || !authority.relation) {
+    const issue = {
+      rule: 'V10-SC-PROJECTION',
+      severity: 'BLOCKING',
+      authorityClass: 'authority_integrity',
+      failureClass: 'authority_integrity',
+      owner: 'host',
+      repairMode: 'fail_closed',
+      repairScope: 'authority',
+      retryable: false,
+      message: 'SC current authority invalid for R2 projection validation'
+    };
+    return { ok: false, errors: [issue.message], issues: [issue], expected: null, actual: null };
+  }
+  const compatibility = projectMainlineCompatibility(authority);
+  const expected = {
+    'S8.PhaseII.正方.有效数': String(Array.isArray(authority.sides.affirmative.candidates) ? authority.sides.affirmative.candidates.length : 0),
+    'S8.PhaseII.反方.有效数': String(Array.isArray(authority.sides.negative.candidates) ? authority.sides.negative.candidates.length : 0),
+    'S8.PhaseIII.状态': compatibility.phaseIIIStatus,
+    'S8.PhaseIII.完成方': compatibility.completionParty,
+    'S8.PhaseIII.⑥双方SC关系': compatibility.legacyRelation
+  };
+  if (compatibility.completion) expected['S8.SC完成度'] = compatibility.completion;
+  if (compatibility.mainlineFamily) expected['S8.S11类型方向'] = compatibility.mainlineFamily;
+  const actual = extractProjectionData(p2Text);
+  const issues = [];
+  for (const [key, value] of Object.entries(expected)) {
+    if (String(actual[key] == null ? '' : actual[key]).trim() === String(value).trim()) continue;
+    issues.push({
+      rule: 'V10-SC-PROJECTION',
+      severity: 'BLOCKING',
+      authorityClass: 'consumer_contract',
+      failureClass: 'consumer_contract',
+      owner: 'model',
+      repairMode: 'bounded_repair',
+      repairScope: 'S8_DATA',
+      retryable: true,
+      field: key,
+      expected: value,
+      actual: actual[key] == null ? null : actual[key],
+      message: 'R2 SC projection mismatch: ' + key + ' expected=' + value + ' actual=' + String(actual[key])
+    });
+  }
+  return { ok: issues.length === 0, errors: issues.map(x => x.message), issues, expected, actual };
+}
+
 function buildAuthorityBlock(current) {
   const authority = current && current.authority;
   const revision = Number(current && current.revision);
@@ -10370,12 +10475,7 @@ function buildAuthorityBlock(current) {
     '',
     JSON.stringify(authority, null, 2),
     '',
-    'R2 必须额外输出以下唯一控制绑定注释（它不是 Judge DATA，不进入报告字段注册表；值来自本 authority，禁止自行改写）：',
-    '<!--SC_AUTHORITY_BINDING revision=' + revision +
-      ' affirmative=' + authority.sides.affirmative.phase_iii +
-      ' negative=' + authority.sides.negative.phase_iii +
-      ' relation=' + authority.relation.type +
-      ' dominant=' + authority.relation.dominant_side + ' -->',
+    'SC_AUTHORITY_BINDING 是 host 控制元数据，不是 Judge DATA。R2 模型不得输出或复制该注释；host 会在模型产物通过语义/表示处理后，根据 current authority 写入唯一 canonical binding。',
     '---'
   ].join('\n');
 }
@@ -10472,6 +10572,8 @@ module.exports = {
   SEMANTIC_REPRESENTATION_SEPARATION_PROTOCOL,
   RELATION_TYPES,
   PHASE_STATES,
+  stableStructuralJson,
+  structuralJsonEqual,
   sha256Text,
   profileBundleSha256,
   parseStrictJsonObject,
@@ -10503,6 +10605,11 @@ module.exports = {
   reviewExistingAuthority,
   parseBindingMarker,
   checkR2Alignment,
+  canonicalBindingMarker,
+  stripBindingMarkers,
+  injectCanonicalBinding,
+  extractProjectionData,
+  checkR2Projection,
   buildAuthorityBlock,
   buildAdjudicativeConsumerView,
   projectMainlineCompatibility,
@@ -14200,6 +14307,99 @@ function assertSourceAnchorExemptionArtifactBinding(round, text, exemptions) {
 // Q3 登记项（260809 R8）：锚加载状态标签——门禁通过/断点跳过日志必须记录"以何配置通过"
 function anchorStateLabel(workDir) { return readAnchor(workDir) ? '锚已加载' : '锚未加载'; }
 
+const RETRY_EVENT_LEDGER = '.tmp-retry-events.jsonl';
+function appendRetryEvent(workDir, event) {
+  if (!workDir || !event || typeof event !== 'object') return;
+  const row = Object.assign({
+    schema: 'judge-retry-event-v1',
+    at: new Date().toISOString()
+  }, event);
+  try {
+    fs.appendFileSync(path.join(workDir, RETRY_EVENT_LEDGER), JSON.stringify(row) + '\n', 'utf8');
+  } catch (_) {
+    // Debug evidence must never mutate execution semantics.
+  }
+}
+
+function roundRepairPlan(round, gate) {
+  const issues = gate && Array.isArray(gate.typedIssues) ? gate.typedIssues : [];
+  if (!issues.length) return { mode: 'round_regenerate', scopes: [], issues: [] };
+  if (issues.some(issue => issue && issue.retryable === false)) {
+    return { mode: 'fail_closed', scopes: [], issues };
+  }
+  const local = issues.filter(issue => issue && issue.repairMode === 'bounded_repair' && issue.repairScope);
+  if (round && (round.name === 'R5A' || round.name === 'R5B') && local.length === issues.length) {
+    const chapters = [...new Set(local.map(issue => String(issue.repairScope).match(/C(?:1[0-2]|[1-9])/)?.[0]).filter(Boolean))];
+    if (chapters.length) return { mode: 'r5_bounded', scopes: local.map(x => x.repairScope), chapters, issues };
+  }
+  return { mode: 'round_regenerate', scopes: local.map(x => x.repairScope).filter(Boolean), issues };
+}
+
+function r5ChapterRanges(markdown) {
+  const source = String(markdown || '');
+  const matches = [...source.matchAll(/^##\s*(C(?:1[0-2]|[1-9]))\b[^\n]*\n?/gm)];
+  const out = new Map();
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].index;
+    const end = i + 1 < matches.length ? matches[i + 1].index : source.length;
+    out.set(matches[i][1], { start, end, text: source.slice(start, end) });
+  }
+  return out;
+}
+
+function buildR5BoundedRepairPrompt(basePrompt, priorArtifact, plan) {
+  const ranges = r5ChapterRanges(priorArtifact);
+  const chapters = plan.chapters.map(id => {
+    const row = ranges.get(id);
+    return { chapter: id, markdown: row ? row.text : '' };
+  });
+  return String(basePrompt || '') +
+    '\n\n---\n## R5 BOUNDED REPRESENTATION REPAIR\n' +
+    '上一版完整候选已经冻结。只修下面列出的章节；未列出的章节由 host 保留原字节，不会采用你的任何改写。\n' +
+    '只输出严格 JSON：{"chapters":[{"chapter":"C2","markdown":"## C2 ..."}]}。chapters 必须恰好覆盖 requestedChapters，一章一次。\n' +
+    '每个 markdown 必须是该章完整 Markdown，从 ## Cn 标题开始，到下一章之前结束。不要输出其它章节、解释或代码围栏。\n' +
+    'requestedChapters=' + JSON.stringify(plan.chapters) + '\n' +
+    'typedIssues=' + JSON.stringify(plan.issues, null, 2) + '\n' +
+    'currentChapters=' + JSON.stringify(chapters, null, 2);
+}
+
+function parseR5BoundedRepair(raw, expectedChapters) {
+  let text = String(raw || '').trim().replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\x60\x60\x60\s*$/, '');
+  const start = text.indexOf('{'), end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) text = text.slice(start, end + 1);
+  const doc = JSON.parse(text);
+  const rows = doc && Array.isArray(doc.chapters) ? doc.chapters : [];
+  const ids = rows.map(row => String(row && row.chapter || ''));
+  if (ids.length !== expectedChapters.length || new Set(ids).size !== expectedChapters.length ||
+      expectedChapters.some(id => !ids.includes(id))) {
+    throw new Error('R5 bounded repair chapters must exactly match: ' + expectedChapters.join(','));
+  }
+  for (const row of rows) {
+    if (typeof row.markdown !== 'string' || !row.markdown.trim().startsWith('## ' + row.chapter)) {
+      throw new Error('R5 bounded repair invalid chapter markdown: ' + row.chapter);
+    }
+  }
+  return new Map(rows.map(row => [String(row.chapter), String(row.markdown).trimEnd() + '\n\n']));
+}
+
+function mergeR5BoundedRepair(priorArtifact, repaired, expectedChapters) {
+  const source = String(priorArtifact || '');
+  const ranges = r5ChapterRanges(source);
+  for (const id of expectedChapters) {
+    if (!ranges.has(id)) throw new Error('R5 bounded repair cannot locate frozen chapter: ' + id);
+  }
+  let out = source;
+  const ordered = expectedChapters.map(id => ({ id, ...ranges.get(id) })).sort((a, b) => b.start - a.start);
+  for (const row of ordered) out = out.slice(0, row.start) + repaired.get(row.id) + out.slice(row.end);
+  const after = r5ChapterRanges(out);
+  for (const [id, before] of ranges.entries()) {
+    if (expectedChapters.includes(id)) continue;
+    const next = after.get(id);
+    if (!next || next.text !== before.text) throw new Error('R5 bounded repair modified frozen chapter: ' + id);
+  }
+  return out;
+}
+
 // 源锚层 v1 名册确认机制——交互 y/n/e、文件确认标记（source-anchor.confirmed 含名册哈希）、--skip 开关；
 // 类型 A/B 严重异常置顶展示；哈希不一致 → 旧标记失效（防"改名册但标记还在"）
 async function confirmRoster(workDir, anchor, opts, onLog) {
@@ -14425,6 +14625,19 @@ function validateRound(workDir, round, text, onLog, extra) {
       if (p1) validationOptions.p1Data = PC.extractDataMarkers(p1);
     }
     v = PC.validate(text, round.name, validationOptions);
+    if (round.name === 'R2' && validationOptions.semanticAuthorityBoundary === 'semantic-first-v10') {
+      const projection = SCA.checkR2Projection(text, extra && extra.scAuthorityCurrentView || null);
+      if (!projection.ok) {
+        const projectionIssues = projection.issues || [];
+        v = {
+          ...v,
+          passed: false,
+          blocking: [...(v.blocking || []), ...projectionIssues],
+          errors: [...(v.errors || []), ...projectionIssues],
+          issues: [...(v.issues || []), ...validator.toTypedIssues(projectionIssues)]
+        };
+      }
+    }
     if (round.name === 'R3' && v.passed) {
       const finalAlignment = checkR3AdjudicativeAuthority(workDir, text, extra);
       if (finalAlignment.upstreamReopenRequest) v.finalUpstreamReopenRequest = finalAlignment.upstreamReopenRequest;
@@ -14855,7 +15068,13 @@ async function runRound(opts) {
   for (let attempt = 0; attempt <= core.MAX_RETRIES; attempt++) {
     semanticReopenRequest = null;
     scSemanticReopenRequest = null;
-    onLog('[executor] ' + round.name + ' 开始调用 API（等待响应…）attempt=' + (attempt + 1));
+    let repairPlan = attempt > 0 ? roundRepairPlan(round, lastGate) : { mode: 'initial', scopes: [], issues: [] };
+    if (repairPlan.mode === 'fail_closed') {
+      appendRetryEvent(workDir, { round: round.name, stage: 'repair', event: 'fail_closed', attempt: attempt + 1, typedIssues: repairPlan.issues || [] });
+      break;
+    }
+    appendRetryEvent(workDir, { round: round.name, stage: 'generation', event: 'attempt_start', attempt: attempt + 1, retryIndex: attempt, repairMode: repairPlan.mode, repairScopes: repairPlan.scopes || [] });
+    onLog('[executor] ' + round.name + ' 开始调用 API（等待响应…）attempt=' + (attempt + 1) + (repairPlan.mode === 'r5_bounded' ? ' · bounded-repair' : ''));
     if (attempt > 0) {
       const d = core.retryDelayMs(attempt);
       onLog('[executor] ' + round.name + ' 重试 ' + attempt + '/' + core.MAX_RETRIES + ' · 退避 ' + d + 'ms');
@@ -14882,10 +15101,20 @@ async function runRound(opts) {
         authorityBoundPrompt = authorityText + '\n\n' + scAuthorityText + '\n\n' + promptText + authorityFooter;
       }
     }
-    const usePrompt = (attempt > 0 && lastGate && lastGate.errors.length)
+    let usePrompt = (attempt > 0 && lastGate && lastGate.errors.length)
       ? authorityBoundPrompt + '\n\n---\n## 上次输出未通过机械格式校验，必须严格修正后完整重新输出（只输出修正后的完整产物）\n' +
         lastGate.errors.map(e => '- ' + e).join('\n') + '\n'
       : authorityBoundPrompt;
+    let priorArtifact = null;
+    if (repairPlan.mode === 'r5_bounded') {
+      priorArtifact = readIfExists(outFile);
+      if (priorArtifact) {
+        usePrompt = buildR5BoundedRepairPrompt(authorityBoundPrompt, priorArtifact, repairPlan);
+        appendRetryEvent(workDir, { round: round.name, stage: 'repair', event: 'bounded_plan', attempt: attempt + 1, repairMode: repairPlan.mode, repairScopes: repairPlan.scopes, chapters: repairPlan.chapters });
+      } else {
+        repairPlan = { mode: 'round_regenerate', scopes: [], issues: repairPlan.issues || [] };
+      }
+    }
     let text;
     let semanticRefs = null;
     try {
@@ -14927,10 +15156,23 @@ async function runRound(opts) {
       } else {
         text = await call(cfg, [{ role: 'user', content: usePrompt }], callOpts);
       }
+      if (repairPlan.mode === 'r5_bounded') {
+        const repaired = parseR5BoundedRepair(text, repairPlan.chapters);
+        text = mergeR5BoundedRepair(priorArtifact, repaired, repairPlan.chapters);
+        appendRetryEvent(workDir, { round: round.name, stage: 'repair', event: 'bounded_merge', attempt: attempt + 1, repairMode: repairPlan.mode, chapters: repairPlan.chapters });
+      }
     } catch (e) {
       // 批 1（260812）：传输层异常（③收紧 流截断/断连/流异常族）纳入轮次重试循环——
       // 不再穿透循环导致管道退出；确定性错误（length 截断/HTTP/配置）仍直接抛（重试无意义）
       const msg = e && e.message ? String(e.message) : String(e);
+      if (repairPlan.mode === 'r5_bounded' && attempt < core.MAX_RETRIES) {
+        const scopedIssues = (repairPlan.issues || []).map(issue => Object.assign({}, issue, {
+          message: String(issue && issue.message || '') + ' | bounded repair response error: ' + msg.slice(0, 600)
+        }));
+        lastGate = { ok: false, errors: ['R5 bounded repair response invalid: ' + msg], warnings: [], typedIssues: scopedIssues };
+        appendRetryEvent(workDir, { round: round.name, stage: 'repair', event: 'bounded_response_failure', attempt: attempt + 1, repairMode: repairPlan.mode, chapters: repairPlan.chapters, message: msg.slice(0, 1600) });
+        continue;
+      }
       // 可重试 = 传输/断连/截断类（③收紧、流异常、缓冲超限、fetch 断连实况）。
       // 注意：不匹配「网络请求失败」宽词——2h 超时 AbortError 会被包装为
       // 「网络请求失败: This operation was aborted」，宽匹配将导致 4×2h 灾难性重试；
@@ -14938,6 +15180,7 @@ async function runRound(opts) {
       const retryable = /未收到 finish_reason|fetch failed|ECONNRESET|terminated|other side closed|socket hang up|流中错误帧|流式响应无 body|缓冲超限/.test(msg);
       if (retryable && attempt < core.MAX_RETRIES) {
         lastGate = null;                       // 不把传输错误注入模型重试 prompt（非模型可修正项）
+        appendRetryEvent(workDir, { round: round.name, stage: 'transport', event: 'retryable_failure', attempt: attempt + 1, failureClass: 'transport_transient', owner: 'provider_transport', repairMode: 'request_replay', repairScope: 'request', retryable: true, message: msg.slice(0, 1600) });
         onLog('[executor] ' + round.name + ' API 传输异常（纳入重试 attempt=' + (attempt + 1) + '）: ' + msg);
         continue;                              // 回到循环头 → 退避 sleep → 下一 attempt
       }
@@ -14948,7 +15191,24 @@ async function runRound(opts) {
       const scReopen = SCA.extractReopenRequest(text, readIfExists(path.join(workDir, '.tmp-debate.txt')));
       text = scReopen.text;
       scSemanticReopenRequest = scReopen.request;
-      if (scSemanticReopenRequest) onLog('[executor] R2 检测到 bounded SC semantic reopen request；正文已剥离 marker，等待独立 SC review/fidelity');
+      if (scSemanticReopenRequest) {
+        onLog('[executor] R2 检测到 bounded SC semantic reopen request；正文已剥离 marker，等待独立 SC review/fidelity');
+      } else {
+        const beforeBinding = text;
+        text = SCA.injectCanonicalBinding(text, opts.scAuthorityCurrentView || null);
+        appendRetryEvent(workDir, {
+          round: round.name,
+          stage: 'host_control',
+          event: 'canonicalized',
+          attempt: attempt + 1,
+          failureClass: 'host_control',
+          owner: 'host',
+          repairMode: 'deterministic',
+          repairScope: 'SC_AUTHORITY_BINDING',
+          retryable: false,
+          changed: text !== beforeBinding
+        });
+      }
       duplicateReopenGateError = duplicateReopenProjectionGate('sc', scSemanticReopenRequest, opts.seenScReopenRequests);
     }
     if (sfMode === 'active' && round.name === 'R3') {
@@ -14995,10 +15255,6 @@ async function runRound(opts) {
     }
     const aa = core.assessArtifact(round.name, text);
     if (!aa.ok) gateErrors.push(aa.errors.join('; '));
-    if (sfMode === 'active' && round.name === 'R2' && !scSemanticReopenRequest) {
-      const scAlignment = SCA.checkR2Alignment(text, opts.scAuthorityCurrentView || null);
-      if (!scAlignment.ok) gateErrors.push('SC authority alignment: ' + scAlignment.errors.join('; '));
-    }
     const typedGateIssues = [];
     if (vr && Array.isArray(vr.typedIssues)) typedGateIssues.push(...vr.typedIssues.filter(x => x && x.severity === 'BLOCKING'));
     if (!aa.ok) {
@@ -15032,10 +15288,13 @@ async function runRound(opts) {
           if (auditOnly.length) onLog('[executor] ' + round.name + ' audit-only V-S8E-WX ' + auditOnly.length + ' 条（不进入 R4.5 语义 warning 通道）');
         } catch (e) { /* 落盘失败不阻断 */ }
       }
+      appendRetryEvent(workDir, { round: round.name, stage: 'validation', event: 'accepted', attempt: attempt + 1, retryIndex: attempt, bytes: Buffer.byteLength(text, 'utf-8') });
       return { round: round.name, ok: true, attempt, bytes: Buffer.byteLength(text, 'utf-8'), semanticFirstMode: sfMode, semanticRefs, semanticReopenRequest, scSemanticReopenRequest, finalUpstreamReopenRequest: vr && vr.finalUpstreamReopenRequest || null, consumerBinding: vr && vr.consumerBinding || opts.consumerBinding || null };
     }
+    appendRetryEvent(workDir, { round: round.name, stage: 'validation', event: 'gate_failure', attempt: attempt + 1, retryIndex: attempt, typedIssues: lastGate.typedIssues || [], errors: (lastGate.errors || []).slice(0, 20) });
     onLog('[executor] ' + round.name + ' 门禁失败: ' + lastGate.errors.join('; '));
   }
+  appendRetryEvent(workDir, { round: round.name, stage: 'validation', event: 'budget_exhausted', attempt: core.MAX_RETRIES + 1, retryIndex: core.MAX_RETRIES, typedIssues: lastGate && lastGate.typedIssues || [], errors: lastGate ? (lastGate.errors || []).slice(0, 20) : ['未知失败'] });
   return { round: round.name, ok: false, errors: lastGate ? lastGate.errors : ['未知失败'], attempt: core.MAX_RETRIES, semanticFirstMode: sfMode, typedIssues: lastGate && lastGate.typedIssues || [], issueRefs: lastGate && lastGate.issueRefs || [], scSemanticReopenRequest };
 }
 
@@ -17466,6 +17725,7 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
     for (let attempt = 0; attempt <= core.MAX_RETRIES; attempt++) {
       if (attempt > 0) {
         const d = core.retryDelayMs(attempt);
+        appendRetryEvent(cacheDir, { round: comprehensionProfile === PV2.PROFILE_GUIDE ? 'R8' : 'R7', stage: 'plain_batch', event: 'retry', batch: ci + 1, attempt: attempt + 1, retryIndex: attempt, repairMode: repairBase && repairIds.length ? 'bounded_repair' : 'batch_regenerate', repairScopes: repairIds.slice() });
         onLog('[executor] 白话翻译批 ' + (ci + 1) + '/' + chunks.length + ' 重试 ' + attempt + '/' + core.MAX_RETRIES + ' · 退避 ' + d + 'ms');
         await sleep(d);
       }
@@ -17532,6 +17792,7 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
         const errMsg = String(e && e.message || '');
         // P0（260901）：旧 UI 只看得到“第 N 批重试”，看不到触发重试的实际原因，
         // 导致真实 R7/R8 门禁问题事后无法从日志复原。只记录有界错误摘要，不记录原始模型响应。
+        appendRetryEvent(cacheDir, { round: comprehensionProfile === PV2.PROFILE_GUIDE ? 'R8' : 'R7', stage: 'plain_batch', event: 'attempt_failure', batch: ci + 1, attempt: attempt + 1, failureClass: 'plain_validation', repairMode: repairBase && repairIds.length ? 'bounded_repair' : 'batch_regenerate', repairScopes: repairIds.slice(), message: errMsg.slice(0, 1200) });
         onLog('[executor] 白话翻译批 ' + (ci + 1) + '/' + chunks.length + ' attempt ' + (attempt + 1) + ' 失败: ' + errMsg.slice(0, 1200));
         if (e && e.code === 'ERR_PLAIN_RETRY_STALLED') throw e;
         if (failedCandidate && comprehensionProfile === PV2.PROFILE_GUIDE &&
@@ -19607,7 +19868,8 @@ function readerGuideContractIdentity() {
   };
 }
 
-module.exports = { runRound, runPipeline, resolveActiveSemanticAuthority, buildFullData, buildR3Prompt, buildR25Prompt, buildR2Prompt, buildR4Prompt, enrichR5Prompts, injectDataSource, assertPromptsWithinContext, resolveSkillPath, mergeNarrative, buildTransitionFinal, renderReport, loadFileConfig, validateRound, validateR3FinalOwnedPreview, goodMockResponder, sleep, adjudicationRecheck, buildAdjudicationInput, translateUnitsLLM, reviewPlainUnits, applyPlain, rebuildApprovedPlainReport, refreshPlainArtifacts, regeneratePlainV2Artifacts, applyReaderGuide, embedVerifiedReaderGuide, loadPlainDict, injectAdjudication, parseAdjArtifact, loadSourceAnchorExemptions, warningsForAdjudication, adjudicationConflictExclusions, legacySemanticAdjudicationConflicts, writeR45InputBinding, stampR45AdjudicationInputBinding, assertR45AdjudicationInputBinding, assertSourceAnchorExemptionArtifactBinding, verifiedV5ReviewDecision, verifiedCurrentGlobalReviewDecision, checkFiniteNetWinnerAlignment, buildFinalAdjudicationBindings, checkFinalAdjudicationAlignment, ensureFinalAdjudicationAuthority, verifyFinalAdjudicationAuthority, semanticFirstMode, semanticShadowRoot, createSemanticSidecarStore, createTestActiveWorkflow, prepareTestSemanticAuthority, buildSemanticConsumerBinding, testSemanticAuthorityBlock, buildTestProvenance, validateTestProvenance, updateTestProvenance, readTestProvenance, writeTestProvenance, semanticIdentity, assertSemanticIdentityUnchanged, readTestSemanticCurrent, semanticReopenRequestFingerprint, duplicateReopenProjectionGate, collectPersistedReopenFingerprints, validateGlobalReopenHistory, extractSemanticReopenRequest, publishTestR3Reopen, invalidateAfterSemanticReopen, invalidateBlockedR3Projection, pruneConsumerBindingAfterInvalidation, captureRoundPromptBaseline, restoreRoundPromptBaseline, resolveConsumerBinding, consumerViewPath, validationConsumerViewPath, validationConsumerViewText, consumerBindingFromProducedViews, readerGuidePaths, buildReaderGuideInputFromWorkDir, prepareTestScAuthority, publishTestScReopen, validateScRequestReceipt, validateScCurrentChain, buildScProvenance, validateScProvenance, readScProvenance, writeScProvenance, invalidateAfterScReopen, scGlobalBinding, buildScCurrentView, readerGuideContractIdentity };
+module.exports = { stableStructuralJson, structuralJsonEqual, roundRepairPlan, r5ChapterRanges, buildR5BoundedRepairPrompt, parseR5BoundedRepair, mergeR5BoundedRepair, runRound, runPipeline, resolveActiveSemanticAuthority, buildFullData, buildR3Prompt, buildR25Prompt, buildR2Prompt, buildR4Prompt, enrichR5Prompts, injectDataSource, assertPromptsWithinContext, resolveSkillPath, mergeNarrative, buildTransitionFinal, renderReport, loadFileConfig, validateRound, validateR3FinalOwnedPreview, goodMockResponder, sleep, adjudicationRecheck, buildAdjudicationInput, translateUnitsLLM, reviewPlainUnits, applyPlain, rebuildApprovedPlainReport, refreshPlainArtifacts, regeneratePlainV2Artifacts, applyReaderGuide, embedVerifiedReaderGuide, loadPlainDict, injectAdjudication, parseAdjArtifact, loadSourceAnchorExemptions, warningsForAdjudication, adjudicationConflictExclusions, legacySemanticAdjudicationConflicts, writeR45InputBinding, stampR45AdjudicationInputBinding, assertR45AdjudicationInputBinding, assertSourceAnchorExemptionArtifactBinding, verifiedV5ReviewDecision, verifiedCurrentGlobalReviewDecision, checkFiniteNetWinnerAlignment, buildFinalAdjudicationBindings, checkFinalAdjudicationAlignment, ensureFinalAdjudicationAuthority, verifyFinalAdjudicationAuthority, semanticFirstMode, semanticShadowRoot, createSemanticSidecarStore, createTestActiveWorkflow, prepareTestSemanticAuthority, buildSemanticConsumerBinding, testSemanticAuthorityBlock, buildTestProvenance, validateTestProvenance, updateTestProvenance, readTestProvenance, writeTestProvenance, semanticIdentity, assertSemanticIdentityUnchanged, readTestSemanticCurrent, semanticReopenRequestFingerprint, duplicateReopenProjectionGate, collectPersistedReopenFingerprints, validateGlobalReopenHistory, extractSemanticReopenRequest, publishTestR3Reopen, invalidateAfterSemanticReopen, invalidateBlockedR3Projection, pruneConsumerBindingAfterInvalidation, captureRoundPromptBaseline, restoreRoundPromptBaseline, resolveConsumerBinding, consumerViewPath, validationConsumerViewPath, validationConsumerViewText, consumerBindingFromProducedViews, readerGuidePaths, buildReaderGuideInputFromWorkDir, prepareTestScAuthority, publishTestScReopen, validateScRequestReceipt, validateScCurrentChain, buildScProvenance, validateScProvenance, readScProvenance, writeScProvenance, invalidateAfterScReopen, scGlobalBinding, buildScCurrentView, readerGuideContractIdentity };
+
   }
 };
 MODULE_PATH_MAP["/executor/host-node.js"] = "_executor_host_node_js";
@@ -20654,13 +20916,54 @@ function toTypedIssue(record) {
     : { rule: '', severity: 'BLOCKING', message: String(record) };
   const severity = String(r.severity || 'BLOCKING');
   const blocking = severity === 'BLOCKING';
+  const rule = String(r.rule || '');
+  const authorityClass = String(r.authorityClass || '');
+  const localRepresentationRules = new Set(['A1', 'A2', 'A3', 'V-S17H']);
+  const factIdentityRules = new Set(['D1', 'D2', 'V10-FINAL-S15']);
+  let failureClass = r.failureClass || (blocking ? 'representation_global' : 'observation');
+  let owner = r.owner || (blocking ? 'model' : 'none');
+  let repairMode = r.repairMode || (blocking ? 'round_regenerate' : 'none');
+  let repairScope = r.repairScope || (blocking ? 'round' : 'none');
+  let retryable = Object.prototype.hasOwnProperty.call(r, 'retryable') ? !!r.retryable : blocking;
+
+  if (blocking && localRepresentationRules.has(rule)) {
+    failureClass = 'representation_local';
+    repairMode = 'bounded_repair';
+    repairScope = r.repairScope || 'artifact_block';
+  }
+  if (blocking && factIdentityRules.has(rule)) {
+    failureClass = 'fact_identity';
+    repairMode = 'bounded_repair';
+    repairScope = r.repairScope || 'fact_claim';
+  }
+  if (blocking && authorityClass === 'consumer_contract') {
+    failureClass = 'consumer_contract';
+    repairScope = r.repairScope || 'consumer_projection';
+  }
+  if (blocking && authorityClass === 'authority_integrity') {
+    failureClass = 'authority_integrity';
+    owner = 'host';
+    repairMode = 'fail_closed';
+    repairScope = 'authority';
+    retryable = false;
+  }
+
+  const issueType = blocking ? 'representation_blocker'
+    : (severity === 'WARNING' ? 'representation_warning' : 'observation');
   return {
-    rule: r.rule || '',
+    rule,
     severity,
     message: r.message || r.reason || String(record || ''),
-    issueType: blocking ? 'representation_blocker' : (severity === 'WARNING' ? 'representation_warning' : 'observation'),
+    authorityClass: authorityClass || null,
+    issueType,
     blockingScope: blocking ? 'representation' : 'none',
     repairTarget: blocking ? 'representation' : null,
+    failureClass,
+    owner,
+    repairMode,
+    repairScope,
+    retryable,
+    issueSignature: [rule || 'UNRULED', failureClass, owner, repairMode, repairScope].join('|'),
     semanticInvalid: false,
     semanticReviewAuthority: false
   };
@@ -21579,7 +21882,7 @@ function checkR5Contract(narrative, registry, opts) {
   const allNames = (narrative.match(/<!--INSERT_(C\d+_[A-Z0-9_]+)-->/g) || [])
     .map(m => m.replace('<!--INSERT_', '').replace('-->', ''));
   const unregistered = [...new Set(allNames.filter(n => !regNames.has(n)))];
-  for (const n of unregistered) errors.push({ rule: 'A2', severity: 'BLOCKING', message: '未注册INSERT名: ' + n });
+  for (const n of unregistered) errors.push({ rule: 'A2', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: n, message: '未注册INSERT名: ' + n });
 
   const parts = narrative.replace(/\r\n/g, '\n').split(/^##\s*C(\d{1,2})\b[^\n]*\n?/gm);
   const sections = {};
@@ -21588,11 +21891,11 @@ function checkR5Contract(narrative, registry, opts) {
   for (const ch of chapters) {
     const sec = sections[ch];
     if (sec === undefined) {
-      errors.push({ rule: 'A1', severity: 'BLOCKING', message: ch + ' 章节缺失' });
+      errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch, message: ch + ' 章节缺失' });
       continue;
     }
     const xp = sec.match(/<!--XP:([\s\S]*?)-->/);
-    if (!xp || !xp[1].trim()) errors.push({ rule: 'A3', severity: 'BLOCKING', message: ch + ' 缺少非空 <!--XP:...-->' });
+    if (!xp || !xp[1].trim()) errors.push({ rule: 'A3', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch + ':XP', message: ch + ' 缺少非空 <!--XP:...-->' });
     const chInserts = registry.inserts.filter(r => r.ch === ch && r.consumer === 'R6b' &&
       (r.producer === 'R5' || (ch === 'C8' && r.producer === 'R2.5')));
     for (const r of chInserts) {
@@ -21602,14 +21905,14 @@ function checkR5Contract(narrative, registry, opts) {
           ? opts.s4DefTrigger : (opts.data ? opts.data[key] : undefined);
         if (actual === val) {
           if (!insertSlotHasContent(sec, r.name))
-            errors.push({ rule: 'A1', severity: 'BLOCKING', message: '条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
+            errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch + ':' + r.name, message: '条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
         } else if (actual !== undefined && sec.includes('<!--INSERT_' + r.name + '-->')) {
           warnings.push({ rule: 'A1W', severity: 'WARNING', message: '条件不满足仍输出 ' + r.name + '（' + ch + '，条件 ' + r.condition + '）' });
         }
         continue;
       }
       if (!insertSlotHasContent(sec, r.name))
-        errors.push({ rule: 'A1', severity: 'BLOCKING', message: '无条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
+        errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: ch + ':' + r.name, message: '无条件INSERT ' + r.name + ' 缺失或为空（' + ch + '）' });
     }
     // R5 规范要求纯 Markdown；C1 诗评若携带 HTML 容器，R6a 的诗行装配会将其误判为空。
     // 在半区门禁前置反馈，避免把可修正的格式问题推迟到最终 HTML 门禁。
@@ -21617,7 +21920,7 @@ function checkR5Contract(narrative, registry, opts) {
       const poemMatch = sec.match(/<!--INSERT_C1_01_POEM-->([\s\S]*?)(?=<!--INSERT_C\d+_[A-Z0-9_]+-->|$)/);
       const poem = poemMatch ? poemMatch[1] : '';
       if (/<\/?[A-Za-z][^>]*>/.test(poem)) {
-        errors.push({ rule: 'A1', severity: 'BLOCKING', message: 'C1_01_POEM 诗评必须保持纯 Markdown，禁止 HTML 容器（如 <div>），否则 R6a 无法装配 .po' });
+        errors.push({ rule: 'A1', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: 'C1:C1_01_POEM', message: 'C1_01_POEM 诗评必须保持纯 Markdown，禁止 HTML 容器（如 <div>），否则 R6a 无法装配 .po' });
       }
     }
   }
@@ -24700,15 +25003,100 @@ function internalMarkers(text) {
   return [...new Set(out)];
 }
 
-// Mechanical hard invariant: protect only machine-provable fact/reference identities.
-// Repeating an already-grounded number/reference for explanation is allowed; introducing a new identity,
-// deleting the only occurrence of an identity, or substituting another identity is not.
-// Semantic framework labels (B0/B'/B'', SC, Phase I/II/III, Q/Lv, 场C, etc.) are reviewed semantically.
+// Mechanical hard invariant: protect machine-provable fact/reference identities,
+// not the incidental spelling of a digit. Equivalent representations such as
+// 第2轮/第二轮 or 4:6/4比6 normalize to one identity. Framework labels such as
+// Lv4/Q1/Phase II remain semantic concepts and are deliberately masked from the
+// generic-number channel.
+const FACT_CN_DIGITS = { '零':0, '〇':0, '一':1, '二':2, '两':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9 };
+const FACT_CN_UNITS = { '十':10, '百':100, '千':1000, '万':10000 };
+
+function parseFactNumber(raw) {
+  const value = String(raw == null ? '' : raw).trim();
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(value)) return Number(value);
+  if (!value || !/^[零〇一二两三四五六七八九十百千万]+$/.test(value)) return null;
+  let total = 0, current = 0;
+  for (const ch of value) {
+    if (Object.prototype.hasOwnProperty.call(FACT_CN_DIGITS, ch)) {
+      current = FACT_CN_DIGITS[ch];
+      continue;
+    }
+    const unit = FACT_CN_UNITS[ch];
+    if (!unit) return null;
+    if (unit === 10000) {
+      total = (total + current || 1) * unit;
+      current = 0;
+    } else {
+      total += (current || 1) * unit;
+      current = 0;
+    }
+  }
+  return total + current;
+}
+
+function factIdentities(text) {
+  const source = normalizeText(text);
+  const occupied = new Array(source.length).fill(false);
+  const atoms = [];
+  const mark = (start, end, atom) => {
+    for (let i = start; i < end; i++) if (occupied[i]) return false;
+    for (let i = start; i < end; i++) occupied[i] = true;
+    if (atom) atoms.push(atom);
+    return true;
+  };
+  const scan = (re, makeAtom) => {
+    let m;
+    while ((m = re.exec(source)) !== null) {
+      mark(m.index, re.lastIndex, makeAtom ? makeAtom(m) : null);
+      if (!m[0]) re.lastIndex++;
+    }
+  };
+  const NUM = '[+-]?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千万]+)';
+
+  scan(/\bM-[A-Za-z]+-\d+\b|\bCP-(?:[A-Za-z]+-)?\d+\b|\bN\d+\b|\bS\d+(?:\.\d+)?\b/gi,
+    m => 'locator:' + m[0].replace(/\s+/g, '').toLowerCase());
+  scan(new RegExp('(' + NUM + ')\\s*(?:比|:|：)\\s*(' + NUM + ')', 'g'), m => {
+    const a = parseFactNumber(m[1]), b = parseFactNumber(m[2]);
+    return a == null || b == null ? null : 'score:' + a + ':' + b;
+  });
+  scan(new RegExp('(' + NUM + ')\\s*[%％]', 'g'), m => {
+    const n = parseFactNumber(m[1]);
+    return n == null ? null : 'percent:' + n;
+  });
+  scan(new RegExp('第\\s*(' + NUM + ')\\s*轮', 'g'), m => {
+    const n = parseFactNumber(m[1]);
+    return n == null ? null : 'round:' + n;
+  });
+  scan(new RegExp('(' + NUM + ')\\s*(位|人|名|次|轮|分|票)', 'g'), m => {
+    const n = parseFactNumber(m[1]);
+    if (n == null) return null;
+    const cat = ({位:'person',人:'person',名:'person',次:'occurrence',轮:'round',分:'score_value',票:'vote'})[m[2]];
+    return 'count:' + cat + ':' + n;
+  });
+  scan(new RegExp('(?:第\\s*)?(' + NUM + ')\\s*类', 'g'), m => {
+    const n = parseFactNumber(m[1]);
+    return n == null ? null : 'class:' + n;
+  });
+
+  // Semantic framework labels are intentionally excluded from the hard fact channel.
+  scan(/\bLv[0-6]\b/gi, null);
+  scan(new RegExp('第\\s*(' + NUM + ')\\s*级', 'g'), null);
+  scan(/\bQ[1-4]\b/gi, null);
+  scan(new RegExp('第\\s*(' + NUM + ')\\s*象限', 'g'), null);
+  scan(/\bPhase\s*(?:I{1,3}|[1-3])\b/gi, null);
+  scan(new RegExp('第\\s*(' + NUM + ')\\s*阶段', 'g'), null);
+
+  let residual = '';
+  for (let i = 0; i < source.length; i++) residual += occupied[i] ? ' ' : source[i];
+  const generic = /(?<![A-Za-z0-9])[+-]?\d+(?:\.\d+)?(?![A-Za-z0-9])/g;
+  let gm;
+  while ((gm = generic.exec(residual)) !== null) atoms.push('number:' + Number(gm[0]));
+
+  return [...new Set(atoms.filter(Boolean))].sort();
+}
+
 function protectedTokens(text) {
-  const s = normalizeText(text);
-  const re = /\bM-[A-Za-z]+-\d+\b|\bCP-(?:[A-Za-z]+-)?\d+\b|\bN\d+\b|\bS\d+(?:\.\d+)?\b|(?<![A-Za-z0-9])\d+\s*[:：]\s*\d+(?![A-Za-z0-9])|(?<![A-Za-z0-9])\d+(?:\.\d+)?\s*[%％]?(?![A-Za-z0-9])/gi;
-  const identities = (s.match(re) || []).map(token => token.replace(/\s+/g, '').toLowerCase());
-  return [...new Set(identities)].sort();
+  return factIdentities(text);
 }
 
 function pushIssue(issues, code, message, detail) {
@@ -24995,6 +25383,8 @@ module.exports = {
   CONCEPTS,
   conceptMatches,
   internalMarkers,
+  parseFactNumber,
+  factIdentities,
   protectedTokens,
   inspectPlainText,
   inspectGuideCard,
@@ -25266,7 +25656,7 @@ function guardTokens(text) {
   // token 层只保护原子数字/ID/主体/胜负词；比分的有序关系由 scorePairClaims +
   // factRelationshipErrors 独立硬门负责。这样结构化“正方4/反方6”可以合法见证 4:6，
   // 又不会因要求来源文本逐字出现“4:6”而产生假阴性。
-  const matches = src.match(/\d+|(?:N\d+|M-[A-Z0-9-]+|CP-\d+)|(?:正方|反方|获胜|胜方|胜出|胜利|落败|败北)/g) || [];
+  const matches = src.match(/(?:N\d+|M-[A-Z0-9-]+|CP-\d+)|(?:正方|反方|获胜|胜方|胜出|胜利|落败|败北)/g) || [];
   return Array.from(new Set(matches.map(x => x.replace(/\s+/g, ''))));
 }
 
@@ -25532,6 +25922,10 @@ function validateGuide(input, guide) {
     const cardText = ['what', 'why', 'conclusion'].map(k => card && card[k]).join('\n');
     const missingTokens = guardTokens(cardText).filter(token => !corpus.replace(/\s+/g, '').includes(token));
     if (missingTokens.length) errors.push(card.sectionId + ' 含来源外事实 token: ' + missingTokens.join(','));
+    const factModule = require('./plain-comprehension.js');
+    const corpusFacts = new Set(factModule.factIdentities(corpus));
+    const missingFacts = factModule.factIdentities(cardText).filter(atom => !corpusFacts.has(atom));
+    if (missingFacts.length) errors.push(card.sectionId + ' 含来源外事实 identity: ' + missingFacts.join(','));
     // 计数事实门逐字段执行：严格度与整卡扫描相同，但错误必须指出 what/why/conclusion，
     // 这样 R8 白话定点修复能冻结同卡其余已合格字段，而不是把整张卡交给模型重写。
     for (const field of ['what', 'why', 'conclusion']) {
@@ -25544,6 +25938,9 @@ function validateGuide(input, guide) {
 
 function semanticIssueText(issue) {
   if (!issue || typeof issue !== 'object' || Array.isArray(issue)) return '';
+  // Free-text meaning is not tied to one magic key. Historical/model outputs have used
+  // issue/reason/message as well as summary/detail. Reading explicit text is not semantic
+  // inference; the program still never guesses action or targetRound from the prose.
   const parts = [];
   for (const key of ['issue', 'reason', 'message', 'summary', 'detail']) {
     const value = issue[key];
@@ -27711,6 +28108,43 @@ function createEngine(bundle, hooks) {
       if (rr.round === 'R6b') r6b = rr;
     }
     summary.reportReady = !!(r6b && r6b.artifact.exists);   // R13-1：由 R6b 轮 artifact.exists 派生
+
+    // Retry/repair audit ledger is diagnostic projection only. It never participates in
+    // authority or resume decisions. Keep categories separate so "3/3" no longer conflates
+    // full regeneration, bounded repair, provider transport replay and host canonicalization.
+    var retryEvents = [];
+    var retryLedgerPath = base + '/.tmp-retry-events.jsonl';
+    if (files[retryLedgerPath] !== undefined && files[retryLedgerPath] !== null) {
+      String(files[retryLedgerPath]).split(/\r?\n/).forEach(function (line) {
+        if (!line.trim()) return;
+        try {
+          var event = JSON.parse(line);
+          if (event && event.schema === 'judge-retry-event-v1') retryEvents.push(event);
+        } catch (e) {}
+      });
+    }
+    var retryBreakdown = {
+      fullGenerationCalls: 0,
+      localRepairCalls: 0,
+      transportRetries: 0,
+      hostControlRepairs: 0,
+      gateFailures: 0,
+      plainBatchRetries: 0,
+      budgetExhausted: 0
+    };
+    retryEvents.forEach(function (event) {
+      if (event.event === 'attempt_start') {
+        if (event.repairMode === 'r5_bounded' || event.repairMode === 'bounded_repair') retryBreakdown.localRepairCalls++;
+        else retryBreakdown.fullGenerationCalls++;
+      }
+      if (event.event === 'retryable_failure' && event.failureClass === 'transport_transient') retryBreakdown.transportRetries++;
+      if (event.event === 'canonicalized' && event.stage === 'host_control' && event.changed !== false) retryBreakdown.hostControlRepairs++;
+      if (event.event === 'gate_failure') retryBreakdown.gateFailures++;
+      if (event.stage === 'plain_batch' && event.event === 'retry') retryBreakdown.plainBatchRetries++;
+      if (event.event === 'budget_exhausted') retryBreakdown.budgetExhausted++;
+    });
+    summary.retryBreakdown = retryBreakdown;
+
     // W-PH：批次档案解析（缺失/损坏 → [] 容错）+ 轮级失配判定 + 计数
     var batches = [];
     var bp = base + '/.tmp-run-batches.json';
@@ -27788,6 +28222,7 @@ function createEngine(bundle, hooks) {
       workDir: base,
       rounds: rounds,
       events: events,
+      retryEvents: retryEvents,
       batches: batches,          // W-PH：批次档案（随 files 快照同构读入）
       staleRounds: staleRounds,  // W-PH：失配轮映射 { R1: true }
       postprocess: pp,
@@ -28232,6 +28667,7 @@ function createEngine(bundle, hooks) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { createEngine };
 }
+
   }
 };
 MODULE_PATH_MAP["/web/engine.js"] = "_web_engine_js";

@@ -3197,6 +3197,99 @@ function assertSourceAnchorExemptionArtifactBinding(round, text, exemptions) {
 // Q3 登记项（260809 R8）：锚加载状态标签——门禁通过/断点跳过日志必须记录"以何配置通过"
 function anchorStateLabel(workDir) { return readAnchor(workDir) ? '锚已加载' : '锚未加载'; }
 
+const RETRY_EVENT_LEDGER = '.tmp-retry-events.jsonl';
+function appendRetryEvent(workDir, event) {
+  if (!workDir || !event || typeof event !== 'object') return;
+  const row = Object.assign({
+    schema: 'judge-retry-event-v1',
+    at: new Date().toISOString()
+  }, event);
+  try {
+    fs.appendFileSync(path.join(workDir, RETRY_EVENT_LEDGER), JSON.stringify(row) + '\n', 'utf8');
+  } catch (_) {
+    // Debug evidence must never mutate execution semantics.
+  }
+}
+
+function roundRepairPlan(round, gate) {
+  const issues = gate && Array.isArray(gate.typedIssues) ? gate.typedIssues : [];
+  if (!issues.length) return { mode: 'round_regenerate', scopes: [], issues: [] };
+  if (issues.some(issue => issue && issue.retryable === false)) {
+    return { mode: 'fail_closed', scopes: [], issues };
+  }
+  const local = issues.filter(issue => issue && issue.repairMode === 'bounded_repair' && issue.repairScope);
+  if (round && (round.name === 'R5A' || round.name === 'R5B') && local.length === issues.length) {
+    const chapters = [...new Set(local.map(issue => String(issue.repairScope).match(/C(?:1[0-2]|[1-9])/)?.[0]).filter(Boolean))];
+    if (chapters.length) return { mode: 'r5_bounded', scopes: local.map(x => x.repairScope), chapters, issues };
+  }
+  return { mode: 'round_regenerate', scopes: local.map(x => x.repairScope).filter(Boolean), issues };
+}
+
+function r5ChapterRanges(markdown) {
+  const source = String(markdown || '');
+  const matches = [...source.matchAll(/^##\s*(C(?:1[0-2]|[1-9]))\b[^\n]*\n?/gm)];
+  const out = new Map();
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].index;
+    const end = i + 1 < matches.length ? matches[i + 1].index : source.length;
+    out.set(matches[i][1], { start, end, text: source.slice(start, end) });
+  }
+  return out;
+}
+
+function buildR5BoundedRepairPrompt(basePrompt, priorArtifact, plan) {
+  const ranges = r5ChapterRanges(priorArtifact);
+  const chapters = plan.chapters.map(id => {
+    const row = ranges.get(id);
+    return { chapter: id, markdown: row ? row.text : '' };
+  });
+  return String(basePrompt || '') +
+    '\n\n---\n## R5 BOUNDED REPRESENTATION REPAIR\n' +
+    '上一版完整候选已经冻结。只修下面列出的章节；未列出的章节由 host 保留原字节，不会采用你的任何改写。\n' +
+    '只输出严格 JSON：{"chapters":[{"chapter":"C2","markdown":"## C2 ..."}]}。chapters 必须恰好覆盖 requestedChapters，一章一次。\n' +
+    '每个 markdown 必须是该章完整 Markdown，从 ## Cn 标题开始，到下一章之前结束。不要输出其它章节、解释或代码围栏。\n' +
+    'requestedChapters=' + JSON.stringify(plan.chapters) + '\n' +
+    'typedIssues=' + JSON.stringify(plan.issues, null, 2) + '\n' +
+    'currentChapters=' + JSON.stringify(chapters, null, 2);
+}
+
+function parseR5BoundedRepair(raw, expectedChapters) {
+  let text = String(raw || '').trim().replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\x60\x60\x60\s*$/, '');
+  const start = text.indexOf('{'), end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) text = text.slice(start, end + 1);
+  const doc = JSON.parse(text);
+  const rows = doc && Array.isArray(doc.chapters) ? doc.chapters : [];
+  const ids = rows.map(row => String(row && row.chapter || ''));
+  if (ids.length !== expectedChapters.length || new Set(ids).size !== expectedChapters.length ||
+      expectedChapters.some(id => !ids.includes(id))) {
+    throw new Error('R5 bounded repair chapters must exactly match: ' + expectedChapters.join(','));
+  }
+  for (const row of rows) {
+    if (typeof row.markdown !== 'string' || !row.markdown.trim().startsWith('## ' + row.chapter)) {
+      throw new Error('R5 bounded repair invalid chapter markdown: ' + row.chapter);
+    }
+  }
+  return new Map(rows.map(row => [String(row.chapter), String(row.markdown).trimEnd() + '\n\n']));
+}
+
+function mergeR5BoundedRepair(priorArtifact, repaired, expectedChapters) {
+  const source = String(priorArtifact || '');
+  const ranges = r5ChapterRanges(source);
+  for (const id of expectedChapters) {
+    if (!ranges.has(id)) throw new Error('R5 bounded repair cannot locate frozen chapter: ' + id);
+  }
+  let out = source;
+  const ordered = expectedChapters.map(id => ({ id, ...ranges.get(id) })).sort((a, b) => b.start - a.start);
+  for (const row of ordered) out = out.slice(0, row.start) + repaired.get(row.id) + out.slice(row.end);
+  const after = r5ChapterRanges(out);
+  for (const [id, before] of ranges.entries()) {
+    if (expectedChapters.includes(id)) continue;
+    const next = after.get(id);
+    if (!next || next.text !== before.text) throw new Error('R5 bounded repair modified frozen chapter: ' + id);
+  }
+  return out;
+}
+
 // 源锚层 v1 名册确认机制——交互 y/n/e、文件确认标记（source-anchor.confirmed 含名册哈希）、--skip 开关；
 // 类型 A/B 严重异常置顶展示；哈希不一致 → 旧标记失效（防"改名册但标记还在"）
 async function confirmRoster(workDir, anchor, opts, onLog) {
@@ -3422,6 +3515,19 @@ function validateRound(workDir, round, text, onLog, extra) {
       if (p1) validationOptions.p1Data = PC.extractDataMarkers(p1);
     }
     v = PC.validate(text, round.name, validationOptions);
+    if (round.name === 'R2' && validationOptions.semanticAuthorityBoundary === 'semantic-first-v10') {
+      const projection = SCA.checkR2Projection(text, extra && extra.scAuthorityCurrentView || null);
+      if (!projection.ok) {
+        const projectionIssues = projection.issues || [];
+        v = {
+          ...v,
+          passed: false,
+          blocking: [...(v.blocking || []), ...projectionIssues],
+          errors: [...(v.errors || []), ...projectionIssues],
+          issues: [...(v.issues || []), ...validator.toTypedIssues(projectionIssues)]
+        };
+      }
+    }
     if (round.name === 'R3' && v.passed) {
       const finalAlignment = checkR3AdjudicativeAuthority(workDir, text, extra);
       if (finalAlignment.upstreamReopenRequest) v.finalUpstreamReopenRequest = finalAlignment.upstreamReopenRequest;
@@ -3852,7 +3958,13 @@ async function runRound(opts) {
   for (let attempt = 0; attempt <= core.MAX_RETRIES; attempt++) {
     semanticReopenRequest = null;
     scSemanticReopenRequest = null;
-    onLog('[executor] ' + round.name + ' 开始调用 API（等待响应…）attempt=' + (attempt + 1));
+    let repairPlan = attempt > 0 ? roundRepairPlan(round, lastGate) : { mode: 'initial', scopes: [], issues: [] };
+    if (repairPlan.mode === 'fail_closed') {
+      appendRetryEvent(workDir, { round: round.name, stage: 'repair', event: 'fail_closed', attempt: attempt + 1, typedIssues: repairPlan.issues || [] });
+      break;
+    }
+    appendRetryEvent(workDir, { round: round.name, stage: 'generation', event: 'attempt_start', attempt: attempt + 1, retryIndex: attempt, repairMode: repairPlan.mode, repairScopes: repairPlan.scopes || [] });
+    onLog('[executor] ' + round.name + ' 开始调用 API（等待响应…）attempt=' + (attempt + 1) + (repairPlan.mode === 'r5_bounded' ? ' · bounded-repair' : ''));
     if (attempt > 0) {
       const d = core.retryDelayMs(attempt);
       onLog('[executor] ' + round.name + ' 重试 ' + attempt + '/' + core.MAX_RETRIES + ' · 退避 ' + d + 'ms');
@@ -3879,10 +3991,20 @@ async function runRound(opts) {
         authorityBoundPrompt = authorityText + '\n\n' + scAuthorityText + '\n\n' + promptText + authorityFooter;
       }
     }
-    const usePrompt = (attempt > 0 && lastGate && lastGate.errors.length)
+    let usePrompt = (attempt > 0 && lastGate && lastGate.errors.length)
       ? authorityBoundPrompt + '\n\n---\n## 上次输出未通过机械格式校验，必须严格修正后完整重新输出（只输出修正后的完整产物）\n' +
         lastGate.errors.map(e => '- ' + e).join('\n') + '\n'
       : authorityBoundPrompt;
+    let priorArtifact = null;
+    if (repairPlan.mode === 'r5_bounded') {
+      priorArtifact = readIfExists(outFile);
+      if (priorArtifact) {
+        usePrompt = buildR5BoundedRepairPrompt(authorityBoundPrompt, priorArtifact, repairPlan);
+        appendRetryEvent(workDir, { round: round.name, stage: 'repair', event: 'bounded_plan', attempt: attempt + 1, repairMode: repairPlan.mode, repairScopes: repairPlan.scopes, chapters: repairPlan.chapters });
+      } else {
+        repairPlan = { mode: 'round_regenerate', scopes: [], issues: repairPlan.issues || [] };
+      }
+    }
     let text;
     let semanticRefs = null;
     try {
@@ -3924,10 +4046,23 @@ async function runRound(opts) {
       } else {
         text = await call(cfg, [{ role: 'user', content: usePrompt }], callOpts);
       }
+      if (repairPlan.mode === 'r5_bounded') {
+        const repaired = parseR5BoundedRepair(text, repairPlan.chapters);
+        text = mergeR5BoundedRepair(priorArtifact, repaired, repairPlan.chapters);
+        appendRetryEvent(workDir, { round: round.name, stage: 'repair', event: 'bounded_merge', attempt: attempt + 1, repairMode: repairPlan.mode, chapters: repairPlan.chapters });
+      }
     } catch (e) {
       // 批 1（260812）：传输层异常（③收紧 流截断/断连/流异常族）纳入轮次重试循环——
       // 不再穿透循环导致管道退出；确定性错误（length 截断/HTTP/配置）仍直接抛（重试无意义）
       const msg = e && e.message ? String(e.message) : String(e);
+      if (repairPlan.mode === 'r5_bounded' && attempt < core.MAX_RETRIES) {
+        const scopedIssues = (repairPlan.issues || []).map(issue => Object.assign({}, issue, {
+          message: String(issue && issue.message || '') + ' | bounded repair response error: ' + msg.slice(0, 600)
+        }));
+        lastGate = { ok: false, errors: ['R5 bounded repair response invalid: ' + msg], warnings: [], typedIssues: scopedIssues };
+        appendRetryEvent(workDir, { round: round.name, stage: 'repair', event: 'bounded_response_failure', attempt: attempt + 1, repairMode: repairPlan.mode, chapters: repairPlan.chapters, message: msg.slice(0, 1600) });
+        continue;
+      }
       // 可重试 = 传输/断连/截断类（③收紧、流异常、缓冲超限、fetch 断连实况）。
       // 注意：不匹配「网络请求失败」宽词——2h 超时 AbortError 会被包装为
       // 「网络请求失败: This operation was aborted」，宽匹配将导致 4×2h 灾难性重试；
@@ -3935,6 +4070,7 @@ async function runRound(opts) {
       const retryable = /未收到 finish_reason|fetch failed|ECONNRESET|terminated|other side closed|socket hang up|流中错误帧|流式响应无 body|缓冲超限/.test(msg);
       if (retryable && attempt < core.MAX_RETRIES) {
         lastGate = null;                       // 不把传输错误注入模型重试 prompt（非模型可修正项）
+        appendRetryEvent(workDir, { round: round.name, stage: 'transport', event: 'retryable_failure', attempt: attempt + 1, failureClass: 'transport_transient', owner: 'provider_transport', repairMode: 'request_replay', repairScope: 'request', retryable: true, message: msg.slice(0, 1600) });
         onLog('[executor] ' + round.name + ' API 传输异常（纳入重试 attempt=' + (attempt + 1) + '）: ' + msg);
         continue;                              // 回到循环头 → 退避 sleep → 下一 attempt
       }
@@ -3945,7 +4081,24 @@ async function runRound(opts) {
       const scReopen = SCA.extractReopenRequest(text, readIfExists(path.join(workDir, '.tmp-debate.txt')));
       text = scReopen.text;
       scSemanticReopenRequest = scReopen.request;
-      if (scSemanticReopenRequest) onLog('[executor] R2 检测到 bounded SC semantic reopen request；正文已剥离 marker，等待独立 SC review/fidelity');
+      if (scSemanticReopenRequest) {
+        onLog('[executor] R2 检测到 bounded SC semantic reopen request；正文已剥离 marker，等待独立 SC review/fidelity');
+      } else {
+        const beforeBinding = text;
+        text = SCA.injectCanonicalBinding(text, opts.scAuthorityCurrentView || null);
+        appendRetryEvent(workDir, {
+          round: round.name,
+          stage: 'host_control',
+          event: 'canonicalized',
+          attempt: attempt + 1,
+          failureClass: 'host_control',
+          owner: 'host',
+          repairMode: 'deterministic',
+          repairScope: 'SC_AUTHORITY_BINDING',
+          retryable: false,
+          changed: text !== beforeBinding
+        });
+      }
       duplicateReopenGateError = duplicateReopenProjectionGate('sc', scSemanticReopenRequest, opts.seenScReopenRequests);
     }
     if (sfMode === 'active' && round.name === 'R3') {
@@ -3992,10 +4145,6 @@ async function runRound(opts) {
     }
     const aa = core.assessArtifact(round.name, text);
     if (!aa.ok) gateErrors.push(aa.errors.join('; '));
-    if (sfMode === 'active' && round.name === 'R2' && !scSemanticReopenRequest) {
-      const scAlignment = SCA.checkR2Alignment(text, opts.scAuthorityCurrentView || null);
-      if (!scAlignment.ok) gateErrors.push('SC authority alignment: ' + scAlignment.errors.join('; '));
-    }
     const typedGateIssues = [];
     if (vr && Array.isArray(vr.typedIssues)) typedGateIssues.push(...vr.typedIssues.filter(x => x && x.severity === 'BLOCKING'));
     if (!aa.ok) {
@@ -4029,10 +4178,13 @@ async function runRound(opts) {
           if (auditOnly.length) onLog('[executor] ' + round.name + ' audit-only V-S8E-WX ' + auditOnly.length + ' 条（不进入 R4.5 语义 warning 通道）');
         } catch (e) { /* 落盘失败不阻断 */ }
       }
+      appendRetryEvent(workDir, { round: round.name, stage: 'validation', event: 'accepted', attempt: attempt + 1, retryIndex: attempt, bytes: Buffer.byteLength(text, 'utf-8') });
       return { round: round.name, ok: true, attempt, bytes: Buffer.byteLength(text, 'utf-8'), semanticFirstMode: sfMode, semanticRefs, semanticReopenRequest, scSemanticReopenRequest, finalUpstreamReopenRequest: vr && vr.finalUpstreamReopenRequest || null, consumerBinding: vr && vr.consumerBinding || opts.consumerBinding || null };
     }
+    appendRetryEvent(workDir, { round: round.name, stage: 'validation', event: 'gate_failure', attempt: attempt + 1, retryIndex: attempt, typedIssues: lastGate.typedIssues || [], errors: (lastGate.errors || []).slice(0, 20) });
     onLog('[executor] ' + round.name + ' 门禁失败: ' + lastGate.errors.join('; '));
   }
+  appendRetryEvent(workDir, { round: round.name, stage: 'validation', event: 'budget_exhausted', attempt: core.MAX_RETRIES + 1, retryIndex: core.MAX_RETRIES, typedIssues: lastGate && lastGate.typedIssues || [], errors: lastGate ? (lastGate.errors || []).slice(0, 20) : ['未知失败'] });
   return { round: round.name, ok: false, errors: lastGate ? lastGate.errors : ['未知失败'], attempt: core.MAX_RETRIES, semanticFirstMode: sfMode, typedIssues: lastGate && lastGate.typedIssues || [], issueRefs: lastGate && lastGate.issueRefs || [], scSemanticReopenRequest };
 }
 
@@ -6463,6 +6615,7 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
     for (let attempt = 0; attempt <= core.MAX_RETRIES; attempt++) {
       if (attempt > 0) {
         const d = core.retryDelayMs(attempt);
+        appendRetryEvent(cacheDir, { round: comprehensionProfile === PV2.PROFILE_GUIDE ? 'R8' : 'R7', stage: 'plain_batch', event: 'retry', batch: ci + 1, attempt: attempt + 1, retryIndex: attempt, repairMode: repairBase && repairIds.length ? 'bounded_repair' : 'batch_regenerate', repairScopes: repairIds.slice() });
         onLog('[executor] 白话翻译批 ' + (ci + 1) + '/' + chunks.length + ' 重试 ' + attempt + '/' + core.MAX_RETRIES + ' · 退避 ' + d + 'ms');
         await sleep(d);
       }
@@ -6529,6 +6682,7 @@ async function translateUnitsLLM(cfg, units, onLog, dict, opts) {
         const errMsg = String(e && e.message || '');
         // P0（260901）：旧 UI 只看得到“第 N 批重试”，看不到触发重试的实际原因，
         // 导致真实 R7/R8 门禁问题事后无法从日志复原。只记录有界错误摘要，不记录原始模型响应。
+        appendRetryEvent(cacheDir, { round: comprehensionProfile === PV2.PROFILE_GUIDE ? 'R8' : 'R7', stage: 'plain_batch', event: 'attempt_failure', batch: ci + 1, attempt: attempt + 1, failureClass: 'plain_validation', repairMode: repairBase && repairIds.length ? 'bounded_repair' : 'batch_regenerate', repairScopes: repairIds.slice(), message: errMsg.slice(0, 1200) });
         onLog('[executor] 白话翻译批 ' + (ci + 1) + '/' + chunks.length + ' attempt ' + (attempt + 1) + ' 失败: ' + errMsg.slice(0, 1200));
         if (e && e.code === 'ERR_PLAIN_RETRY_STALLED') throw e;
         if (failedCandidate && comprehensionProfile === PV2.PROFILE_GUIDE &&
@@ -8604,4 +8758,4 @@ function readerGuideContractIdentity() {
   };
 }
 
-module.exports = { stableStructuralJson, structuralJsonEqual, runRound, runPipeline, resolveActiveSemanticAuthority, buildFullData, buildR3Prompt, buildR25Prompt, buildR2Prompt, buildR4Prompt, enrichR5Prompts, injectDataSource, assertPromptsWithinContext, resolveSkillPath, mergeNarrative, buildTransitionFinal, renderReport, loadFileConfig, validateRound, validateR3FinalOwnedPreview, goodMockResponder, sleep, adjudicationRecheck, buildAdjudicationInput, translateUnitsLLM, reviewPlainUnits, applyPlain, rebuildApprovedPlainReport, refreshPlainArtifacts, regeneratePlainV2Artifacts, applyReaderGuide, embedVerifiedReaderGuide, loadPlainDict, injectAdjudication, parseAdjArtifact, loadSourceAnchorExemptions, warningsForAdjudication, adjudicationConflictExclusions, legacySemanticAdjudicationConflicts, writeR45InputBinding, stampR45AdjudicationInputBinding, assertR45AdjudicationInputBinding, assertSourceAnchorExemptionArtifactBinding, verifiedV5ReviewDecision, verifiedCurrentGlobalReviewDecision, checkFiniteNetWinnerAlignment, buildFinalAdjudicationBindings, checkFinalAdjudicationAlignment, ensureFinalAdjudicationAuthority, verifyFinalAdjudicationAuthority, semanticFirstMode, semanticShadowRoot, createSemanticSidecarStore, createTestActiveWorkflow, prepareTestSemanticAuthority, buildSemanticConsumerBinding, testSemanticAuthorityBlock, buildTestProvenance, validateTestProvenance, updateTestProvenance, readTestProvenance, writeTestProvenance, semanticIdentity, assertSemanticIdentityUnchanged, readTestSemanticCurrent, semanticReopenRequestFingerprint, duplicateReopenProjectionGate, collectPersistedReopenFingerprints, validateGlobalReopenHistory, extractSemanticReopenRequest, publishTestR3Reopen, invalidateAfterSemanticReopen, invalidateBlockedR3Projection, pruneConsumerBindingAfterInvalidation, captureRoundPromptBaseline, restoreRoundPromptBaseline, resolveConsumerBinding, consumerViewPath, validationConsumerViewPath, validationConsumerViewText, consumerBindingFromProducedViews, readerGuidePaths, buildReaderGuideInputFromWorkDir, prepareTestScAuthority, publishTestScReopen, validateScRequestReceipt, validateScCurrentChain, buildScProvenance, validateScProvenance, readScProvenance, writeScProvenance, invalidateAfterScReopen, scGlobalBinding, buildScCurrentView, readerGuideContractIdentity };
+module.exports = { stableStructuralJson, structuralJsonEqual, roundRepairPlan, r5ChapterRanges, buildR5BoundedRepairPrompt, parseR5BoundedRepair, mergeR5BoundedRepair, runRound, runPipeline, resolveActiveSemanticAuthority, buildFullData, buildR3Prompt, buildR25Prompt, buildR2Prompt, buildR4Prompt, enrichR5Prompts, injectDataSource, assertPromptsWithinContext, resolveSkillPath, mergeNarrative, buildTransitionFinal, renderReport, loadFileConfig, validateRound, validateR3FinalOwnedPreview, goodMockResponder, sleep, adjudicationRecheck, buildAdjudicationInput, translateUnitsLLM, reviewPlainUnits, applyPlain, rebuildApprovedPlainReport, refreshPlainArtifacts, regeneratePlainV2Artifacts, applyReaderGuide, embedVerifiedReaderGuide, loadPlainDict, injectAdjudication, parseAdjArtifact, loadSourceAnchorExemptions, warningsForAdjudication, adjudicationConflictExclusions, legacySemanticAdjudicationConflicts, writeR45InputBinding, stampR45AdjudicationInputBinding, assertR45AdjudicationInputBinding, assertSourceAnchorExemptionArtifactBinding, verifiedV5ReviewDecision, verifiedCurrentGlobalReviewDecision, checkFiniteNetWinnerAlignment, buildFinalAdjudicationBindings, checkFinalAdjudicationAlignment, ensureFinalAdjudicationAuthority, verifyFinalAdjudicationAuthority, semanticFirstMode, semanticShadowRoot, createSemanticSidecarStore, createTestActiveWorkflow, prepareTestSemanticAuthority, buildSemanticConsumerBinding, testSemanticAuthorityBlock, buildTestProvenance, validateTestProvenance, updateTestProvenance, readTestProvenance, writeTestProvenance, semanticIdentity, assertSemanticIdentityUnchanged, readTestSemanticCurrent, semanticReopenRequestFingerprint, duplicateReopenProjectionGate, collectPersistedReopenFingerprints, validateGlobalReopenHistory, extractSemanticReopenRequest, publishTestR3Reopen, invalidateAfterSemanticReopen, invalidateBlockedR3Projection, pruneConsumerBindingAfterInvalidation, captureRoundPromptBaseline, restoreRoundPromptBaseline, resolveConsumerBinding, consumerViewPath, validationConsumerViewPath, validationConsumerViewText, consumerBindingFromProducedViews, readerGuidePaths, buildReaderGuideInputFromWorkDir, prepareTestScAuthority, publishTestScReopen, validateScRequestReceipt, validateScCurrentChain, buildScProvenance, validateScProvenance, readScProvenance, writeScProvenance, invalidateAfterScReopen, scGlobalBinding, buildScCurrentView, readerGuideContractIdentity };

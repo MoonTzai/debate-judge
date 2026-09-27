@@ -1243,6 +1243,43 @@ function createEngine(bundle, hooks) {
       if (rr.round === 'R6b') r6b = rr;
     }
     summary.reportReady = !!(r6b && r6b.artifact.exists);   // R13-1：由 R6b 轮 artifact.exists 派生
+
+    // Retry/repair audit ledger is diagnostic projection only. It never participates in
+    // authority or resume decisions. Keep categories separate so "3/3" no longer conflates
+    // full regeneration, bounded repair, provider transport replay and host canonicalization.
+    var retryEvents = [];
+    var retryLedgerPath = base + '/.tmp-retry-events.jsonl';
+    if (files[retryLedgerPath] !== undefined && files[retryLedgerPath] !== null) {
+      String(files[retryLedgerPath]).split(/\r?\n/).forEach(function (line) {
+        if (!line.trim()) return;
+        try {
+          var event = JSON.parse(line);
+          if (event && event.schema === 'judge-retry-event-v1') retryEvents.push(event);
+        } catch (e) {}
+      });
+    }
+    var retryBreakdown = {
+      fullGenerationCalls: 0,
+      localRepairCalls: 0,
+      transportRetries: 0,
+      hostControlRepairs: 0,
+      gateFailures: 0,
+      plainBatchRetries: 0,
+      budgetExhausted: 0
+    };
+    retryEvents.forEach(function (event) {
+      if (event.event === 'attempt_start') {
+        if (event.repairMode === 'r5_bounded' || event.repairMode === 'bounded_repair') retryBreakdown.localRepairCalls++;
+        else retryBreakdown.fullGenerationCalls++;
+      }
+      if (event.event === 'retryable_failure' && event.failureClass === 'transport_transient') retryBreakdown.transportRetries++;
+      if (event.event === 'canonicalized' && event.stage === 'host_control' && event.changed !== false) retryBreakdown.hostControlRepairs++;
+      if (event.event === 'gate_failure') retryBreakdown.gateFailures++;
+      if (event.stage === 'plain_batch' && event.event === 'retry') retryBreakdown.plainBatchRetries++;
+      if (event.event === 'budget_exhausted') retryBreakdown.budgetExhausted++;
+    });
+    summary.retryBreakdown = retryBreakdown;
+
     // W-PH：批次档案解析（缺失/损坏 → [] 容错）+ 轮级失配判定 + 计数
     var batches = [];
     var bp = base + '/.tmp-run-batches.json';
@@ -1320,6 +1357,7 @@ function createEngine(bundle, hooks) {
       workDir: base,
       rounds: rounds,
       events: events,
+      retryEvents: retryEvents,
       batches: batches,          // W-PH：批次档案（随 files 快照同构读入）
       staleRounds: staleRounds,  // W-PH：失配轮映射 { R1: true }
       postprocess: pp,

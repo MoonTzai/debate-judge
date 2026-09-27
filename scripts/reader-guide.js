@@ -250,7 +250,7 @@ function guardTokens(text) {
   // token 层只保护原子数字/ID/主体/胜负词；比分的有序关系由 scorePairClaims +
   // factRelationshipErrors 独立硬门负责。这样结构化“正方4/反方6”可以合法见证 4:6，
   // 又不会因要求来源文本逐字出现“4:6”而产生假阴性。
-  const matches = src.match(/\d+|(?:N\d+|M-[A-Z0-9-]+|CP-\d+)|(?:正方|反方|获胜|胜方|胜出|胜利|落败|败北)/g) || [];
+  const matches = src.match(/(?:N\d+|M-[A-Z0-9-]+|CP-\d+)|(?:正方|反方|获胜|胜方|胜出|胜利|落败|败北)/g) || [];
   return Array.from(new Set(matches.map(x => x.replace(/\s+/g, ''))));
 }
 
@@ -516,6 +516,10 @@ function validateGuide(input, guide) {
     const cardText = ['what', 'why', 'conclusion'].map(k => card && card[k]).join('\n');
     const missingTokens = guardTokens(cardText).filter(token => !corpus.replace(/\s+/g, '').includes(token));
     if (missingTokens.length) errors.push(card.sectionId + ' 含来源外事实 token: ' + missingTokens.join(','));
+    const factModule = require('./plain-comprehension.js');
+    const corpusFacts = new Set(factModule.factIdentities(corpus));
+    const missingFacts = factModule.factIdentities(cardText).filter(atom => !corpusFacts.has(atom));
+    if (missingFacts.length) errors.push(card.sectionId + ' 含来源外事实 identity: ' + missingFacts.join(','));
     // 计数事实门逐字段执行：严格度与整卡扫描相同，但错误必须指出 what/why/conclusion，
     // 这样 R8 白话定点修复能冻结同卡其余已合格字段，而不是把整张卡交给模型重写。
     for (const field of ['what', 'why', 'conclusion']) {

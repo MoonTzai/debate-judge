@@ -2238,10 +2238,13 @@ function validateHalf(content, label, opts) {
   opts = opts || {};
   const errors = [];
   const warnings = [];
+  const records = [];
   const otherRange = label === 'A' ? /<!--INSERT_(C[8-9]|C1[0-2])_/g : /<!--INSERT_(C[1-7])_/g;
   const invalid = content.match(otherRange) || [];
   if (invalid.length > 0) {
-    errors.push('包含不应处理的INSERT: ' + invalid.join(', '));
+    const rec = { rule: 'A4', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: label === 'A' ? 'R5A' : 'R5B', message: '包含不应处理的INSERT: ' + invalid.join(', ') };
+    records.push(rec);
+    errors.push(rec.rule + ': ' + rec.message);
   }
   // A4：半区正向约束——本半区无条件 INSERT 全覆盖 + 注册名校验 + XP（C4 条件项按 S4 豁免）
   let registry = opts.registry || null;
@@ -2257,16 +2260,20 @@ function validateHalf(content, label, opts) {
       s4DefTrigger: opts.s4DefTrigger,
       data: opts.data
     });
-    for (const e of cr.errors) errors.push(e.rule + ': ' + e.message);
+    for (const e of cr.errors) { records.push(e); errors.push(e.rule + ': ' + e.message); }
     for (const w of cr.warnings) warnings.push(w.rule + ': ' + w.message);
   }
   // L2/C7（260808）：R5A 输出契约在轮门禁强制——5 个 C7 DATA 标记存在性 + 标记间一致性，
   // 缺失/矛盾 → 门禁失败携带反馈重试（此前仅 R5-FINAL 检查，重试反馈够不到）
   if (label === 'A') {
-    for (const e of validator.checkC7DataContract(content, { s8: opts.data })) errors.push(e);
+    for (const e of validator.checkC7DataContract(content, { s8: opts.data })) {
+      const rec = { rule: 'C7-DATA', severity: 'BLOCKING', failureClass: 'representation_local', owner: 'model', repairMode: 'bounded_repair', repairScope: 'C7', message: String(e) };
+      records.push(rec);
+      errors.push(String(e));
+    }
   }
-  if (errors.length > 0) return { passed: false, reason: errors.join('; '), warnings };
-  return { passed: true, warnings };
+  if (errors.length > 0) return { passed: false, reason: errors.join('; '), errors, warnings, records, issues: validator.toTypedIssues(records.length ? records : errors) };
+  return { passed: true, warnings, records: [], issues: [] };
 }
 
 // R7 阶段 2：--plain 三层开关解析（CLI > .api-config.json plain 字段 > 默认 false）

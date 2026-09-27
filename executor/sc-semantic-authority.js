@@ -1117,6 +1117,86 @@ function checkR2Alignment(p2Text, current) {
   return { ok: errors.length === 0, errors };
 }
 
+function canonicalBindingMarker(current) {
+  const authority = current && current.authority;
+  const revision = Number(current && current.revision);
+  if (!authority || !Number.isInteger(revision) || revision < 1) {
+    throw new Error('SC canonical binding requires current authority');
+  }
+  return '<!--SC_AUTHORITY_BINDING revision=' + revision +
+    ' affirmative=' + authority.sides.affirmative.phase_iii +
+    ' negative=' + authority.sides.negative.phase_iii +
+    ' relation=' + authority.relation.type +
+    ' dominant=' + authority.relation.dominant_side + ' -->';
+}
+
+function stripBindingMarkers(text) {
+  return String(text || '')
+    .replace(/<!--SC_AUTHORITY_BINDING\s+revision=\d+\s+affirmative=(?:formed|not_formed|uncertain)\s+negative=(?:formed|not_formed|uncertain)\s+relation=(?:none|single_side|parallel_independent|higher_order_cover|apparent_double_actual_single|mutual_partial|other_evidenced_relation)\s+dominant=(?:affirmative|negative|none|both|uncertain)\s*-->/g, '')
+    .replace(/^\s+/, '');
+}
+
+function injectCanonicalBinding(text, current) {
+  const body = stripBindingMarkers(text);
+  return canonicalBindingMarker(current) + (body ? '\n\n' + body : '\n');
+}
+
+function extractProjectionData(text) {
+  const out = {};
+  const re = /<!--DATA:\s*([^=\n]+)=([\s\S]*?)-->/g;
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) out[String(m[1] || '').trim()] = String(m[2] || '').trim();
+  return out;
+}
+
+function checkR2Projection(p2Text, current) {
+  const authority = current && current.authority;
+  if (!authority || !authority.sides || !authority.sides.affirmative || !authority.sides.negative || !authority.relation) {
+    const issue = {
+      rule: 'V10-SC-PROJECTION',
+      severity: 'BLOCKING',
+      authorityClass: 'authority_integrity',
+      failureClass: 'authority_integrity',
+      owner: 'host',
+      repairMode: 'fail_closed',
+      repairScope: 'authority',
+      retryable: false,
+      message: 'SC current authority invalid for R2 projection validation'
+    };
+    return { ok: false, errors: [issue.message], issues: [issue], expected: null, actual: null };
+  }
+  const compatibility = projectMainlineCompatibility(authority);
+  const expected = {
+    'S8.PhaseII.正方.有效数': String(Array.isArray(authority.sides.affirmative.candidates) ? authority.sides.affirmative.candidates.length : 0),
+    'S8.PhaseII.反方.有效数': String(Array.isArray(authority.sides.negative.candidates) ? authority.sides.negative.candidates.length : 0),
+    'S8.PhaseIII.状态': compatibility.phaseIIIStatus,
+    'S8.PhaseIII.完成方': compatibility.completionParty,
+    'S8.PhaseIII.⑥双方SC关系': compatibility.legacyRelation
+  };
+  if (compatibility.completion) expected['S8.SC完成度'] = compatibility.completion;
+  if (compatibility.mainlineFamily) expected['S8.S11类型方向'] = compatibility.mainlineFamily;
+  const actual = extractProjectionData(p2Text);
+  const issues = [];
+  for (const [key, value] of Object.entries(expected)) {
+    if (String(actual[key] == null ? '' : actual[key]).trim() === String(value).trim()) continue;
+    issues.push({
+      rule: 'V10-SC-PROJECTION',
+      severity: 'BLOCKING',
+      authorityClass: 'consumer_contract',
+      failureClass: 'consumer_contract',
+      owner: 'model',
+      repairMode: 'bounded_repair',
+      repairScope: 'S8_DATA',
+      retryable: true,
+      field: key,
+      expected: value,
+      actual: actual[key] == null ? null : actual[key],
+      message: 'R2 SC projection mismatch: ' + key + ' expected=' + value + ' actual=' + String(actual[key])
+    });
+  }
+  return { ok: issues.length === 0, errors: issues.map(x => x.message), issues, expected, actual };
+}
+
 function buildAuthorityBlock(current) {
   const authority = current && current.authority;
   const revision = Number(current && current.revision);
@@ -1141,12 +1221,7 @@ function buildAuthorityBlock(current) {
     '',
     JSON.stringify(authority, null, 2),
     '',
-    'R2 必须额外输出以下唯一控制绑定注释（它不是 Judge DATA，不进入报告字段注册表；值来自本 authority，禁止自行改写）：',
-    '<!--SC_AUTHORITY_BINDING revision=' + revision +
-      ' affirmative=' + authority.sides.affirmative.phase_iii +
-      ' negative=' + authority.sides.negative.phase_iii +
-      ' relation=' + authority.relation.type +
-      ' dominant=' + authority.relation.dominant_side + ' -->',
+    'SC_AUTHORITY_BINDING 是 host 控制元数据，不是 Judge DATA。R2 模型不得输出或复制该注释；host 会在模型产物通过语义/表示处理后，根据 current authority 写入唯一 canonical binding。',
     '---'
   ].join('\n');
 }
@@ -1276,6 +1351,11 @@ module.exports = {
   reviewExistingAuthority,
   parseBindingMarker,
   checkR2Alignment,
+  canonicalBindingMarker,
+  stripBindingMarkers,
+  injectCanonicalBinding,
+  extractProjectionData,
+  checkR2Projection,
   buildAuthorityBlock,
   buildAdjudicativeConsumerView,
   projectMainlineCompatibility,

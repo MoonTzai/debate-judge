@@ -62,15 +62,100 @@ function internalMarkers(text) {
   return [...new Set(out)];
 }
 
-// Mechanical hard invariant: protect only machine-provable fact/reference identities.
-// Repeating an already-grounded number/reference for explanation is allowed; introducing a new identity,
-// deleting the only occurrence of an identity, or substituting another identity is not.
-// Semantic framework labels (B0/B'/B'', SC, Phase I/II/III, Q/Lv, 场C, etc.) are reviewed semantically.
+// Mechanical hard invariant: protect machine-provable fact/reference identities,
+// not the incidental spelling of a digit. Equivalent representations such as
+// 第2轮/第二轮 or 4:6/4比6 normalize to one identity. Framework labels such as
+// Lv4/Q1/Phase II remain semantic concepts and are deliberately masked from the
+// generic-number channel.
+const FACT_CN_DIGITS = { '零':0, '〇':0, '一':1, '二':2, '两':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9 };
+const FACT_CN_UNITS = { '十':10, '百':100, '千':1000, '万':10000 };
+
+function parseFactNumber(raw) {
+  const value = String(raw == null ? '' : raw).trim();
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(value)) return Number(value);
+  if (!value || !/^[零〇一二两三四五六七八九十百千万]+$/.test(value)) return null;
+  let total = 0, current = 0;
+  for (const ch of value) {
+    if (Object.prototype.hasOwnProperty.call(FACT_CN_DIGITS, ch)) {
+      current = FACT_CN_DIGITS[ch];
+      continue;
+    }
+    const unit = FACT_CN_UNITS[ch];
+    if (!unit) return null;
+    if (unit === 10000) {
+      total = (total + current || 1) * unit;
+      current = 0;
+    } else {
+      total += (current || 1) * unit;
+      current = 0;
+    }
+  }
+  return total + current;
+}
+
+function factIdentities(text) {
+  const source = normalizeText(text);
+  const occupied = new Array(source.length).fill(false);
+  const atoms = [];
+  const mark = (start, end, atom) => {
+    for (let i = start; i < end; i++) if (occupied[i]) return false;
+    for (let i = start; i < end; i++) occupied[i] = true;
+    if (atom) atoms.push(atom);
+    return true;
+  };
+  const scan = (re, makeAtom) => {
+    let m;
+    while ((m = re.exec(source)) !== null) {
+      mark(m.index, re.lastIndex, makeAtom ? makeAtom(m) : null);
+      if (!m[0]) re.lastIndex++;
+    }
+  };
+  const NUM = '[+-]?(?:\\d+(?:\\.\\d+)?|[零〇一二两三四五六七八九十百千万]+)';
+
+  scan(/\bM-[A-Za-z]+-\d+\b|\bCP-(?:[A-Za-z]+-)?\d+\b|\bN\d+\b|\bS\d+(?:\.\d+)?\b/gi,
+    m => 'locator:' + m[0].replace(/\s+/g, '').toLowerCase());
+  scan(new RegExp('(' + NUM + ')\\s*(?:比|:|：)\\s*(' + NUM + ')', 'g'), m => {
+    const a = parseFactNumber(m[1]), b = parseFactNumber(m[2]);
+    return a == null || b == null ? null : 'score:' + a + ':' + b;
+  });
+  scan(new RegExp('(' + NUM + ')\\s*[%％]', 'g'), m => {
+    const n = parseFactNumber(m[1]);
+    return n == null ? null : 'percent:' + n;
+  });
+  scan(new RegExp('第\\s*(' + NUM + ')\\s*轮', 'g'), m => {
+    const n = parseFactNumber(m[1]);
+    return n == null ? null : 'round:' + n;
+  });
+  scan(new RegExp('(' + NUM + ')\\s*(位|人|名|次|轮|分|票)', 'g'), m => {
+    const n = parseFactNumber(m[1]);
+    if (n == null) return null;
+    const cat = ({位:'person',人:'person',名:'person',次:'occurrence',轮:'round',分:'score_value',票:'vote'})[m[2]];
+    return 'count:' + cat + ':' + n;
+  });
+  scan(new RegExp('(?:第\\s*)?(' + NUM + ')\\s*类', 'g'), m => {
+    const n = parseFactNumber(m[1]);
+    return n == null ? null : 'class:' + n;
+  });
+
+  // Semantic framework labels are intentionally excluded from the hard fact channel.
+  scan(/\bLv[0-6]\b/gi, null);
+  scan(new RegExp('第\\s*(' + NUM + ')\\s*级', 'g'), null);
+  scan(/\bQ[1-4]\b/gi, null);
+  scan(new RegExp('第\\s*(' + NUM + ')\\s*象限', 'g'), null);
+  scan(/\bPhase\s*(?:I{1,3}|[1-3])\b/gi, null);
+  scan(new RegExp('第\\s*(' + NUM + ')\\s*阶段', 'g'), null);
+
+  let residual = '';
+  for (let i = 0; i < source.length; i++) residual += occupied[i] ? ' ' : source[i];
+  const generic = /(?<![A-Za-z0-9])[+-]?\d+(?:\.\d+)?(?![A-Za-z0-9])/g;
+  let gm;
+  while ((gm = generic.exec(residual)) !== null) atoms.push('number:' + Number(gm[0]));
+
+  return [...new Set(atoms.filter(Boolean))].sort();
+}
+
 function protectedTokens(text) {
-  const s = normalizeText(text);
-  const re = /\bM-[A-Za-z]+-\d+\b|\bCP-(?:[A-Za-z]+-)?\d+\b|\bN\d+\b|\bS\d+(?:\.\d+)?\b|(?<![A-Za-z0-9])\d+\s*[:：]\s*\d+(?![A-Za-z0-9])|(?<![A-Za-z0-9])\d+(?:\.\d+)?\s*[%％]?(?![A-Za-z0-9])/gi;
-  const identities = (s.match(re) || []).map(token => token.replace(/\s+/g, '').toLowerCase());
-  return [...new Set(identities)].sort();
+  return factIdentities(text);
 }
 
 function pushIssue(issues, code, message, detail) {
@@ -357,6 +442,8 @@ module.exports = {
   CONCEPTS,
   conceptMatches,
   internalMarkers,
+  parseFactNumber,
+  factIdentities,
   protectedTokens,
   inspectPlainText,
   inspectGuideCard,
