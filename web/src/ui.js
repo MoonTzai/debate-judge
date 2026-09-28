@@ -95,10 +95,10 @@
     },
     gate: {
       line: '你确定向圣堂申请裁决，并承受相应的代价吗？',
-      fee: '<b>费用</b>：建议按约<strong class="gate-risk-emphasis">120–180万 Token</strong>预留；最近一次全链路实测累计约161.6万 Token（含 R8 多次尝试/续跑成本）。比赛长度、模型与重试次数会影响消耗，复杂场次可能更高。',
-      time: '<b>耗时</b>：建议按约<strong class="gate-risk-emphasis">120–180分钟</strong>预留；最近一次全链路实测累计约142分钟（含 R8 多次尝试/续跑耗时）。可中途中止，已完成轮次的产物保存在本地缓存，但断点续跑仍不应视为绝对可靠。',
-      accuracy: '<b>AI 误差</b>：裁决由 AI 生成，可能存在错漏、误判或争议；结果仅供技术学习与辩论训练参考，不构成任何专业意见；使用须遵守相关法律法规。',
-      key: '<b>密钥</b>：API Key 仅保存在你的浏览器本地，但仍须提高安全意识，泄漏风险自负，请勿在公共机器使用。',
+      fee: '<b>费用</b>：最近完整全流程实测为<strong class="gate-risk-emphasis">45–60万 Token</strong>，仅供参考。实际消耗受比赛长度、所用模型、模型行为、重试及白话报告/章节导览影响，不同 LLM 可能明显更高；上述区间不是固定用量或上限，请留意账户余额。',
+      time: '<b>耗时</b>：最近完整全流程实测为<strong class="gate-risk-emphasis">45–90分钟</strong>，仅供参考。实际耗时受模型响应速度、比赛长度、重试及后处理影响，可能更长。可中途中止，已完成轮次的产物保存在本地缓存，但断点续跑仍不应视为绝对可靠。',
+      accuracy: '<b>AI 误差</b>：裁决由 AI 生成，可能存在错漏、误判或争议，因为机制设计，同一场比赛重跑也可能结果不同，结果仅供技术学习与辩论训练参考，不构成任何专业意见；使用须遵守相关法律法规。建议选择上下文长度不少于 1M tokens 的模型，否则长辩词或后续阶段可能因上下文不足而失败。',
+      key: '<b>密钥与接口</b>：API Key 保存在浏览器本地，调用时会发送给所配置的 API 服务方；请勿在公共机器使用。<b>优先使用模型厂商原厂 API，慎用第三方中转站或聚合平台</b>：其可能附加未知参数或流量限制，模型版本、上下文/输出上限、计费及隐私策略也可能不同，导致异常或失败；服务方还可能接触你的密钥和辩词。',
       enter: '🔱 进入圣堂',
       leave: '离开',
       leftNote: '圣堂之门已闭……愿你在门外想清楚再来。',
@@ -153,7 +153,7 @@
       thinkingHint: '思维链流程故障时可关闭，开启后模型先「思考」再作答（reasoning 内容不计入报告，只取最终回答，但会占用模型生成预算）。',
       thinkingJsonLabel: '思考参数 JSON（原样并入请求体，高级自定义）',
       thinkingJsonHint: '示例：DeepSeek 系 {"thinking":{"type":"enabled"},"thinking_budget":4096}；OpenAI 系 {"reasoning_effort":"medium"}。端点不支持时会自动降级为不附加（自适应保险）。',
-      costHint: '费用提示：完整全链路实际消耗可能达到百万级 Token，请以风险提示页的实测区间为参考并留意账户余额。默认单请求输出上限 384K；Judge 核心上下文硬门为 1M tokens（超限即停止，不裁剪降级）。「本地冒烟」= 不联网、用假数据跑通全流程。',
+      costHint: '费用提示：最近完整全流程实测为 45–60万 Token，仅供参考；不同 LLM、比赛长度、重试及后处理可能使实际消耗明显更高，该区间不是上限。请留意账户余额。默认单请求输出上限 384K；Judge 核心上下文硬门为 1M tokens（超限即停止，不裁剪降级）。「本地冒烟」= 不联网、用假数据跑通全流程。',
       testApi: '🔌 连通性测试',
       tendTitle: '⚖️ 裁判倾向（三维优先级与六向度看重程度)',
       tendH4a: '① 三维相对优先级（评委大倾向）+ 随机性',
@@ -483,6 +483,13 @@
     }
   };
 
+  // UI language is presentation-only; keep TXT and all pipeline values canonical.
+  var uiLocale = BUNDLE.modules.uiI18n().create({document: document, source: TXT});
+  function uiAlert(s) { return window.alert(uiLocale.message(s)); }
+  function uiConfirm(s) { return window.confirm(uiLocale.message(s)); }
+  function uiPrompt(s, value) { return window.prompt(uiLocale.message(s), value); }
+  function uiContent(s) { return '<span data-ui-content translate="no">' + esc(s) + '</span>'; }
+
   // ================= 状态 =================
   // 设置存储键带版本号：默认值修订时升版本，旧缓存自动弃用（API Key 另存，不受影响）
   var LS_KEY = 'judge_web_settings_v9';
@@ -504,6 +511,8 @@
   var abortController = null;
   var currentSession = null;   // {dir, title}
   var runEvidenceLines = [];   // 本次运行完整文本；DOM 的 800 行显示上限不裁剪导出。
+  var runEvidenceWorkDir = null; // Bind Debug to the visible run, never a previous report.
+  var debugExportBusy = false;
   var pendingResume = null;    // {dir}：历史断点已恢复到 VFS，但尚未开始任何 API
   var fetchManager = null;
   var modelListItems = [];
@@ -1098,9 +1107,13 @@
       '</div>' +
       '<div class="wrap">' +
       '  <header class="sanctum-rail">' +
-      '    <div class="brand shell-brand"><div><h1>' + TXT.brand.title + '</h1><div class="ver">' + TXT.brand.ver + '</div></div></div>' +
+      '    <div class="brand shell-brand"><div><h1>' + TXT.brand.title + '</h1><div class="ver">' + TXT.brand.ver + ' <span id="build-version">· 20260928-r2 / R8 v6</span></div></div></div>' +
       '    <div class="quest-tracker shell-stage" id="quest-tracker"><span class="qt-step" id="qt-step">' + TXT.top.questSteps[0] + '</span><span class="qt-name" id="qt-name">' + TXT.top.questNames[0] + '</span><span class="qt-dots" id="qt-dots"></span></div>' +
       '    <div class="topbtns shell-utilities">' +
+      '      <div class="ui-language-switch" role="group" aria-label="界面语言" title="切换界面语言；辩词、原始记录和报告正文保持原文">' +
+      '        <button class="btn" id="ui-lang-zh" type="button" lang="zh-CN" translate="no" aria-pressed="true">中文</button>' +
+      '        <button class="btn" id="ui-lang-en" type="button" lang="en" translate="no" aria-pressed="false">English</button>' +
+      '      </div>' +
       '      <button class="btn" id="btn-sessions">' + TXT.top.sessions + '</button>' +
       '      <button class="btn" id="btn-theme">' + TXT.top.themeDark + '</button>' +
       '      <button class="btn" id="btn-clear-cache">' + TXT.top.clearCache + '</button>' +
@@ -1309,7 +1322,7 @@
       '        <div class="timeline" id="timeline"></div>' +
       '      </section>' +
       '      <section class="work-surface tribunal-current" id="run-current-status" aria-live="polite">' +
-      '        <div class="surface-title">Current Status · 当前裁决</div>' +
+      '        <div class="surface-title">运行状态</div>' +
       '        <div class="tribunal-current-round" id="run-current-round">—</div>' +
       '        <div class="run-status-line" id="run-status"></div>' +
       '        <div class="tribunal-actions">' +
@@ -1319,12 +1332,12 @@
       '          <button class="btn" id="btn-back-run">' + TXT.run.backRun + '</button>' +
       '        </div>' +
       '        <div class="tribunal-evidence">' +
-      '          <div class="evidence-heading"><div class="surface-subtitle">Log / Evidence</div><button class="btn small" id="btn-export-log" type="button" disabled>导出日志</button></div>' +
+      '          <div class="evidence-heading"><div class="surface-subtitle">运行日志 / 证据</div><div class="evidence-actions"><button class="btn small" id="btn-export-log" type="button" disabled>导出日志</button><button class="btn small" id="btn-export-debug" type="button" disabled>导出 Debug</button></div></div>' +
       '          <div class="logbox" id="logbox"></div>' +
       '        </div>' +
       '      </section>' +
       '      <aside class="work-surface tribunal-telemetry" id="run-telemetry" aria-label="运行遥测">' +
-      '        <div class="surface-title">Telemetry</div>' +
+      '        <div class="surface-title">运行统计</div>' +
       '        <div class="progress-note tribunal-telemetry-list"><span id="pn-live"></span><span id="pn-rounds"></span><span id="pn-retries"></span><span id="pn-anchor"></span></div>' +
       '      </aside>' +
       '    </div>' +
@@ -1568,7 +1581,7 @@
       refreshJudgeContextSummary();
       return true;
     } catch (e) {
-      if (showError) alert(TXT.ctx.invalid + e.message);
+      if (showError) uiAlert(TXT.ctx.invalid + e.message);
       return false;
     }
   }
@@ -1584,9 +1597,9 @@
   function applyTendencyProfilePayload(payload) {
     var profile;
     try { profile = tendencyMod.normalizeTendencyProfile(payload); }
-    catch (e) { alert(TXT.setup.tendProfileInvalid + e.message); return false; }
+    catch (e) { uiAlert(TXT.setup.tendProfileInvalid + e.message); return false; }
     var confirmTail = profile.dimWeights ? TXT.setup.tendProfileConfirmV2Tail : TXT.setup.tendProfileConfirmV1Tail;
-    if (!confirm(TXT.setup.tendProfileConfirmPre + tendencyProfileLabel(profile) + confirmTail)) return false;
+    if (!uiConfirm(TXT.setup.tendProfileConfirmPre + tendencyProfileLabel(profile) + confirmTail)) return false;
     var next = {};
     for (var i = 0; i < TEND_DIMS.length; i++) next[TEND_DIMS[i]] = profile.vectorWeights[TEND_DIMS[i]];
     settings.tendencyWeights = next;
@@ -1596,15 +1609,15 @@
     }
     saveSettings();
     renderTendency();
-    alert(profile.dimWeights ? TXT.setup.tendProfileAppliedV2 : TXT.setup.tendProfileAppliedV1);
+    uiAlert(profile.dimWeights ? TXT.setup.tendProfileAppliedV2 : TXT.setup.tendProfileAppliedV1);
     return true;
   }
   function applyLocalTendencyProfile() {
     var raw = null;
     try { raw = localStorage.getItem(TENDENCY_PROFILE_V2_LS_KEY) || localStorage.getItem(TENDENCY_PROFILE_LS_KEY); } catch (e) {}
-    if (!raw) { alert(TXT.setup.tendProfileNone); return; }
+    if (!raw) { uiAlert(TXT.setup.tendProfileNone); return; }
     try { applyTendencyProfilePayload(JSON.parse(raw)); }
-    catch (e) { alert(TXT.setup.tendProfileInvalid + e.message); }
+    catch (e) { uiAlert(TXT.setup.tendProfileInvalid + e.message); }
   }
 
   // ================= 轮次时间线 / 日志 =================
@@ -1769,9 +1782,11 @@
   }
   function clearRunEvidence() {
     runEvidenceLines = [];
+    runEvidenceWorkDir = null;
     $('logbox').innerHTML = '';
     var button = $('btn-export-log');
     if (button) button.disabled = true;
+    if ($('btn-export-debug')) $('btn-export-debug').disabled = true;
   }
   function exportRunEvidence() {
     if (!runEvidenceLines.length) return;
@@ -1784,6 +1799,7 @@
     runEvidenceLines.push(text);
     var button = $('btn-export-log');
     if (button) button.disabled = false;
+    if ($('btn-export-debug') && !debugExportBusy) $('btn-export-debug').disabled = false;
     var box = $('logbox');
     if (!box) return;
     var line = document.createElement('div');
@@ -1824,17 +1840,17 @@
     ov.className = 'overlay';
     var sideHtml = function (side, team) {
       var rows = anchor.roster.filter(function (r) { return r.side === side; })
-        .map(function (r) { return '<li>' + esc(r.role) + '　' + esc(r.name || TXT.roster.roleLabel) + '</li>'; }).join('');
-      return '<div class="roster-side"><h4>' + esc(side) + '　' + esc(team || '') + '</h4><ul>' + (rows || '<li>' + TXT.roster.emptySide + '</li>') + '</ul></div>';
+        .map(function (r) { return '<li>' + '<span>' + esc(r.role) + '</span>　' + uiContent(r.name || TXT.roster.roleLabel) + '</li>'; }).join('');
+      return '<div class="roster-side"><h4>' + '<span>' + esc(side) + '</span>　' + uiContent(team || '') + '</h4><ul>' + (rows || '<li>' + TXT.roster.emptySide + '</li>') + '</ul></div>';
     };
     ov.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="roster-modal-title">' +
       '<h2 id="roster-modal-title">' + TXT.roster.title + '</h2>' +
-      '<div class="msub">' + TXT.roster.topic + esc(anchor.title || TXT.roster.unknown) + TXT.roster.integrity + esc(anchor.integrity || '') + '</div>' +
-      ((anchor.typeA || anchor.typeB) ? '<div class="roster-alert">' + TXT.roster.alert + (anchor.typeA ? TXT.roster.typeA : '') + (anchor.typeB ? TXT.roster.typeB : '') + TXT.roster.alertTail + '</div>' : '') +
+      '<div data-ui-summary class="msub">' + TXT.roster.topic + uiContent(anchor.title || TXT.roster.unknown) + TXT.roster.integrity + uiContent(anchor.integrity || '') + '</div>' +
+      ((anchor.typeA || anchor.typeB) ? '<div data-ui-summary class="roster-alert">' + TXT.roster.alert + (anchor.typeA ? TXT.roster.typeA : '') + (anchor.typeB ? TXT.roster.typeB : '') + TXT.roster.alertTail + '</div>' : '') +
       '<div class="roster-grid">' + sideHtml('正方', anchor.proTeam) + sideHtml('反方', anchor.conTeam) + '</div>' +
-      '<div class="msub">' + TXT.roster.bench + (anchor.bench && anchor.bench.length ? anchor.bench.map(function (b) { return esc(b.name); }).join('、') : TXT.roster.none) +
-      TXT.roster.otherSpeakers + (anchor.other_speakers && anchor.other_speakers.length ? anchor.other_speakers.map(function (o) { return esc(o.name) + '（' + esc(o.category) + '）'; }).join('、') : TXT.roster.none) + '</div>' +
-      (anchor.warnings && anchor.warnings.length ? '<div class="msub" style="color:var(--gold)">' + TXT.roster.warn + esc(anchor.warnings.join('；')) + '</div>' : '') +
+      '<div data-ui-summary class="msub">' + TXT.roster.bench + (anchor.bench && anchor.bench.length ? anchor.bench.map(function (b) { return uiContent(b.name); }).join('、') : TXT.roster.none) +
+      TXT.roster.otherSpeakers + (anchor.other_speakers && anchor.other_speakers.length ? anchor.other_speakers.map(function (o) { return uiContent(o.name) + '（' + uiContent(o.category) + '）'; }).join('、') : TXT.roster.none) + '</div>' +
+      (anchor.warnings && anchor.warnings.length ? '<div data-ui-summary class="msub" style="color:var(--gold)">' + TXT.roster.warn + uiContent(anchor.warnings.join('；')) + '</div>' : '') +
       '<div class="modal-btns">' +
       '<button class="btn" id="roster-edit">' + TXT.roster.edit + '</button>' +
       '<button class="btn" id="roster-abort">' + TXT.roster.abort + '</button>' +
@@ -1855,7 +1871,7 @@
         removeTransientLayer(ov);
         resolve({ action: 'edit', editedAnchor: edited });
       } catch (e) {
-        alert(TXT.roster.jsonInvalid + e.message);
+        uiAlert(TXT.roster.jsonInvalid + e.message);
       }
     };
   }
@@ -1972,7 +1988,7 @@
       // W-T1/R8：把当前三件私有 R8 状态作为一个整体覆盖记录持久化；缺失项写 null 墓碑，
       // 防止 guide draft → core cache → plain draft 演进时旧私有文件在恢复合并后被“复活”。
       var r8Snapshot = engine.snapshotSession(workDir);
-      var r8Names = ['.tmp-reader-guide-draft.json', '.tmp-reader-guide-cache.json', '.tmp-reader-guide-plain-draft.json'];
+      var r8Names = ['.tmp-reader-guide-draft.json', '.tmp-reader-guide-cache.json', '.tmp-reader-guide-plain-draft.json', '.tmp-reader-guide-review.json', '.analysis-review.json'];
       var r8Files = {};
       for (var r8i = 0; r8i < r8Names.length; r8i++) {
         var r8Path = workDir + '/' + r8Names[r8i];
@@ -2097,6 +2113,33 @@
     if (items.length) return mergeFileRecords(items);
     var rec = await idbGet(dir);
     return rec && rec.files ? rec.files : null;
+  }
+  // One readonly transaction binds durable metadata and checkpoint files. Live
+  // VFS is captured separately; neither is restored, migrated or rewritten here.
+  function readDebugSessionSnapshot(dir) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction([DB_STORE, 'sessionFiles'], 'readonly');
+        var sessionRequest = tx.objectStore(DB_STORE).get(dir);
+        var filesRequest = tx.objectStore('sessionFiles').getAll();
+        tx.oncomplete = function () {
+          var session = sessionRequest.result || null;
+          var rows = filesRequest.result || [];
+          var checkpoints = rows.filter(function (row) { return row.id.indexOf(dir + '#') === 0; });
+          var versions = rows.filter(function (row) { return row.kind === 'judge-session-version-v1' && row.sessionId === dir; });
+          var files = checkpoints.length ? mergeFileRecords(checkpoints) : session && session.files || {};
+          function scopedFiles(source) {
+            var out = {};
+            Object.keys(source || {}).forEach(function (name) { if (name.indexOf(dir + '/') === 0) out[name] = source[name]; });
+            return out;
+          }
+          checkpoints.concat(versions).forEach(function (row) { row.files = scopedFiles(row.files); });
+          if (session) delete session.files; // Legacy inline files are represented by files below.
+          resolve({ session: session, files: scopedFiles(files), checkpoints: checkpoints, versions: versions });
+        };
+        tx.onerror = tx.onabort = function () { reject(tx.error || new Error('Debug snapshot read failed')); };
+      });
+    });
   }
   // ================= W-T5：run 徽章 / 断点预览 / 迁移（UI 投影层消费侧） =================
   // 徽章状态词与 si-meta 状态词语义不同，须独立键（R17-1）；未知值透传原文
@@ -2331,17 +2374,17 @@
     $('fr-export-all').onclick = exportSelectedFlightRecords;
     $('fr-persist').onclick = function () {
       if (!flightRecorder) return;
-      flightRecorder.requestPersistence().then(function (ok) { alert(ok ? TXT.flight.persistGranted : TXT.flight.persistDenied); });
+      flightRecorder.requestPersistence().then(function (ok) { uiAlert(ok ? TXT.flight.persistGranted : TXT.flight.persistDenied); });
     };
     $('fr-clear').onclick = function () {
-      if (!flightRecorder || !confirm(TXT.flight.clearConfirm)) return;
+      if (!flightRecorder || !uiConfirm(TXT.flight.clearConfirm)) return;
       flightRecorder.clearAll().then(function () { refreshArchiveFlight(); });
     };
     $('btn-history-limit').onclick = function () {
       var next = historyGovernance.normalizeRetentionLimit(number.value);
       idbAll().then(function (list) {
         var victims = historyGovernance.selectEvictionVictims(list, next, {});
-        if (victims.length && !confirm(TXT.sess.retentionConfirmPre + list.length + TXT.sess.retentionConfirmMid + victims.length + TXT.sess.retentionConfirmTail)) return;
+        if (victims.length && !uiConfirm(TXT.sess.retentionConfirmPre + list.length + TXT.sess.retentionConfirmMid + victims.length + TXT.sess.retentionConfirmTail)) return;
         historyPolicy.maxSessions = next;
         saveHistoryPolicy();
         range.value = number.value = next;
@@ -2353,20 +2396,20 @@
     };
     $('btn-history-orphans').onclick = function () {
       idbScanOrphans().then(function (orphans) {
-        if (!orphans.length) { alert(TXT.sess.orphanNone); return; }
-        if (!confirm(TXT.sess.orphanConfirmPre + orphans.length + TXT.sess.orphanConfirmTail)) return;
-        return idbCleanupOrphans(orphans).then(function (n) { alert(TXT.sess.orphanDone + n); refreshHistoryManager(); });
-      }).catch(function (e) { alert(String(e && e.message || e)); });
+        if (!orphans.length) { uiAlert(TXT.sess.orphanNone); return; }
+        if (!uiConfirm(TXT.sess.orphanConfirmPre + orphans.length + TXT.sess.orphanConfirmTail)) return;
+        return idbCleanupOrphans(orphans).then(function (n) { uiAlert(TXT.sess.orphanDone + n); refreshHistoryManager(); });
+      }).catch(function (e) { uiAlert(String(e && e.message || e)); });
     };
     $('btn-history-clear').onclick = function () {
-      if (!confirm(TXT.sess.clearJudgeConfirm)) return;
+      if (!uiConfirm(TXT.sess.clearJudgeConfirm)) return;
       idbAll().then(function (list) {
         return idbClearAllHistory().then(function () {
           if (engine) list.forEach(function (s) { engine.removeSession(s.dir || s.id); });
           currentSession = null;
           refreshHistoryManager();
         });
-      }).catch(function (e) { alert(String(e && e.message || e)); });
+      }).catch(function (e) { uiAlert(String(e && e.message || e)); });
     };
     selectArchiveTab(initialTab);
     refreshHistoryManager();
@@ -2399,7 +2442,7 @@
       var run = s.run || engine.buildRunModelFromFiles(s.dir, await getSessionFilesReadOnly(s.dir) || {});
       return await dumpMeta(run);
     } catch (e) {
-      alert('元数据导出失败：' + (e && e.message ? e.message : e));
+      uiAlert('元数据导出失败：' + (e && e.message ? e.message : e));
       return { ok: false, error: e };
     }
   }
@@ -2422,7 +2465,7 @@
   }
   function viewSessionVersion(version, displayIndex) {
     var html = versionReportHtml(version);
-    if (!html) { alert('该只读版本没有 report.html。'); return; }
+    if (!html) { uiAlert('该只读版本没有 report.html。'); return; }
     closeHistoryManager();
     // 旧版本属于 Judge 自产可信文档，但 workDir=null：可阅读/章节导航，不具备 Run 返回、续跑或会话导出 authority。
     showReport(html, null, 'internal', '只读历史版本 v' + String(displayIndex || 1));
@@ -2535,7 +2578,7 @@
     el.querySelector('[data-archive-act=export]').onclick = function () { exportSessionRecord(s); };
     el.querySelector('[data-archive-act=meta]').onclick = function () { exportSessionRunMeta(s); };
     el.querySelector('[data-archive-act=rename]').onclick = function () {
-      var nt = prompt(TXT.sess.renamePrompt, s.title);
+      var nt = uiPrompt(TXT.sess.renamePrompt, s.title);
       if (nt && nt !== s.title) {
         s.title = nt;
         idbPut(s).then(function () {
@@ -2546,13 +2589,13 @@
     };
     renderSessionVersions(s, el.querySelector('[data-archive-versions]'));
     el.querySelector('[data-archive-act=delete]').onclick = function () {
-      if (!confirm(TXT.sess.delConfirm + s.title + TXT.sess.delConfirmTail)) return;
+      if (!uiConfirm(TXT.sess.delConfirm + s.title + TXT.sess.delConfirmTail)) return;
       idbDeleteSessionComplete(s.id).then(function () {
         if (engine) engine.removeSession(s.dir || s.id);
         if (currentSession && currentSession.dir === s.dir) currentSession = null;
         archiveSelectedSessionId = null;
         refreshHistoryManager();
-      }).catch(function (e) { alert(String(e && e.message || e)); });
+      }).catch(function (e) { uiAlert(String(e && e.message || e)); });
     };
   }
   function refreshSessionList() {
@@ -2562,7 +2605,7 @@
       list.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
       var visible = list.filter(function (s) {
         if (!archiveSearchQuery) return true;
-        var haystack = [s.title, statusWord(s.status), s.status, s.updatedAt].join(' ').toLowerCase();
+        var haystack = [s.title, statusWord(s.status), uiLocale.translate(statusWord(s.status), false), s.status, s.updatedAt].join(' ').toLowerCase();
         return haystack.indexOf(archiveSearchQuery) >= 0;
       });
       archiveVisibleCount = visible.length;
@@ -2643,6 +2686,7 @@
     if (!settings.plain) roundState.R7 = 'skipped';
     if (settings.readerGuide !== true) roundState.R8 = 'skipped';
     clearRunEvidence();
+    runEvidenceWorkDir = s.dir;
     showScene('run');
     renderTimeline(null);
     setTribunalCurrentRound(null, TXT.run.resumeReady);
@@ -2661,7 +2705,7 @@
     if (running) return;
     if (!engine) initEngine();
     var files = await getSessionFiles(s.dir);   // C5：v2 经 sessionFiles 合并恢复（v1 惰性迁移）
-    if (!files) { alert(TXT.sess.noReport); return; }
+    if (!files) { uiAlert(TXT.sess.noReport); return; }
     // 历史 session 快照是续跑 authority；restore 前先清同 workDir VFS，避免旧内存残留补回磁盘快照已不存在的下游产物。
     engine.removeSession(s.dir);
     engine.restoreSession(files);
@@ -2675,20 +2719,20 @@
   async function exportSessionRecord(s) {
     try {
       var files = await getSessionFiles(s.dir);
-      if (!files) { alert(TXT.sess.noSession); return; }
+      if (!files) { uiAlert(TXT.sess.noSession); return; }
       var payload = { kind: 'judge-web-session-v1', exportedAt: new Date().toISOString(), workDir: s.dir, files: files, settings: s.settings || settings };
       await exportFile(TXT.sess.sessionFile + tsName() + '.json', JSON.stringify(payload, null, 2), 'application/json', { kind: 'history-session' });
-    } catch (e) { alert(String(e && e.message || e)); }
+    } catch (e) { uiAlert(String(e && e.message || e)); }
   }
   async function viewSavedSessionReport(s) {
     if (!engine) initEngine();
     var files = await getSessionFilesReadOnly(s.dir);   // 严格只读：不迁移、不重建、不写 Judge history。
-    if (!files) { alert(TXT.sess.noSession); return; }
+    if (!files) { uiAlert(TXT.sess.noSession); return; }
     var workDir = s.dir;
     var reportPath = String(workDir || '').replace(/\/+$/, '') + '/report.html';
     var html = files[reportPath];
     if (typeof html !== 'string' || !html.trim()) {
-      alert('该历史会话没有现成 report.html；“查看报告”不会自动重新生成。');
+      uiAlert('该历史会话没有现成 report.html；“查看报告”不会自动重新生成。');
       return;
     }
     // 仅同步浏览器内存 VFS，保证该 report 的同 workDir 导出读取同一历史快照；不改变 currentSession / Run authority。
@@ -2700,7 +2744,7 @@
   async function reissueSessionReport(s) {
     if (!engine) initEngine();
     var files = await getSessionFilesReadOnly(s.dir);   // 纯读取正式 Judge session；Recorder 与 v1 惰性迁移都不参与。
-    if (!files) { alert(TXT.sess.noSession); return; }
+    if (!files) { uiAlert(TXT.sess.noSession); return; }
     var workDir = s.dir;
     // restore 是覆盖式而非镜像式；必须先清同 workDir 旧 VFS，防缺失正式产物被内存残留假满足。
     engine.removeSession(workDir);
@@ -2716,7 +2760,7 @@
       currentSession = { dir: workDir, title: s.title, createdAt: s.createdAt };
       showReport(html, workDir);
     } catch (e) {
-      alert(TXT.sess.noReport + (e && e.message ? e.message : e));
+      uiAlert(TXT.sess.noReport + (e && e.message ? e.message : e));
     }
   }
 
@@ -2763,10 +2807,10 @@
     var winner = summary.winner || '裁决已生成';
     var why = summary.why || '';
     var clash = summary.keyClash || '';
-    el.innerHTML = '<div class="report-cover-kicker">Verdict</div><h2>' + esc(winner) + '</h2>' +
+    el.innerHTML = '<div class="report-cover-kicker">Verdict</div><h2>' + uiContent(winner) + '</h2>' +
       (summary.reportTitle ? '<div class="report-cover-title">' + esc(summary.reportTitle) + '</div>' : '') +
-      (why ? '<div class="report-cover-reason"><b>为什么：</b>' + esc(why) + '</div>' : '<div class="report-cover-reason"><button class="btn small" data-report-jump="C1">查看 C1</button></div>') +
-      (clash ? '<div class="report-cover-clash"><b>关键交锋：</b>' + esc(clash) + '</div>' : '<div class="report-cover-clash"><button class="btn small" data-report-jump="C6">查看 C6 关键交锋</button></div>');
+      (why ? '<div class="report-cover-reason"><b>为什么：</b>' + uiContent(why) + '</div>' : '<div class="report-cover-reason"><button class="btn small" data-report-jump="C1">查看 C1</button></div>') +
+      (clash ? '<div class="report-cover-clash"><b>关键交锋：</b>' + uiContent(clash) + '</div>' : '<div class="report-cover-clash"><button class="btn small" data-report-jump="C6">查看 C6 关键交锋</button></div>');
     Array.prototype.forEach.call(el.querySelectorAll('[data-report-jump]'), function (btn) {
       btn.onclick = function () { navigateReportSection(btn.getAttribute('data-report-jump'), true); };
     });
@@ -2851,7 +2895,7 @@
     if (!reportHost) reportHost = reportHostMod.createReportHost({
       frame: $('report-frame'),
       exportFile: function (blob, filename, meta) { return judgeHostIO.saveBlob(blob, filename, meta || { kind: 'hosted-report-download' }); },
-      onExportError: function (e) { alert('报告内部导出失败：' + (e && e.message ? e.message : e)); },
+      onExportError: function (e) { uiAlert('报告内部导出失败：' + (e && e.message ? e.message : e)); },
       onReady: function (doc) {
         if (doc && doc.trust === 'internal' && reportHost) {
           reportHost.setTheme(settings.theme);
@@ -2947,7 +2991,7 @@
       if (result === false || (result && result.ok === false)) throw new Error(result && result.error ? String(result.error.message || result.error) : '保存未完成');
       return result;
     }).catch(function (e) {
-      alert('导出失败：' + (e && e.message ? e.message : e));
+      uiAlert('导出失败：' + (e && e.message ? e.message : e));
       return { ok: false, error: e };
     });
   }
@@ -3044,7 +3088,7 @@
       host.innerHTML = list.map(function (s) {
         var checked = archiveFlightSelectedSessionIds[s.id] ? ' checked' : '';
         var workDir = s.dir || s.id || '';
-        return '<label class="archive-flight-session-option"><input type="checkbox" value="' + esc(s.id) + '"' + checked + '><span><b>' + esc(s.title || workDir) + '</b><small>' + esc(workDir) + ' · ' + esc(statusWord(s.status)) + '</small></span></label>';
+        return '<label class="archive-flight-session-option"><input type="checkbox" value="' + esc(s.id) + '"' + checked + '><span><b>' + esc(s.title || workDir) + '</b><small>' + uiContent(workDir) + ' · <span>' + esc(statusWord(s.status)) + '</span>' + '</small></span></label>';
       }).join('');
       Array.prototype.forEach.call(host.querySelectorAll('input[type=checkbox]'), function (box) {
         box.onchange = function () { archiveFlightSelectedSessionIds[box.value] = !!box.checked; updateFlightExportSelectionState(); };
@@ -3056,6 +3100,91 @@
       updateFlightExportSelectionState();
       return [];
     });
+  }
+  async function collectDebugFlightSource(workDir, sessionRecord, readErrors) {
+    var source = { sessionRecord: sessionRecord || { id: workDir, dir: workDir }, runModel: sessionRecord && sessionRecord.run || null, flightRuns: [] };
+    if (!workDir || !flightRecorder) return source;
+    try {
+      var runs = (await flightRecorder.listRuns()).filter(function (r) { return r && r.workDir === workDir; });
+      runs.sort(function (a, b) { return String(a.startedAt || '').localeCompare(String(b.startedAt || '')); });
+      for (var ri = 0; ri < runs.length; ri++) {
+        var runSource = { run: runs[ri], requests: [] };
+        source.flightRuns.push(runSource);
+        try {
+          var reqs = await flightRecorder.listRequests(runs[ri].id);
+          for (var qi = 0; qi < reqs.length; qi++) {
+            var req = reqs[qi], artifact = null, readError = null;
+            try { artifact = await flightRecorder.getRequestArtifact(req.id); }
+            catch (e) { readError = String(e && e.message || e); }
+            runSource.requests.push({
+              record: artifact && artifact.request || req,
+              requestText: artifact && artifact.request ? artifact.requestText : String(req.requestBodyText || ''),
+              rawBytes: artifact && artifact.rawBytes || new Uint8Array(0),
+              actualRawBytes: artifact && artifact.actualRawBytes || 0,
+              actualChunkCount: artifact && artifact.actualChunkCount || 0,
+              readError: readError || artifact && artifact.readError || null
+            });
+          }
+        } catch (e) { readErrors.push({ scope: 'flight-run', runId: runs[ri].id, error: String(e && e.message || e) }); }
+      }
+    } catch (e) { readErrors.push({ scope: 'flight-recorder', error: String(e && e.message || e) }); }
+    return source;
+  }
+  async function exportCurrentDebugBundle() {
+    if (debugExportBusy) return;
+    debugExportBusy = true;
+    var button = $('btn-export-debug');
+    if (button) button.disabled = true;
+    try {
+      if (!flightExportMod || !flightExportMod.buildDebugExportArchive) throw new Error('Debug export module unavailable');
+      // Capture visible-run context before the first await; a run can complete
+      // or the user can open another scene while IndexedDB is being read.
+      var workDir = runEvidenceWorkDir || '';
+      var exportedAt = new Date().toISOString(), wasRunning = running;
+      var liveFiles = workDir && engine ? engine.snapshotSession(workDir) : {};
+      var liveFilesUsed = Object.keys(liveFiles).length > 0;
+      var logText = runEvidenceLines.join('\n') + (runEvidenceLines.length ? '\n' : '');
+      var settingsCopy = JSON.parse(JSON.stringify(settings));
+      var telemetry = { roundState: Object.assign({}, roundState), retryCount: retryCount,
+        elapsedMs: wasRunning && runStartAt ? Date.now() - runStartAt : null,
+        estimatedRunTokens: currentRunEstimatedTokens(), estimatedSessionTokens: currentSessionEstimatedTokens(),
+        liveProgress: liveProgress ? Object.assign({}, liveProgress) : null,
+        visible: $('pn-live') ? $('pn-live').textContent : null };
+      var environment = { edition: 'Semantic', build: '20260928-r2 / R8 v6', title: document.title,
+        uiLocale: document.documentElement.lang || null,
+        browser: navigator.userAgent, flightWarning: flightRecorderWarning || null };
+      var secrets = Object.keys(API_KEYS).map(function (key) { return API_KEYS[key]; }).concat([API_KEY]);
+      var pendingBytes = flightRecorder && flightRecorder.getPendingBytes ? flightRecorder.getPendingBytes() : 0;
+      var readErrors = [], snapshot = null;
+      if (workDir) {
+        try { snapshot = await readDebugSessionSnapshot(workDir); }
+        catch (e) { readErrors.push({ scope: 'judge-storage', error: String(e && e.message || e) }); }
+      }
+      var files = liveFilesUsed ? liveFiles : snapshot && snapshot.files || {};
+      var sessionRecord = snapshot && snapshot.session || { id: workDir, dir: workDir, status: wasRunning ? 'running' : 'unknown' };
+      var runModel = null;
+      if (workDir && engine && Object.keys(files).length) {
+        try { runModel = engine.buildRunModelFromFiles(workDir, files, { plain: !!settingsCopy.plain }); }
+        catch (e) { readErrors.push({ scope: 'run-model', error: String(e && e.message || e) }); }
+      }
+      // Read only bytes already in the recorder. Do not wait for an ongoing
+      // stream to finish or make export a prerequisite for the next API call.
+      var flightSource = await collectDebugFlightSource(workDir, sessionRecord, readErrors);
+      var archive = flightExportMod.buildDebugExportArchive({
+        workDir: workDir, exportedAt: exportedAt, captureFinishedAt: new Date().toISOString(),
+        captureState: wasRunning ? 'live/intermediate' : 'current-view', liveFilesUsed: liveFilesUsed,
+        files: files, sessionRecord: sessionRecord, runModel: runModel, settings: settingsCopy,
+        persistedSnapshot: snapshot ? { session: snapshot.session, files: snapshot.files, checkpoints: snapshot.checkpoints } : null,
+        versions: snapshot && snapshot.versions || [], logText: logText, telemetry: telemetry,
+        environment: environment, flightSource: flightSource, pendingFlightBytes: pendingBytes,
+        readErrors: readErrors, secrets: secrets
+      });
+      await exportFile('Judge-Debug-Bundle-' + tsName() + '.zip', archive.bytes, 'application/zip', { kind: 'judge-debug-bundle', workDir: workDir });
+    } catch (e) { uiAlert('Debug 导出失败：' + (e && e.message || e)); }
+    finally {
+      debugExportBusy = false;
+      if (button) button.disabled = !runEvidenceLines.length && !runEvidenceWorkDir;
+    }
   }
   async function exportSelectedFlightRecords() {
     var status = $('fr-export-status');
@@ -3157,7 +3286,7 @@
           var ordinal = ordinals[run.id] || '—';
           var shortRunId = String(run.id || '').slice(-12);
           html += '<div class="card archive-flight-run"><div class="card-b" style="display:block">' +
-            '<div class="archive-flight-run-title">本场运行 ' + esc(ordinal) + ' · ' + esc(formatFlightRunRange(run)) + ' · ' + esc(g.requests.length) + ' requests</div>' +
+            '<div data-ui-summary class="archive-flight-run-title">本场运行 ' + esc(ordinal) + ' · ' + esc(formatFlightRunRange(run)) + ' · ' + esc(g.requests.length) + ' requests</div>' +
             '<div class="hint" style="user-select:text">' + esc(run.provider || '') + ' · ' + esc(run.model || '') + ' · ' + esc(run.status || '') +
             (run.captureTruncated ? ' · ⚠ capture_truncated' : '') + '</div>' +
             '<div class="hint" style="user-select:text;margin-top:3px">workDir: ' + esc(run.workDir || '—') + ' · runId: ' + esc(shortRunId || '—') + '</div>';
@@ -3185,7 +3314,7 @@
             var requestId = btn.getAttribute('data-fr-id');
             var kind = btn.getAttribute('data-fr-export');
             flightRecorder.getRequestArtifact(requestId).then(function (a) {
-              if (!a || !a.request) { alert('飞行记录读取失败'); return; }
+              if (!a || !a.request) { uiAlert('飞行记录读取失败'); return; }
               var base = 'judge-web-flight-' + String(a.request.runId || 'run').replace(/[^A-Za-z0-9._-]/g, '_') + '-r' + a.request.index;
               if (kind === 'request') exportFile(base + '-request.json', a.requestText, 'application/json', { kind: 'flight-request' });
               else if (kind === 'raw') exportFile(base + '-response.sse.raw', a.rawBytes, 'application/octet-stream', { kind: 'flight-raw' });
@@ -3382,14 +3511,14 @@
         '<code style="font-size:13px;user-select:text;overflow-wrap:anywhere">' + esc(id) + '</code>' +
         '<span style="display:flex;gap:6px"><button class="btn small model-use" type="button" data-model="' + esc(id) + '">' + TXT.setup.modelUse + '</button>' +
         '<button class="btn small model-copy" type="button" data-model="' + esc(id) + '">' + TXT.setup.modelCopy + '</button></span></div>' +
-        (meta.length ? '<div class="hint" style="margin-top:5px">' + meta.map(esc).join(' · ') + '</div>' : '') +
+        (meta.length ? '<div class="hint" style="margin-top:5px">' + meta.map(function (part) { return part.indexOf('所属：') === 0 ? '<span>所属：</span>' + uiContent(part.slice(3)) : '<span data-ui-summary>' + esc(part) + '</span>'; }).join(' · ') + '</div>' : '') +
         '</div>';
     }).join('');
   }
   function copyModelText(text, button) {
     function done() {
       if (!button) return;
-      var old = button.textContent;
+      var old = uiLocale.originalText(button);
       button.textContent = TXT.setup.modelCopied;
       setTimeout(function () { button.textContent = old; }, 1200);
     }
@@ -3478,10 +3607,10 @@
       transcript = resumeText;
       $('transcript').value = transcript;
     }
-    if (!transcript.trim()) { alert(TXT.alert.noTranscript); return; }
+    if (!transcript.trim()) { uiAlert(TXT.alert.noTranscript); return; }
     if (!commitJudgeContextFromForm(true)) return;
     readFormSettings();
-    if (settings.provider !== 'mock' && !API_KEY) { alert(TXT.alert.noKey); return; }
+    if (settings.provider !== 'mock' && !API_KEY) { uiAlert(TXT.alert.noKey); return; }
 
     // “本次累计”每次启动从 0 计；“本场累计”以同一 workDir 的历史持久值为基线。
     // 旧会话没有 estimatedTokensTotal 时，尝试用 Flight Recorder 同 workDir 的正文/思考字数按同一估算公式回填；
@@ -3510,7 +3639,7 @@
         var savedVersion = await idbCreateSessionVersionSnapshot(versionSession, versionFiles);
         opts.resumeVersionId = savedVersion.versionId;
       } catch (versionErr) {
-        alert('定点续跑未启动：旧版本归档失败。' + (versionErr && versionErr.message ? versionErr.message : versionErr));
+        uiAlert('定点续跑未启动：旧版本归档失败。' + (versionErr && versionErr.message ? versionErr.message : versionErr));
         return;
       }
     }
@@ -3612,6 +3741,7 @@
         },
         persist: function (step, payload) {
           var dir = payload && payload.workDir ? payload.workDir : null;
+          if (dir) runEvidenceWorkDir = dir;
           if (dir && !currentSession) currentSession = { dir: dir, title: dir.split('/').pop(), createdAt: new Date().toISOString() };
           // W-T5（U6，R7-A2）：persist 钩子 = rec.run 唯一写入口——pipeline-done/error 两时点带 patch（含 !res.ok 门禁耗尽失败路径——
           // engine L313-315 在 !res.ok 时也调 persist('pipeline-done')，无 L1188-1190 分支补写）；round-done/start 不带 patch（不写 rec.run）
@@ -3635,7 +3765,7 @@
               return persistSession(dir, { filesOp: 'plain-state', phase: checkpointPhase });
             }
             if (checkpointPhase === 'r8-guide-draft' || checkpointPhase === 'r8-core-cache' || checkpointPhase === 'r8-plain-draft' ||
-                checkpointPhase === 'r8-plain-review' || checkpointPhase === 'r8-plain-repair-draft') {
+                checkpointPhase === 'r8-plain-review' || checkpointPhase === 'r8-plain-repair-draft' || checkpointPhase === 'r8-upstream-review') {
               return persistSession(dir, { filesOp: 'r8-checkpoint', phase: checkpointPhase });
             }
             return persistSession(dir, { filesOp: 'plain-batch', batchIndex: payload && payload.index });
@@ -3660,8 +3790,8 @@
       if (res.aborted) {
         $('run-status').textContent = TXT.run.statusAborted;
         logLine(TXT.run.logAborted);
-      } else if (!res.ok && res.postprocessFailed && res.semanticOk && !res.persistenceFailed) {
-        $('run-status').textContent = '主报告已生成；R8 章节导览待处理';
+      } else if (!res.ok && res.postprocessFailed && (res.semanticOk || res.upstreamReviewPending) && !res.persistenceFailed) {
+        $('run-status').textContent = res.upstreamReviewPending ? '报告已保存；上游判断仍待核对，详见日志' : '主报告已生成；R8 章节导览待处理';
         logLine('R8 尚未完成：' + (res.error || '请查看复核记录'));
         logLine((res.reportPlain ? '主报告和白话报告已保存' : '主报告已保存') + '，可从历史记录查看；R8 问题按其实际影响处理。');
       } else if (!res.ok) {
@@ -3728,9 +3858,9 @@
     var el = $('upload-config-summary');
     if (!el) return;
     var providerEl = $('cfg-provider'), modelEl = $('cfg-model'), thinkingEl = $('cfg-thinking');
-    var provider = providerEl && providerEl.selectedIndex >= 0 ? providerEl.options[providerEl.selectedIndex].text : String(settings.provider || '');
+    var provider = providerEl && providerEl.selectedIndex >= 0 ? uiLocale.originalText(providerEl.options[providerEl.selectedIndex]) : String(settings.provider || '');
     var model = modelEl ? modelEl.value.trim() : String(settings.model || '');
-    var thinking = thinkingEl && thinkingEl.selectedIndex >= 0 ? thinkingEl.options[thinkingEl.selectedIndex].text : String(settings.thinking || '');
+    var thinking = thinkingEl && thinkingEl.selectedIndex >= 0 ? uiLocale.originalText(thinkingEl.options[thinkingEl.selectedIndex]) : String(settings.thinking || '');
     var plain = $('opt-plain') && $('opt-plain').checked ? '白话：开' : '白话：关';
     var guide = $('opt-reader-guide') && $('opt-reader-guide').checked ? '导览：开' : '导览：关';
     var depth = [];
@@ -3738,7 +3868,7 @@
       var d = $(['depth-verdict','depth-mainline','depth-clash'][i]);
       if (d) depth.push(d.value);
     }
-    el.textContent = provider + ' · ' + model + '\n' + thinking + ' · ' + plain + ' · ' + guide + '\n深度：' + depth.join(' / ') + '\n倾向：' + tendencySummaryText() + '\n额外设定：' + contextSummaryText();
+    el.innerHTML = '<span data-ui-summary>' + esc(provider) + '</span> · ' + uiContent(model) + '<br><span data-ui-summary>' + esc(thinking + ' · ' + plain + ' · ' + guide) + '<br>' + esc('深度：' + depth.join(' / ')) + '<br>' + esc('倾向：' + tendencySummaryText()) + '<br>' + esc('额外设定：' + contextSummaryText()) + '</span>';
   }
   function renderUploadFileList(files) {
     var el = $('upload-file-list');
@@ -3762,7 +3892,7 @@
       var f = pending.shift();
       if (!f) {
         if (allText) { $('transcript').value = allText; $('file-info').style.display = 'block'; $('file-info').textContent = TXT.files.loaded + (allText.length / 1024).toFixed(1) + TXT.files.loadedTail; updateTokenWarn(); }
-        if (errors.length) alert(TXT.files.readFail + errors.join('\n'));
+        if (errors.length) uiAlert(TXT.files.readFail + errors.join('\n'));
         return;
       }
       var ext = f.name.split('.').pop().toLowerCase();
@@ -3862,12 +3992,12 @@
     (NATIVE_FETCH || window.fetch)(url, init)
       .then(function (r) {
         clearTimeout(timer);
-        if (r.ok) { el.textContent = TXT.api.ok + r.status + TXT.api.okTail; el.style.color = 'var(--green)'; }
-        else { el.textContent = TXT.api.warn + r.status + TXT.api.warnTail; el.style.color = 'var(--gold)'; }
+        if (r.ok) { el.innerHTML = '<span>' + esc(TXT.api.ok) + '</span>' + esc(r.status) + '<span>' + esc(TXT.api.okTail) + '</span>'; el.style.color = 'var(--green)'; }
+        else { el.innerHTML = '<span>' + esc(TXT.api.warn) + '</span>' + esc(r.status) + '<span>' + esc(TXT.api.warnTail) + '</span>'; el.style.color = 'var(--gold)'; }
       })
       .catch(function (e) {
         clearTimeout(timer);
-        el.textContent = TXT.api.fail + (e && e.message ? e.message : e) + TXT.api.failTail;
+        el.innerHTML = '<span>' + esc(TXT.api.fail) + '</span>' + uiContent(e && e.message ? e.message : e) + '<span>' + esc(TXT.api.failTail) + '</span>';
         el.style.color = 'var(--red)';
       });
   }
@@ -3892,6 +4022,7 @@
       '<h2 id="tend-help-title">' + TXT.tend.helpTitle + '</h2>' +
       '<div style="font-size:13px;line-height:1.9">' +
       TXT.tend.helpP1 + TXT.tend.helpP2 + TXT.tend.helpP3 + TXT.tend.helpP4 + TXT.tend.helpP5 +
+      '<p class="hint">术语说明：三维六向度是本项目的评价框架。证明关注论证的支持与拆解；理性和感性分别侧重常识共鸣与情境体验；场面感关注回应、论证责任和赛场规则的运用；意义感关注价值理由的深度。英文为说明性译名，不代表国际通用评分分类。</p>' +
       '</div>' +
       '<div class="modal-btns"><button class="btn primary" id="help-close">' + TXT.tend.helpClose + '</button></div></div>';
     document.body.appendChild(ov);
@@ -3909,7 +4040,7 @@
       r.onload = function (ev) {
         try {
           var payload = JSON.parse(ev.target.result);
-          if (payload.kind !== 'judge-web-session-v1' || !payload.workDir || !payload.files) { alert(TXT.sess.notValid); return; }
+          if (payload.kind !== 'judge-web-session-v1' || !payload.workDir || !payload.files) { uiAlert(TXT.sess.notValid); return; }
           if (!engine) initEngine();
           engine.restoreSession(payload.files);
           settings = normalizeSettingsKeys(payload.settings) || settings;
@@ -3924,9 +4055,9 @@
           }).then(function () {
             scheduleHistoryLimit();
             refreshHistoryManager();
-            alert(TXT.sess.imported + payload.workDir + TXT.sess.importedTail);
-          }).catch(function (err) { alert(TXT.sess.importFailed + (err && err.message ? err.message : err)); });
-        } catch (err) { alert(TXT.sess.importFailed + err.message); }
+            uiAlert(TXT.sess.imported + payload.workDir + TXT.sess.importedTail);
+          }).catch(function (err) { uiAlert(TXT.sess.importFailed + (err && err.message ? err.message : err)); });
+        } catch (err) { uiAlert(TXT.sess.importFailed + err.message); }
       };
       r.readAsText(f, 'UTF-8');
     };
@@ -3986,7 +4117,7 @@
     }
     if (currentScene === 'run') {
       if (running) {
-        if (confirm(TXT.alert.abortRun)) {
+        if (uiConfirm(TXT.alert.abortRun)) {
           stopRun();
           showScene('upload');
         }
@@ -4014,7 +4145,7 @@
       saveSettings(); applyTheme();
     };
     $('btn-clear-cache').onclick = function () {
-      if (confirm(TXT.alert.clearCache)) {
+      if (uiConfirm(TXT.alert.clearCache)) {
         localStorage.removeItem(LS_KEY);
         localStorage.removeItem('judge_web_settings_v7');
         localStorage.removeItem('judge_web_settings_v6');
@@ -4039,7 +4170,7 @@
       var r = new FileReader();
       r.onload = function (ev) {
         try { applyTendencyProfilePayload(JSON.parse(String(ev.target.result || ''))); }
-        catch (err) { alert(TXT.setup.tendProfileInvalid + err.message); }
+        catch (err) { uiAlert(TXT.setup.tendProfileInvalid + err.message); }
         $('cfg-tend-profile').value = '';
       };
       r.readAsText(f, 'UTF-8');
@@ -4090,7 +4221,7 @@
           syncPlainDictStatus();
           logLine(TXT.setup.plainDictLogPre + Object.keys(j).length + TXT.setup.plainDictLogTail);
         } catch (err) {
-          alert(TXT.setup.plainDictInvalid);
+          uiAlert(TXT.setup.plainDictInvalid);
         }
       };
       r.readAsText(f, 'UTF-8');
@@ -4134,6 +4265,7 @@
     $('btn-resume-run').onclick = startPreparedResume;
     $('btn-stop').onclick = stopRun;
     $('btn-export-log').onclick = exportRunEvidence;
+    $('btn-export-debug').onclick = exportCurrentDebugBundle;
     $('btn-return-report').onclick = returnToCurrentReport;
     $('btn-back-run').onclick = navigateJudgeBack;
     $('btn-report-run-log').onclick = openRunLogFromReport;
@@ -4192,23 +4324,23 @@
     };
     $('btn-export-html').onclick = function () {
       var html = currentReportHtml();
-      if (!html) { alert(TXT.report.noReport); return; }
+      if (!html) { uiAlert(TXT.report.noReport); return; }
       exportFile(TXT.report.fileHtml + tsName() + '.html', html, 'text/html', { kind: 'report-html', trust: reportState.document && reportState.document.trust });
     };
     $('btn-export-md').onclick = function () {
       var html = currentReportHtml();
-      if (!html) { alert(TXT.report.noReport); return; }
+      if (!html) { uiAlert(TXT.report.noReport); return; }
       exportFile(TXT.report.fileMd + tsName() + '.md', stripHtml(html), 'text/markdown', { kind: 'report-md' });
     };
     $('btn-copy').onclick = function () {
       var html = currentReportHtml();
-      if (!html) { alert(TXT.report.noReport); return; }
-      navigator.clipboard.writeText(stripHtml(html)).then(function () { alert(TXT.report.copied); })
-        .catch(function () { alert(TXT.report.copyFailed); });
+      if (!html) { uiAlert(TXT.report.noReport); return; }
+      navigator.clipboard.writeText(stripHtml(html)).then(function () { uiAlert(TXT.report.copied); })
+        .catch(function () { uiAlert(TXT.report.copyFailed); });
     };
     $('btn-export-session').onclick = function () {
       var workDir = reportState.workDir;
-      if (!workDir || !engine) { alert(TXT.sess.noSession); return; }
+      if (!workDir || !engine) { uiAlert(TXT.sess.noSession); return; }
       var files = engine.snapshotSession(workDir, ['/input']);
       var payload = { kind: 'judge-web-session-v1', exportedAt: new Date().toISOString(), workDir: workDir, files: files, settings: settings };
       exportFile(TXT.sess.sessionFile + tsName() + '.json', JSON.stringify(payload, null, 2), 'application/json', { kind: 'report-session' });
@@ -4254,6 +4386,7 @@
     var pm = /[?&]theme=(dark|light)/.exec(location.search);
     if (pm) settings.theme = pm[1];
     renderShell();
+    uiLocale.mount();
     initFlightRecorder();
     bind();
     applyTheme();

@@ -489,6 +489,9 @@ function createEngine(bundle, hooks) {
       var r = PC.resolveOutputDir(speechPath, null, null);
       workDir = r.dir;
     }
+    log('[judge-web] ' + (opts.resumeDir
+      ? (effectiveForce && !targetedResume ? '重新分析已有会话；本次强制重算' : '续跑已有会话；按所选起点和依赖复用有效产物')
+      : '新建会话；本次使用独立工作目录') + '：' + workDir);
     // 定点续跑失败时需要恢复到“进入本次 runSession 前”的完整内存现场，而不只是恢复被删文件。
     if (targetedResume) resumeEntrySnapshot = vfs.snapshot(workDir + '/');
 
@@ -530,7 +533,10 @@ function createEngine(bundle, hooks) {
     // 6) 名册由共享 host 在 durable BASE 后准备；Web 不再用旧抽取器覆盖。
 
     // 6.5) 受控 rewind：规划通过后、durable BASE 前执行；人工名册取消时恢复进入现场。
-    if (targetedResume) applyResumeRewind(workDir, resumePlan);
+    if (targetedResume) {
+      if (semanticFirstMode !== 'active') host.captureReaderGuideReview(workDir);
+      applyResumeRewind(workDir, resumePlan);
+    }
 
     if (typeof opts.persist === 'function') {
       try {
@@ -557,8 +563,7 @@ function createEngine(bundle, hooks) {
       queueRoundCheckpoint(r);
     };
     var res;
-    try {
-      res = await host.runPipeline({
+    var pipelineOptions = {
         workDir: workDir,
         cfg: cfg,
         mockResponder: mockResponder,
@@ -587,7 +592,9 @@ function createEngine(bundle, hooks) {
         onRosterCheckpoint: function (info) {
           return persistRequired('round-done', { workDir: workDir, round: { round: 'ROSTER', phase: info.phase } }, '名册 ' + info.phase);
         }
-      });
+      };
+    try {
+      res = await host.runPipeline(pipelineOptions);
       // 最后一笔 semantic raw 之后可能没有下一笔 API，因此 host terminal 必须主动提交 semantic subtree。
       queueSemanticCheckpoint('host-terminal');
       await requireDurability();
@@ -629,7 +636,11 @@ function createEngine(bundle, hooks) {
       }
       return {
         ok: false,
-        semanticOk: durabilityError ? null : false,
+        semanticOk: durabilityError || (e && e.code === 'R8_UPSTREAM_REVIEW') ? null : false,
+        upstreamReviewPending: !!(e && e.code === 'R8_UPSTREAM_REVIEW'),
+        postprocessFailed: !!(e && e.code === 'R8_UPSTREAM_REVIEW'),
+        readerGuideFailed: !!(e && e.code === 'R8_UPSTREAM_REVIEW'),
+        reportHtml: e && e.code === 'R8_UPSTREAM_REVIEW' ? readReportHtml(workDir) : null,
         persistenceFailed: !!terminalPersistenceError,
         persistenceError: terminalPersistenceError ? String(terminalPersistenceError.message || terminalPersistenceError) : null,
         aborted: aborted,
@@ -666,16 +677,19 @@ function createEngine(bundle, hooks) {
         }
         log('[judge-web] 主裁决完成，开始 R8 章节导览（独立后处理）');
         if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R8', state: 'active', postprocess: true }); } catch (e) {} }
-        var guideResult = await host.applyReaderGuide(workDir, cfg, function (m) { log(m); }, {
+        var guideResult = await host.applyReaderGuideWithRecovery(workDir, cfg, function (m) { log(m); }, {
           cache: !effectiveForce,
           requestCompletion: apiStubWrap,
           onBatchCheckpoint: function (info) { queueBatchCheckpoint(info); },
-          consumerBinding: res.consumerBinding || null
+          consumerBinding: res.consumerBinding || null,
+          pipelineOptions: pipelineOptions
         });
+        if (guideResult && guideResult.pipelineResult) res = guideResult.pipelineResult;
         if (guideResult && guideResult.consumerBinding) res.consumerBinding = guideResult.consumerBinding;
         readerGuideApplied = true;
         if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R8', state: 'done', postprocess: true }); } catch (e) {} }
       } catch (r8e) {
+        if (r8e && r8e.pipelineResult) res = r8e.pipelineResult;
         if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R8', state: 'fail', postprocess: true, errors: [String(r8e && r8e.message || r8e)] }); } catch (e) {} }
         // R8 也属于 terminal path：即使它在最后一个私有 checkpoint 后、下一笔 API 前失败，
         // 也必须先等该 checkpoint 真正 durable，再写 FINAL/error，避免迟到 #RZZR8 把终态覆盖回 running。
@@ -700,7 +714,7 @@ function createEngine(bundle, hooks) {
               error: String(r8e.message || r8e),
               aborted: r8Aborted,
               postprocess: 'R8',
-              semanticOk: true,
+              semanticOk: r8e && r8e.code === 'R8_UPSTREAM_REVIEW' ? null : true,
               runModel: r8RunModel
             }, 'FINAL/R8 postprocess');
           } catch (r8pe) { r8PersistenceError = r8PersistenceError || r8pe; }
@@ -709,7 +723,8 @@ function createEngine(bundle, hooks) {
         var basePlain = vfs.existsSync(workDir + '/report-plain.html') ? vfs.readFileSync(workDir + '/report-plain.html', 'utf-8') : null;
         return {
           ok: false,
-          semanticOk: true,
+          semanticOk: r8e && r8e.code === 'R8_UPSTREAM_REVIEW' ? null : true,
+          upstreamReviewPending: !!(r8e && r8e.code === 'R8_UPSTREAM_REVIEW'),
           postprocessFailed: true,
           readerGuideFailed: true,
           readerGuideApplied: false,
@@ -764,7 +779,10 @@ function createEngine(bundle, hooks) {
     }
     return {
       ok: !!res.ok && !finalPersistenceError,
-      semanticOk: !!res.ok,
+      semanticOk: res.upstreamReviewPending ? null : !!res.ok,
+      upstreamReviewPending: !!res.upstreamReviewPending,
+      postprocessFailed: !!res.upstreamReviewPending,
+      readerGuideFailed: !!res.upstreamReviewPending,
       persistenceFailed: !!finalPersistenceError,
       persistenceError: finalPersistenceError ? String(finalPersistenceError.message || finalPersistenceError) : null,
       error: finalPersistenceError ? String(finalPersistenceError.message || finalPersistenceError) : semanticError,

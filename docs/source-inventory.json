@@ -1,24 +1,30 @@
 {
-  "snapshot": "semantic-2026.09.24-r6",
-  "source": "GPT6 r6 complete source snapshot (2026-09-24)",
-  "preservedR6Files": [
+  "snapshot": "semantic-2026.09.28-r8-debug",
+  "previousPublishedSnapshot": "semantic-2026.09.24-r6",
+  "source": "Maintainer-approved Semantic Edition candidate 20260928-r2 / R8 v6, including accumulated UI/background fixes, upstream recovery and Debug export.",
+  "publicationLicense": "MIT",
+  "unchangedSincePreviousPublishedSnapshot": [
+    ".gitattributes",
+    ".gitignore",
+    "CONTRIBUTING.md",
+    "LICENSE",
     "assets/charts-constants.js",
     "assets/plain-dict.json",
     "assets/report.css",
     "assets/skeleton.html",
+    "docs/installation.md",
+    "docs/support-and-governance.md",
     "executor/api-provider.js",
     "executor/browser.js",
     "executor/codex-cli.js",
     "executor/contract.js",
     "executor/core.js",
-    "executor/host-node.js",
-    "executor/sc-original-integration.js",
     "executor/sc-source-roster.js",
     "executor/semantic-production-store.js",
     "executor/semantic-workflow.js",
     "executor/validator.js",
     "executor/wayfinder-runtime.js",
-    "pipeline-controller.js",
+    "install-skill.js",
     "render-report.js",
     "render-tables.js",
     "schemas/adjudication.schema.json",
@@ -27,32 +33,31 @@
     "schemas/input-contract.json",
     "schemas/model-snapshot.schema.json",
     "schemas/presentation.schema.json",
-    "schemas/reader-guide.schema.json",
     "schemas/semantic-session.schema.json",
     "schemas/tendency.schema.json",
+    "scripts/accept-release.js",
     "scripts/create-baseline.js",
-    "scripts/embed-assets.js",
     "scripts/generate-input-contract.js",
+    "scripts/generate-manifest.js",
     "scripts/html-contract.js",
     "scripts/judge-run-settings.js",
     "scripts/key-checker.js",
     "scripts/key-extract.js",
     "scripts/plain-comprehension.js",
     "scripts/plain-language.js",
-    "scripts/reader-guide.js",
     "scripts/sc-semantic-activation.js",
     "scripts/sc-semantic-default-router.js",
     "scripts/sc-semantic-pilot.js",
     "scripts/sc-semantic-production-cutover.js",
+    "scripts/secret-scan.js",
     "tests/dead-assets.test.js",
     "tests/dictionary-consistency.test.js",
     "tests/key-engine.test.js",
     "tests/plain-comprehension.test.js",
     "tests/plain-reading-context.test.js",
     "tests/plain-semantic.test.js",
-    "tests/reader-guide-semantic-flow.test.js",
-    "tests/reader-guide.test.js",
     "tests/rounds-source.test.js",
+    "tests/run-public.js",
     "tests/run-settings.test.js",
     "tests/sc-semantic-boundary.test.js",
     "tests/self-check.test.js",
@@ -60,61 +65,68 @@
     "tests/slicing-contract.test.js",
     "tests/validator-coverage.test.js",
     "tests/wayfinder-runtime.test.js",
-    "web/src/engine.js",
-    "web/src/flight-export.js",
     "web/src/flight-recorder.js",
     "web/src/history-governance.js",
     "web/src/judge-context.js",
     "web/src/judge-host-io.js",
     "web/src/report-host.js",
     "web/src/report-markdown.js",
-    "web/src/tendency.js",
+    "web/src/tendency.js"
+  ],
+  "updatedOrAddedSincePreviousPublishedSnapshot": [
+    ".claude/skills/debate-judge/SKILL.md",
+    "CHANGELOG.md",
+    "CITATION.cff",
+    "Debate-Judge.md",
+    "MANIFEST.sha256",
+    "README.md",
+    "README.zh-CN.md",
+    "Skill-Judge.md",
+    "THIRD_PARTY_NOTICES.md",
+    "docs/ai-usage.md",
+    "docs/architecture.md",
+    "docs/data-and-rights.md",
+    "docs/reproducibility.md",
+    "docs/semantic-edition.md",
+    "docs/source-inventory.json",
+    "docs/usage.md",
+    "executor/host-node.js",
+    "executor/sc-original-integration.js",
+    "pipeline-controller.js",
+    "schemas/reader-guide.schema.json",
+    "scripts/embed-assets.js",
+    "scripts/reader-guide.js",
+    "tests/README.md",
+    "tests/debug-export.test.js",
+    "tests/reader-guide-envelope.test.js",
+    "tests/reader-guide-semantic-flow.test.js",
+    "tests/reader-guide-upstream-recovery.test.js",
+    "tests/reader-guide.test.js",
+    "tests/semantic-edition.test.js",
+    "web/assets/sanctum-dark.webp",
+    "web/assets/sanctum-light.webp",
+    "web/build-judge-web.js",
+    "web/judge.html",
+    "web/src/app.css",
+    "web/src/engine.js",
+    "web/src/flight-export.js",
+    "web/src/ui-i18n.js",
+    "web/src/ui-locales.js",
     "web/src/ui.js"
   ],
-  "packagingChanges": [
-    {
-      "path": ".claude/skills/debate-judge/SKILL.md",
-      "licenseOnly": false,
-      "changes": [
-        "MIT license metadata",
-        "generic absolute checkout-directory placeholder"
-      ]
-    },
-    {
-      "path": "Debate-Judge.md",
-      "licenseOnly": false,
-      "changes": [
-        "MIT license metadata",
-        "generic absolute checkout-directory placeholder"
-      ]
-    },
-    {
-      "path": "Skill-Judge.md",
-      "licenseOnly": false,
-      "changes": [
-        "MIT license metadata",
-        "generic absolute checkout-directory placeholder"
-      ]
-    },
-    {
-      "path": "install-skill.js",
-      "licenseOnly": true
-    },
-    {
-      "path": "web/build-judge-web.js",
-      "licenseOnly": false
-    },
-    {
-      "path": "web/src/app.css",
-      "licenseOnly": false
-    }
-  ],
   "excludedCategories": [
-    "private transcripts and run artifacts",
-    "private audits and credentials",
-    "non-cleared UI artwork",
-    "obsolete nested controller and vendor snapshot",
+    "private transcripts and model/run artifacts",
+    "credentials and private audit/backup material",
+    "obsolete nested controller and vendor snapshots",
     "tests requiring private data"
   ],
-  "note": "Full files are versioned; no external source checkout or checksum-only recovery is required."
+  "projectArtwork": {
+    "files": [
+      "web/assets/sanctum-dark.webp",
+      "web/assets/sanctum-light.webp"
+    ],
+    "origin": "Project-generated with local ComfyUI; maintainer-confirmed 2026-09-25",
+    "publicationLicense": "MIT"
+  },
+  "note": "Complete sources and HTML are versioned. Publication normalizes LF and removes obsolete duplicate asset copies from Skill seed files. All seven round-prompt templates and bundled executable modules match the validated candidate. Checksum lists supplement, never replace, complete files."
 }

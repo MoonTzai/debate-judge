@@ -16,8 +16,25 @@ assert.deepEqual(fs.readFileSync(generated), before, 'Tracked HTML must reproduc
 assert.equal(builder.buildBundle().js, builder.buildBundle().js, 'No wall-clock variation in the distributed bundle');
 assert.equal(read('Skill-Judge.md'), read('Debate-Judge.md'));
 assert.equal(read('Skill-Judge.md'), read('.claude/skills/debate-judge/SKILL.md'));
+const embedder = require('../scripts/embed-assets');
+const skillText = read('Skill-Judge.md');
+for (const block of embedder.blocks) {
+  const matches = skillText.match(new RegExp('^<!-- EMBED_ASSET:' + block.name + '_START -->$', 'gm')) || [];
+  assert.equal(matches.length, 1, 'Exactly one embedded copy: ' + block.name);
+}
+assert.equal(embedder.renderSkillContent(skillText), skillText, 'Asset regeneration must be idempotent');
+// Legacy files had assets after PC_END. Rebuilding must replace those copies,
+// preserve unrelated tail prose and leave exactly one fresh copy per asset.
+const pcEnd = '<!-- PIPELINE_CONTROLLER_END -->';
+const migrated = embedder.embed(skillText.replace(pcEnd, pcEnd + '\n' + embedder.buildBlock(embedder.blocks[0]) + '\nTAIL_PRESERVATION_FIXTURE\n'));
+assert.equal((migrated.match(new RegExp('^<!-- EMBED_ASSET:' + embedder.blocks[0].name + '_START -->$', 'gm')) || []).length, 1);
+assert(migrated.includes('TAIL_PRESERVATION_FIXTURE'));
 assert(!fs.existsSync(path.join(root, '.claude/skills/debate-judge/pipeline-controller.js')), 'Do not publish the unused stale nested controller');
-assert(!/data:image\/webp;base64|__JUDGE_ASSET_(?:DARK|LIGHT)__/.test(read('web/judge.html')));
+assert(!/__JUDGE_ASSET_(?:DARK|LIGHT)__/.test(read('web/judge.html')));
+for (const theme of ['dark', 'light']) {
+  const asset=fs.readFileSync(path.join(root,'web/assets/sanctum-'+theme+'.webp'));
+  assert(read('web/judge.html').includes('data:image/webp;base64,'+asset.toString('base64')));
+}
 assert(read('web/judge.html').includes('<title>Debate-Judge Semantic Edition'));
 (0, eval)(read('web/dist/judge-bundle.js'));
 const bundle = globalThis.JUDGE_BUNDLE;
@@ -33,4 +50,4 @@ assert.equal(bundle.loadModule('/executor/sc-original-integration.js').POLICY,
 for (const modulePath of ['/executor/host-node.js', '/scripts/plain-language.js', '/scripts/plain-comprehension.js', '/scripts/reader-guide.js', '/web/engine.js']) {
   assert(bundle.loadModule(modulePath), 'Load public runtime ' + modulePath);
 }
-console.log('Semantic Edition packaging: PASS (rebuild, mirrors, module load, round topology, Node/Web prompts, SC policy, no private cutover/artwork)');
+console.log('Semantic Edition packaging: PASS (rebuild, mirrors, module load, round topology, Node/Web prompts, SC policy, embedded project backgrounds, no private cutover)');

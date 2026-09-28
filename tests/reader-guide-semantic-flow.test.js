@@ -88,7 +88,7 @@ test('approved=true 不能抹去实质异议；回查模型所指R5B而非硬编
  try{
   await assert.rejects(H.applyReaderGuide(d,cfg,()=>{},{requestCompletion:async()=>{
    calls++;return JSON.stringify(calls===1?g:{...review(),semanticIssues:[{action:'upstream_review',targetRound:'R5B',issue:'报告叙事遗漏了原裁决的必要条件，影响结论的实际范围。'}]});
-  }}),e=>/上游语义回查待处理/.test(e.message)&&!/预算耗尽/.test(e.message));
+  }}),e=>e.code==='R8_UPSTREAM_REVIEW'&&!/预算耗尽/.test(e.message));
   assert.equal(calls,2);const proof=JSON.parse(fs.readFileSync(path.join(d,'.tmp-reader-guide-review.json'),'utf8'));
   assert.equal(proof.reopenNode,'R5B');assert.deepEqual(proof.reopenNodes,['R5B']);
   assert.equal(fs.readFileSync(path.join(d,'report.html'),'utf8'),html);

@@ -22,4 +22,4 @@ Historical cutover/router/pilot modules remain because the builder imports them.
 
 ## Integrity boundary
 
-The 35-block installer verifier and browser build are current source-closure checks. The inherited legacy self-check has known assumptions about old embedded-block placement, SC terminology and inline CSS. It remains available and reports failures; see [snapshot notes](semantic-edition.md). Do not rewrite frozen rules or run the old embed/sync chain merely to turn legacy checks green. Develop such corrections as a separately reviewed revision.
+The 35-block installer verifier and browser build are current source-closure checks. Packaging also checks one copy of each embedded asset and idempotent rebuilding, including migration from the earlier after-controller layout. The inherited legacy self-check still has obsolete SC terminology expectations and remains available with its failures; see [snapshot notes](semantic-edition.md). Do not rewrite judging rules merely to satisfy obsolete string assertions.

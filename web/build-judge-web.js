@@ -71,6 +71,8 @@ const MODULES = RUNTIME_BLOCKS
     ['/web/judge-host-io.js', path.join(WEB, 'src', 'judge-host-io.js')],
     ['/web/report-host.js', path.join(WEB, 'src', 'report-host.js')],
     ['/web/report-markdown.js', path.join(WEB, 'src', 'report-markdown.js')],
+    ['/web/ui-locales.js', path.join(WEB, 'src', 'ui-locales.js')],
+    ['/web/ui-i18n.js', path.join(WEB, 'src', 'ui-i18n.js')],
     ['/web/ui.js', path.join(WEB, 'src', 'ui.js')]
   ]);
 
@@ -555,6 +557,7 @@ var BUNDLE = {
     flightExport: function () { return loadModule('/web/flight-export.js'); },
     judgeHostIO: function () { return loadModule('/web/judge-host-io.js'); },
     reportHost: function () { return loadModule('/web/report-host.js'); },
+    uiI18n: function () { return loadModule('/web/ui-i18n.js'); },
     ui: function () { return loadModule('/web/ui.js'); }
   }
 };
@@ -990,13 +993,26 @@ function safeForHtml(src) {
 }
 
 const APP_CSS_PATH = path.join(WEB, 'src', 'app.css');
-// The public distribution uses programmatic CSS backgrounds; no external artwork.
-const UI_ASSETS = Object.freeze({});
-function inlineAppCssAssets(css) { return String(css); }
+// Local artwork edition: inline existing theme images into the standalone HTML.
+const UI_ASSETS = Object.freeze({
+  dark: path.join(WEB, 'assets', 'sanctum-dark.webp'),
+  light: path.join(WEB, 'assets', 'sanctum-light.webp')
+});
+function inlineAppCssAssets(css) {
+  let out = String(css);
+  for (const key of ['dark', 'light']) {
+    const fp = UI_ASSETS[key];
+    if (!fs.existsSync(fp)) throw new Error('[build-judge-web] UI asset missing: ' + fp);
+    const token = '__JUDGE_ASSET_' + key.toUpperCase() + '__';
+    if (!out.includes(token)) throw new Error('[build-judge-web] UI asset token missing in app.css: ' + token);
+    out = out.replaceAll(token, 'data:image/webp;base64,' + fs.readFileSync(fp).toString('base64'));
+  }
+  return out;
+}
 
 function buildBundle() {
   const parts = [];
-  parts.push('/* Debate-Judge Semantic Edition · 2026-09-24 r6 · reproducible bundle */');
+  parts.push('/* Debate-Judge Semantic Edition · 20260928-r2 · R8 recovery v6 · reproducible bundle */');
   // 种子文件以 JSON 字符串嵌入；</script 需转义（JSON 中 \/ 合法且解析回 /）
   parts.push('var SEED_FILES = ' + JSON.stringify(
     Object.fromEntries(STATIC_FILES.map(([vp, fp]) => [vp, fs.readFileSync(fp, 'utf-8')]))
@@ -1030,7 +1046,7 @@ function buildHtml(bundleJs, appCss, uiJs, sourceOf) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Debate-Judge Semantic Edition · 20260924-r6</title>
+<title>Debate-Judge Semantic Edition · 20260928-r2 · R8 recovery v6</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>">
 <style>
 ${safeForHtml(appCss)}

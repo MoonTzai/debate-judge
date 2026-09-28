@@ -785,7 +785,8 @@ function validPlainGuide(guide, overrides) {
     }, null, 2), 'utf8');
     const badDraftRows = draftResumeGuide.cards.flatMap(card => ['what','why','conclusion'].map(field => ({
       id: 'R8P:' + card.sectionId + ':' + field,
-      text: card.sectionId === 'C12' && field === 'why' ? '文'.repeat(241) : card[field] + '（白话）'
+      // Length is advisory. Use genuinely invalid markup to test scoped repair.
+      text: card.sectionId === 'C12' && field === 'why' ? '<b>不允许的 HTML 标记</b>' : card[field] + '（白话）'
     })));
     const badDraftById = new Map(badDraftRows.map(row => [row.id, row.text]));
     const idsInPrompt = prompt => Array.from(new Set([...String(prompt || '').matchAll(/"id"\s*:\s*"(R8P:[^"]+)"/g)].map(match => match[1])));

@@ -6,7 +6,7 @@ authors:
   - name: "Debate-Judge contributors"
 repository-code: "https://github.com/MoonTzai/debate-judge"
 url: "https://github.com/MoonTzai/debate-judge/tree/semantic-edition"
-version: "semantic-2026.09.24-r6"
-date-released: 2026-09-24
+version: "semantic-2026.09.28-r8-debug"
+date-released: 2026-09-28
 license: MIT
 abstract: "A staged research-software prototype for source-grounded analysis, structural clash reconstruction, adjudication, and explanation of Chinese debates. Deterministic software checks are not evidence of adjudication accuracy."

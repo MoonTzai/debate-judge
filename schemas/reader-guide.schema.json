@@ -128,7 +128,7 @@
           "pattern": "^[a-f0-9]{64}$"
         },
         "promptVersion": {
-          "const": "r8-reader-guide-prompt-v4"
+          "const": "r8-reader-guide-prompt-v6"
         },
         "modelSnapshot": {
           "type": "object"
@@ -153,18 +153,15 @@
               },
               "what": {
                 "type": "string",
-                "minLength": 1,
-                "maxLength": 240
+                "minLength": 1
               },
               "why": {
                 "type": "string",
-                "minLength": 1,
-                "maxLength": 240
+                "minLength": 1
               },
               "conclusion": {
                 "type": "string",
-                "minLength": 1,
-                "maxLength": 240
+                "minLength": 1
               },
               "evidence": {
                 "type": "array",
@@ -201,8 +198,7 @@
                     },
                     "quote": {
                       "type": "string",
-                      "minLength": 1,
-                      "maxLength": 240
+                      "minLength": 1
                     }
                   },
                   "additionalProperties": false

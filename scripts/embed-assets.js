@@ -26,13 +26,20 @@ function embed(content) {
   const marker = '<!-- PIPELINE_CONTROLLER_' + 'START -->';
   const idx = content.indexOf(marker);
   if (idx < 0) throw new Error('PIPELINE_CONTROLLER_START 未找到');
-  // 幂等重建（卡 3 修复现状非幂等 bug：原删除正则 \n? 只吞一个换行 → 块区边界空行每次累积）：
-  // 只重建 PC_START 之前的块区（整块删除并吞块后空白 \s*，块序 = BLOCKS 序）；
-  // 行首锚定（^ + m，卡 8 教训同款）：源码内块标记字面量（如 contract.js loadInputContract 正则）
-  // 均非行首（前缀 content.match(/ 等）——杜绝跨内容误删；PC 块/尾部绝不触碰
-  const head = content.slice(0, idx).replace(/^<!-- EMBED_ASSET:[A-Z0-9_]+_START -->[\s\S]*?^<!-- EMBED_ASSET:[A-Z0-9_]+_END -->\s*/gm, '');
+  // Some earlier deliveries placed assets AFTER the controller. Rebuild both
+  // outer regions, retaining the controller itself and all non-asset text. Only
+  // registered, line-anchored, matched marker pairs are removed; source literals
+  // inside the controller are never interpreted as asset boundaries.
+  const endMarker = '<!-- PIPELINE_CONTROLLER_' + 'END -->';
+  const end = content.indexOf(endMarker, idx + marker.length);
+  if (end < 0) throw new Error('PIPELINE_CONTROLLER_END 未找到');
+  const controllerEnd = end + endMarker.length;
+  const names = new Set(blocks.map(b => b.name));
+  const stripAssets = region => region.replace(/^<!-- EMBED_ASSET:([A-Z0-9_]+)_START -->[\s\S]*?^<!-- EMBED_ASSET:\1_END -->\s*/gm,
+    (whole, name) => names.has(name) ? '' : whole);
+  const head = stripAssets(content.slice(0, idx));
   const blockText = blocks.map(buildBlock).join('\n') + '\n\n';
-  return head + blockText + content.slice(idx);
+  return head + blockText + content.slice(idx, controllerEnd) + stripAssets(content.slice(controllerEnd));
 }
 
 // 卡 3：EMBED_ASSET_LIST 尾部区块更新（lastIndexOf 定位，与 install-skill verify 语义一致；幂等；

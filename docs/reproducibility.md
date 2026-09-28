@@ -1,6 +1,6 @@
 # Reproducibility
 
-Check out tag `semantic-2026.09.24-r6` for this snapshot. Complete sources, compatibility mirrors and generated HTML are versioned. The checksum manifest is supplementary transport integrity, not a substitute for files or a semantic authority.
+Check out tag `semantic-2026.09.28-r8-debug` for this snapshot. Complete sources, compatibility mirrors, project-generated background images and generated HTML are versioned. The earlier `semantic-2026.09.24-r6` tag is retained unchanged; the intervening 2026-09-25 candidate was not separately published. The checksum manifest is supplementary transport integrity, not a substitute for files or a semantic authority.
 
 ## Offline software verification
 
@@ -13,7 +13,7 @@ node tests/run-public.js --current
 node scripts/secret-scan.js .
 ```
 
-`tests/semantic-edition.test.js` compares a rebuild with the distributed HTML, checks mirrors and module loading, and compares Node/Web prompts and SC policy. Sources use LF line endings; the distributed build contains no current-time stamp. `web/dist/` is an ignored build intermediate.
+`tests/semantic-edition.test.js` compares a rebuild with the distributed HTML, checks mirrors, unique embedded assets, idempotent asset regeneration and module loading, and compares Node/Web prompts and SC policy. Sources use LF line endings; the distributed build contains no current-time stamp. `web/dist/` is an ignored build intermediate.
 
 Run `node tests/run-public.js` to inspect all inherited public checks. It currently exits nonzero: the old self-check and key-engine suites fail, as does `pipeline-controller.js self-check`. These failures also occur in unmodified r6. They are not suppressed or converted into passing results. See [limitations](semantic-edition.md).
 

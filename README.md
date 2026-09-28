@@ -1,8 +1,10 @@
 # Debate-Judge Semantic Edition
 
-[中文](README.zh-CN.md) · Branch: `semantic-edition` · Snapshot: `semantic-2026.09.24-r6`
+[中文](README.zh-CN.md) · Branch: `semantic-edition` · Snapshot: `semantic-2026.09.28-r8-debug`
 
 Structure-aware analysis and adjudication for competitive Chinese debate. Semantic Edition preserves the GPT6 r6 branch's staged pipeline, source-grounded structural clash (SC) analysis, judge settings, report layout, recovery, plain-language explanation, and reader guide. The branch name describes its development emphasis; the inference provider/model is configurable.
+
+This snapshot includes Chinese/English interface switching, the project's ComfyUI-generated dark/light backgrounds, the scrolling-layout repair, and R8 metadata/draft recovery. It also aligns final clash assessments with report summaries, routes substantive R8 objections back to the responsible analysis stage, and adds one-click Debug export beside the run log. New-run and resume messages now reflect the actual entry point. The UI language setting does not translate transcripts, reports, or raw logs and does not change judging prompts.
 
 **Status: a frozen research-software preview, not a validated judging benchmark or an all-tests-green release.** The current deterministic subset and packaging checks pass. Two inherited legacy suites and the old project self-check still fail; the full public runner exposes those failures. See [snapshot notes](docs/semantic-edition.md).
 
@@ -31,7 +33,7 @@ The packaging test rebuilds the complete HTML, compares the artifact, loads its 
 - `Skill-Judge.md`: canonical rules and the complete 35-block embedded runtime.
 - `Debate-Judge.md` and `.claude/skills/debate-judge/SKILL.md`: identical compatibility mirrors retained by this frozen branch, not independently authored policies.
 - `pipeline-controller.js`, `executor/`, `scripts/`, `schemas/`, `assets/`: execution, contracts, prompts, post-processing, and rendering.
-- `web/src/`, `web/build-judge-web.js`: maintainable browser source and deterministic builder.
+- `web/src/`, `web/assets/`, `web/build-judge-web.js`: maintainable browser source, project-generated backgrounds, and deterministic builder.
 - `web/judge.html`: generated single-file distribution.
 - `tests/`: public deterministic tests with synthetic or source-integrity inputs.
 - `docs/`: architecture, usage, provenance, validation limits, and research guidance.
@@ -52,4 +54,4 @@ Use the exact snapshot tag or commit for experiments; a branch can advance. [CIT
 
 ## License
 
-The maintainer authorized this public r6 distribution under the [MIT License](LICENSE). [Third-party notices](THIRD_PARTY_NOTICES.md) describe attribution and exclusions. Real competition corpora, private run evidence, credentials, and non-cleared background artwork are not distributed.
+The maintainer authorized this distribution, including the project backgrounds generated locally with ComfyUI, under the [MIT License](LICENSE). [Third-party notices](THIRD_PARTY_NOTICES.md) record the corrected artwork provenance and other attribution boundaries. Real competition corpora, private run evidence, and credentials are not distributed.

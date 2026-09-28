@@ -1250,7 +1250,7 @@ function runAll(speechFile, options = {}) {
   fs.writeFileSync(settingsPath, JSON.stringify({version:1,settings:normalized,tendency}, null, 2), 'utf8');
   if (options.force) {
     // Explicit full rerun starts a fresh bounded review; retain the complete old record.
-    for (const name of ['.analysis-review.json','.analysis-pristine-prompts.json']) {
+    for (const name of ['.analysis-review.json','.analysis-pristine-prompts.json','.tmp-reader-guide-review.json']) {
       const p=path.join(workDir,name);
       if (fs.existsSync(p)) { fs.writeFileSync(p+'.previous-'+Date.now(),fs.readFileSync(p,'utf8'),'utf8'); fs.unlinkSync(p); }
     }
@@ -2039,22 +2039,26 @@ else if (cmd === 'pipeline' && args[1] === 'run') {
     }
     let rewindRemoved = [];
     if (targetedResume) {
+      if (semanticFirstMode !== 'active') host.captureReaderGuideReview(workDir);
       rewindRemoved = applyResumeRewindFs(workDir, resumePlan);
       console.log('[resume] 已归档旧版本 ' + resumeVersion.versionId + '；请求 ' + resumePlan.requestedNode + ' → 实际 ' + resumePlan.effectiveStartNode + '；失效 ' + resumePlan.invalidatedNodes.join('、'));
     }
     const mockResponder = provider === 'mock' ? (mockGood ? host.goodMockResponder : () => '<!-- mock 冒烟响应 -->') : undefined;
-    host.runPipeline({
+    const pipelineOptions = {
       workDir, cfg, mockResponder, onLog: m => console.log(m), force, plain,
       semanticFirstMode,
       plainReplayOnly: !!(resumePlan && resumePlan.requirePlainCacheHit),
       plainDict, skipRosterConfirm
-    }).then(async res => {
+    };
+    host.runPipeline(pipelineOptions).then(async res => {
       let readerGuideApplied = false;
       if (res.ok && readerGuide) {
-        const guideResult = await host.applyReaderGuide(workDir, cfg, m => console.log(m), {
+        const guideResult = await host.applyReaderGuideWithRecovery(workDir, cfg, m => console.log(m), {
           cache: !force,
-          consumerBinding: res.consumerBinding || null
+          consumerBinding: res.consumerBinding || null,
+          pipelineOptions
         });
+        if (guideResult && guideResult.pipelineResult) res = guideResult.pipelineResult;
         if (guideResult && guideResult.consumerBinding) res.consumerBinding = guideResult.consumerBinding;
         readerGuideApplied = true;
       }

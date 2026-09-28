@@ -1901,6 +1901,11 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
   const PC = require('../pipeline-controller.js');
   opts = opts || {};
   onLog = typeof onLog === 'function' ? onLog : () => {};
+  const recovery = readAnalysisReview(workDir);
+  const pendingUpstream = readReaderGuideUpstreamReview(workDir);
+  if (pendingUpstream && !(recovery && recovery.origin === 'R8' && recovery.state === 'awaiting-guide')) {
+    throw readerGuideUpstreamError('报告存在未处理的上游异议；需先完成责任定位与回查，不能对同稿重新求批准');
+  }
   const immutableBefore = fingerprintOptionalFiles(workDir, r8ImmutableNames(workDir));
   try {
     const prepared = buildReaderGuideInputFromWorkDir(workDir, RG, RR, PC, { consumerBinding: opts.consumerBinding || null });
@@ -1913,7 +1918,7 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
     let review = null;
     let cached = false;
 
-    if (opts.cache !== false && fs.existsSync(files.cache)) {
+    if (opts.cache !== false && !(recovery && recovery.origin === 'R8' && recovery.state === 'awaiting-guide') && fs.existsSync(files.cache)) {
       try {
         const saved = JSON.parse(fs.readFileSync(files.cache, 'utf-8'));
         if (saved && saved.key === key && saved.inputHash === inputHash) {
@@ -1939,9 +1944,15 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
     if (!guide && opts.cache !== false && fs.existsSync(files.draft)) {
       try {
         const savedDraft = JSON.parse(fs.readFileSync(files.draft, 'utf-8'));
-        if (savedDraft && savedDraft.v === 1 && savedDraft.key === key && savedDraft.inputHash === inputHash && savedDraft.guide) {
-          guide = savedDraft.guide;
+        const restored = RG.restoreGuideDraft(input, snapshot, savedDraft);
+        if (restored) {
+          guide = restored.guide;
           guideCheck = checkReaderGuideContract(RG, input, guide, snapshot);
+          if (restored.migrated) {
+            fs.writeFileSync(files.draft + '.previous-' + Date.now(), JSON.stringify(savedDraft, null, 2), 'utf8');
+            fs.writeFileSync(files.draft, JSON.stringify({ v: 1, key, inputHash, guide, errors: guideCheck.errors || [] }, null, 2), 'utf8');
+            onLog('[executor] R8 已核对旧草稿的输入及模型，运行元数据由程序重新绑定；保留迁移前草稿，重新进行独立语义复核');
+          }
           onLog('[executor] R8 检测到私有导览 draft，继续' + (guideCheck.ok ? '独立复核' : '定点修复') + '，不重生已保存候选');
         }
       } catch (e) {
@@ -1993,7 +2004,7 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
               system: READER_GUIDE_SYSTEM,
               codexRunner: opts.codexRunner
             });
-            guide = RG.parseJson(rawGuide, '导览生成响应');
+            guide = RG.bindGuideResponse(input, RG.parseJson(rawGuide, '导览生成响应'), snapshot);
           }
           guideCheck = checkReaderGuideContract(RG, input, guide, snapshot);
           if (opts.cache !== false) {
@@ -2008,6 +2019,7 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
         } catch (e) {
           lastGuideError = e;
         }
+        if (lastGuideError) onLog('[executor] R8 导览候选待纠错：' + lastGuideError.message);
         if (attempt === core.MAX_RETRIES) break;
       }
       if (!guideCheck || !guideCheck.ok) {
@@ -2028,6 +2040,11 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
         let semanticRejected = false;
         try {
           let reviewPrompt = RG.buildReviewPrompt(input, guide);
+          if (recovery && recovery.origin === 'R8' && recovery.state === 'awaiting-guide') {
+            reviewPrompt += '\n\n## 已执行的定点回查（必须逐项核对是否解决）\n' +
+              JSON.stringify({ originalIssues: RG.upstreamReviewIssues(recovery.originalReview), resolution: recovery.resolution }) +
+              '\n请对照当前实际输入说明每项是否已经解决；维持原异议或有充分理由撤销均可。处置记录只是线索，不能因已经回查就自动批准。必要时在 semanticIssues 中保留 note 或 upstream_review。';
+          }
           if (reviewCheck && reviewCheck.errors && reviewCheck.errors.length) {
             reviewPrompt += '\n\n上一版复核尚不能执行。保留已有实质判断，只补齐未说明的影响/责任或处理已指出的问题，不为通过而撤销异议：\n- ' + reviewCheck.errors.join('\n- ') + '\n上一版复核：\n' + JSON.stringify(review);
           }
@@ -2042,6 +2059,11 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
           const failedCards = (review.cardChecks || []).filter(c => c && (c.noNewJudgment !== true || c.factsConsistent !== true || c.anchorsConsistent !== true)).map(c => c.sectionId);
           if (reviewCheck.upstreamIssues.length) {
             fs.writeFileSync(path.join(workDir, '.tmp-reader-guide-review.json'), JSON.stringify({ inputHash, guide, review, reopenNode: reviewCheck.reopenNodes[0], reopenNodes: reviewCheck.reopenNodes }, null, 2), 'utf-8');
+            if (recovery && recovery.origin === 'R8' && recovery.state === 'awaiting-guide') {
+              recovery.state = 'blocked'; recovery.unresolved = reviewCheck.upstreamIssues;
+              writeAnalysisReview(workDir, recovery);
+            }
+            if (typeof opts.onBatchCheckpoint === 'function') await opts.onBatchCheckpoint({ phase: 'r8-upstream-review', workDir });
             reviewStopReason = '上游语义回查待处理';
             break; // A substantive decision is preserved, never re-voted for approval.
           }
@@ -2076,11 +2098,17 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
         if (attempt === core.MAX_RETRIES) break;
       }
       if (!reviewCheck || !reviewCheck.ok) {
+        if (reviewCheck && reviewCheck.upstreamIssues.length) throw readerGuideUpstreamError(lastReviewError.message);
         throw new Error((reviewStopReason || '独立复核纠错预算耗尽') + ': ' + (lastReviewError && lastReviewError.message ? lastReviewError.message : '未知错误'));
       }
     }
 
     const acceptedReview = RG.validateReview(input, guide, review);
+    if (recovery && recovery.origin === 'R8' && recovery.state === 'awaiting-guide') {
+      recovery.state = 'resolved'; recovery.finalReview = review;
+      writeAnalysisReview(workDir, recovery);
+      onLog('[executor] R8 上游异议已完成定点回查并经当前报告复核，继续生成导览');
+    }
     for (const note of acceptedReview.notes) onLog('[executor] R8 复核备注（模型判为不阻断）：' + (note.issue || note.reason || note.message));
     const reviewJournalPath = path.join(workDir, '.tmp-reader-guide-review.json');
     const acceptedJournal = JSON.stringify({ inputHash, guide, review, reopenNode: null, disposition: acceptedReview.notes.length ? 'accepted_with_notes' : 'accepted' }, null, 2);
@@ -2128,6 +2156,7 @@ async function applyReaderGuide(workDir, cfg, onLog, opts) {
     } catch (immutabilityError) {
       throw new Error('[executor] R8 章节导览失败且检测到上游权威产物漂移: ' + (immutabilityError && immutabilityError.message ? immutabilityError.message : String(immutabilityError)) + '；原错误=' + (e && e.message ? e.message : String(e)));
     }
+    if (e && e.code === 'R8_UPSTREAM_REVIEW') throw e;
     throw new Error('[executor] R8 章节导览失败: ' + (e && e.message ? e.message : String(e)));
   }
 }
@@ -4071,6 +4100,126 @@ async function rewindAnalysisReview(workDir, review, opts) {
   if (typeof opts.onAnalysisReviewCheckpoint === 'function') await opts.onAnalysisReviewCheckpoint({workDir, targetRound:review.targetRound, plan:review.plan});
 }
 
+function readerGuideUpstreamError(message) {
+  const error = new Error('[executor] 报告上游待核：' + message);
+  error.code = 'R8_UPSTREAM_REVIEW';
+  return error;
+}
+
+function readReaderGuideUpstreamReview(workDir) {
+  const text = readIfExists(path.join(workDir, '.tmp-reader-guide-review.json'));
+  if (!text) return null;
+  const saved = JSON.parse(text);
+  return require('../scripts/reader-guide.js').upstreamReviewIssues(saved.review).length ? saved : null;
+}
+
+// Also called before an explicitly selected resume node invalidates reports.
+function captureReaderGuideReview(workDir) {
+  let recovery = readAnalysisReview(workDir);
+  if (recovery && recovery.origin === 'R8') return recovery;
+  const pending = readReaderGuideUpstreamReview(workDir);
+  if (!pending) return null;
+  if (recovery && recovery.origin !== 'R8' && recovery.state !== 'resolved') throw readerGuideUpstreamError('现有责任轮回查尚未完成，先完成该回查');
+  if (!recovery || recovery.origin !== 'R8') {
+    const previousFiles = {};
+    for (const name of fs.readdirSync(workDir)) {
+      if (/^\.analysis-|config|credential|secret/i.test(name)) continue;
+      const file = path.join(workDir, name);
+      if (fs.statSync(file).isFile()) previousFiles[name] = fs.readFileSync(file, 'utf8');
+    }
+    if (recovery) fs.writeFileSync(path.join(workDir, '.analysis-review.previous-' + Date.now() + '.json'), JSON.stringify(recovery), 'utf8');
+    recovery = { version: 1, origin: 'R8', state: 'routing', sourceInputHash: pending.inputHash,
+      originalReview: pending.review, previousFiles, requests: [], previousResults: [] };
+    writeAnalysisReview(workDir, recovery);
+  }
+  return recovery;
+}
+
+// Reuse the existing bounded analysis rewind. A routing decision is a semantic
+// task over the actual artifacts, not a mapping from chapter names to rounds.
+async function prepareReaderGuideRecovery(workDir, cfg, onLog, opts) {
+  const RG = require('../scripts/reader-guide.js'), PC = require('../pipeline-controller.js');
+  let recovery = readAnalysisReview(workDir);
+  if (recovery && recovery.origin === 'R8' && recovery.state !== 'routing') return;
+  if (!readReaderGuideUpstreamReview(workDir) && !(recovery && recovery.origin === 'R8')) return;
+  if (opts.consumerBinding || semanticFirstMode(opts) === 'active') throw readerGuideUpstreamError('当前 authority 分支需使用其原生修订通道');
+  recovery = captureReaderGuideReview(workDir);
+  if (typeof opts.onAnalysisReviewCheckpoint === 'function') await opts.onAnalysisReviewCheckpoint({ workDir, targetRound: 'R8 回查定位', plan: { invalidatedNodes: [] } });
+  const artifacts = {};
+  for (const name of ['.tmp-debate.txt','P1.md','P2.md','P2.5.md','P3.md','structure.json','adjudication.json','叙事.md','report.html']) {
+    artifacts[name] = readIfExists(path.join(workDir, name)) || recovery.previousFiles[name] || '';
+  }
+  if (!artifacts['.tmp-debate.txt']) throw readerGuideUpstreamError('缺少原始辩词，已保留异议和旧报告');
+  let checked;
+  if (recovery.resolution) checked = RG.validateUpstreamResolution(recovery.originalReview, recovery.resolution);
+  else {
+    const prompt = RG.buildUpstreamReviewPrompt(recovery.originalReview, artifacts);
+    core.assertWithinContextLimit(prompt, 'R8 upstream responsibility review');
+    fs.writeFileSync(path.join(workDir, '.analysis-review-request-R8.md'), prompt, 'utf8');
+    onLog('[executor] R8 已发现上游实质异议，按原文与完整工件核实责任轮（一次定点回查）');
+    const call = opts.requestCompletion || opts.apiStub || requestCompletionNode;
+    const raw = await call(cfg, [{ role: 'user', content: prompt }], {
+      system: '你是 Debate-Judge 上游异议责任复核器。根据提供的原文及完整工件核实疑问，输出要求的 JSON 处置；不直接改写裁决或报告。',
+      codexRunner: opts.codexRunner
+    });
+    fs.writeFileSync(path.join(workDir, '.analysis-review-response-R8.txt'), raw, 'utf8');
+    const resolution = RG.parseJson(raw, '上游责任定位');
+    checked = RG.validateUpstreamResolution(recovery.originalReview, resolution);
+    recovery.resolution = resolution;
+    writeAnalysisReview(workDir, recovery);
+    // Persist the semantic disposition before any next request, including a
+    // note-only outcome that does not enter the rewind checkpoint below.
+    if (typeof opts.onAnalysisReviewCheckpoint === 'function') await opts.onAnalysisReviewCheckpoint({ workDir, targetRound: 'R8 回查定位', plan: { invalidatedNodes: [] } });
+  }
+  if (checked.unresolved.length) {
+    recovery.state = 'blocked'; recovery.unresolved = checked.unresolved;
+    writeAnalysisReview(workDir, recovery);
+    throw readerGuideUpstreamError(checked.unresolved.map(d => d.reason + '；' + d.impact).join('\n'));
+  }
+  recovery.targetRound = checked.targetRound;
+  if (checked.targetRound) {
+    // Fresh prompts from this executable; never restore archived prompts from an
+    // older HTML when a saved session is resumed in the new one.
+    PC.runAll(path.join(workDir, '.tmp-debate.txt'), { outputDir: workDir });
+    recovery.pristinePrompts = {};
+    for (const round of core.ROUNDS) recovery.pristinePrompts[round.promptFile] = readIfExists(path.join(workDir, round.promptFile));
+    recovery.requests = checked.decisions.filter(d => d.action === 'reopen').map(d => ({
+      targetRound: d.targetRound, issue: RG.upstreamReviewIssues(recovery.originalReview)[d.issueIndex],
+      evidence: d.reason, impact: d.impact
+    }));
+    recovery.plan = PC.buildResumePlanForDir(workDir, checked.targetRound, { plain: !!opts.plain, readerGuide: true });
+    recovery.state = 'preparing';
+    onLog('[executor] R8 责任回查 → ' + checked.targetRound + '；保留完整旧版，重建 ' + recovery.plan.invalidatedNodes.join('、'));
+  } else {
+    recovery.state = 'awaiting-guide';
+    onLog('[executor] R8 异议已逐项解释为备注；保留解释并对照现稿复核，不改上游裁决');
+  }
+  writeAnalysisReview(workDir, recovery);
+}
+
+// The read-only R8 seam stays read-only. Orchestration owns any analysis rewind,
+// just as it owns normal R1–R7 execution. Only one upstream correction is allowed.
+async function applyReaderGuideWithRecovery(workDir, cfg, onLog, opts) {
+  opts = opts || {};
+  try { return await applyReaderGuide(workDir, cfg, onLog, opts); }
+  catch (error) {
+    const prior = readAnalysisReview(workDir);
+    if (error.code !== 'R8_UPSTREAM_REVIEW' || !opts.pipelineOptions ||
+        (prior && prior.origin === 'R8' && prior.state !== 'routing')) throw error;
+    const pipelineResult = await runPipeline(Object.assign({}, opts.pipelineOptions, { force: false, plainReplayOnly: false }));
+    if (!pipelineResult.ok) {
+      const failed = readerGuideUpstreamError(pipelineResult.results.filter(r => !r.ok).flatMap(r => r.errors || []).join('; '));
+      failed.pipelineResult = pipelineResult;
+      throw failed;
+    }
+    if (cfg.provider === 'mock' && !opts.pipelineOptions.plain) renderReport(workDir);
+    if (typeof opts.pipelineOptions.onStage === 'function') opts.pipelineOptions.onStage({ stage: 'R8', state: 'active', postprocess: true });
+    const result = await applyReaderGuide(workDir, cfg, onLog, Object.assign({}, opts, { cache: true }));
+    result.pipelineResult = pipelineResult;
+    return result;
+  }
+}
+
 async function runPipeline(opts) {
   const workDir = opts.workDir;
   const sfMode = semanticFirstMode(opts);
@@ -4083,12 +4232,18 @@ async function runPipeline(opts) {
       })
     : opts.cfg;
   const onLog = opts.onLog || (() => {});
+  onLog('[executor] Semantic Edition 20260928-r2 · R8 recovery v6');
+  await prepareReaderGuideRecovery(workDir, cfg, onLog, opts);
   const pendingReview = readAnalysisReview(workDir);
-  if (pendingReview && pendingReview.state === 'blocked') return { ok:false, results:[{round:pendingReview.origin,ok:false,errors:['一次回查后仍有重大实质分歧；完整候选和异议保存在 .analysis-review.json，需人工处理后再续跑']} ] };
+  if (pendingReview && pendingReview.state === 'blocked') {
+    const details = (pendingReview.unresolved || []).map(issue => issue.reason || issue.message || issue.issue || '').filter(Boolean);
+    return { ok:false, upstreamReviewPending:pendingReview.origin === 'R8', results:[{round:pendingReview.origin,ok:false,
+      errors:['定点回查仍有待核问题；完整候选和异议已保存，不重复调用模型求批准。' + details.join('；')]}] };
+  }
   if (pendingReview && ['preparing','reviewing'].includes(pendingReview.state)) {
     if (opts.consumerBinding || sfMode === 'active') throw new Error('回查会话不能混入已绑定的 authority 分支');
     await rewindAnalysisReview(workDir, pendingReview, opts);
-    opts = Object.assign({},opts,{force:false});
+    opts = Object.assign({},opts,{force:false, plainReplayOnly: pendingReview.origin === 'R8' ? false : opts.plainReplayOnly});
   }
   pristineAnalysisPrompts(workDir);
   const realValidate = opts.realValidate !== false && cfg.provider !== 'mock';   // mock 仅链路冒烟，跳过真实校验
@@ -4289,7 +4444,7 @@ async function runPipeline(opts) {
     }
     if (round.name === 'R4.5' && r.ok) {
       const review = readAnalysisReview(workDir);
-      if (review && review.state === 'reviewing') { review.state = 'resolved'; writeAnalysisReview(workDir,review); }
+      if (review && review.state === 'reviewing' && review.origin !== 'R8') { review.state = 'resolved'; writeAnalysisReview(workDir,review); }
       // T7：mock 不跑正式机械复核；仍需物化与正式链同形的“裁决后视图”，
       // 供默认 Web R8 冒烟消费。这里只做既有 adjudication 的确定性 merge，不把 mock 升格为正式语义校验。
       if (!realValidate) {
@@ -4418,7 +4573,12 @@ async function runPipeline(opts) {
       onLog('[executor] R6-PLAIN 跳过：管道存在失败轮次（失败即终止，不执行白话层收口，保留真实错误）');
     }
   }
+  const completedReview = readAnalysisReview(workDir);
+  if (results.every(r => r.ok) && completedReview && completedReview.origin === 'R8' && completedReview.state === 'reviewing') {
+    completedReview.state = 'awaiting-guide';
+    writeAnalysisReview(workDir, completedReview);
+  }
   return { ok: results.every(r => r.ok), results, consumerBinding };
 }
 
-module.exports = { prepareSourceRoster, runRound, runPipeline, buildFullData, buildR3Prompt, buildR25Prompt, buildR2Prompt, buildR4Prompt, enrichR5Prompts, injectDataSource, assertPromptsWithinContext, resolveSkillPath, mergeNarrative, buildTransitionFinal, renderReport, loadFileConfig, validateRound, goodMockResponder, sleep, adjudicationRecheck, buildAdjudicationInput, translateUnitsLLM, reviewPlainUnits, applyPlain, rebuildApprovedPlainReport, refreshPlainArtifacts, regeneratePlainV2Artifacts, applyReaderGuide, embedVerifiedReaderGuide, loadPlainDict, injectAdjudication, parseAdjArtifact, loadSourceAnchorExemptions, warningsForAdjudication, assertSourceAnchorExemptionArtifactBinding, semanticFirstMode, semanticShadowRoot, createSemanticSidecarStore, createProductionActiveWorkflow, prepareProductionSemanticAuthority, buildProductionConsumerBinding, productionSemanticAuthorityBlock, resolveConsumerBinding, consumerViewPath, consumerBindingFromProducedViews, readerGuidePaths, buildReaderGuideInputFromWorkDir };
+module.exports = { prepareSourceRoster, runRound, runPipeline, buildFullData, buildR3Prompt, buildR25Prompt, buildR2Prompt, buildR4Prompt, enrichR5Prompts, injectDataSource, assertPromptsWithinContext, resolveSkillPath, mergeNarrative, buildTransitionFinal, renderReport, loadFileConfig, validateRound, goodMockResponder, sleep, adjudicationRecheck, buildAdjudicationInput, translateUnitsLLM, reviewPlainUnits, applyPlain, rebuildApprovedPlainReport, refreshPlainArtifacts, regeneratePlainV2Artifacts, applyReaderGuide, applyReaderGuideWithRecovery, captureReaderGuideReview, prepareReaderGuideRecovery, embedVerifiedReaderGuide, loadPlainDict, injectAdjudication, parseAdjArtifact, loadSourceAnchorExemptions, warningsForAdjudication, assertSourceAnchorExemptionArtifactBinding, semanticFirstMode, semanticShadowRoot, createSemanticSidecarStore, createProductionActiveWorkflow, prepareProductionSemanticAuthority, buildProductionConsumerBinding, productionSemanticAuthorityBlock, resolveConsumerBinding, consumerViewPath, consumerBindingFromProducedViews, readerGuidePaths, buildReaderGuideInputFromWorkDir };
