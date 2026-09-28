@@ -1,7 +1,7 @@
 // ============================================================
 // build-judge-web.js — Judge 网页版单文件构建器（W1）
 // 输入（只读）：根目录 install-skill.js 的 BLOCKS 单一事实源派生浏览器 runtime 闭包；
-//   Skill-Judge.md 作为唯一规则种子固定内嵌。
+//   Skill-Judge.md / Debate-Judge.md 作为镜像种子固定内嵌。
 // 输入（只读）：web/src/{engine,tendency,history-governance,flight-recorder,flight-export,ui}.js、web/src/app.css
 // 输出：web/judge.html（单文件交付）+ 可选 web/dist/judge-bundle.js（Node 测试用）
 // Judge 根内核只读：本脚本不修改主版本。
@@ -9,18 +9,49 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const ROOT = path.resolve(__dirname, '..');
 const CORE = ROOT;
 const WEB = __dirname;
 const { BLOCKS } = require(path.join(CORE, 'install-skill.js')); 
 
+// S4B portable-active：build-time fresh 校验 project-private cutover/router，
+// 只把 active profile + 不可变身份摘要投影进单文件；private lifecycle/audit bytes 永不打包。
+function buildProductionSemanticAttestation() {
+  const cutover = require(path.join(CORE, 'scripts', 'sc-semantic-production-cutover.js'));
+  const status = cutover.status(CORE);
+  if (!status || status.active_authorized !== true) {
+    return Object.freeze({ schema: 'judge-web-production-semantic-v1', mode: 'off' });
+  }
+  const authorization = cutover.assertActiveAuthorization(CORE);
+  const profile = cutover.activePromptProfile(CORE);
+  if (profile.profile_id !== authorization.profile_id || profile.sha256 !== authorization.prompt_bundle_sha256) {
+    throw new Error('[judge-web build] Production semantic profile/cutover binding drift');
+  }
+  return Object.freeze({
+    schema: 'judge-web-production-semantic-v1',
+    mode: 'active',
+    production_state_sha256: authorization.state_sha256,
+    router_state_sha256: authorization.router && authorization.router.state_sha256 || null,
+    profile_id: profile.profile_id,
+    prompt_bundle_sha256: profile.sha256,
+    prompt_profile: Object.freeze({
+      profile_id: profile.profile_id,
+      analyze: profile.analyze,
+      review: profile.review,
+      issueText: profile.issueText
+    })
+  });
+}
+const PRODUCTION_SEMANTIC_ATTESTATION = buildProductionSemanticAttestation();
+
 // ------------------------------------------------------------
 // 1) 浏览器 runtime 闭包：唯一资产源 = install-skill.js BLOCKS
 // ------------------------------------------------------------
 // 排除项只包含浏览器运行时不应承担的离线/安装职责；新增 BLOCK 默认进入 web，
 // 由 web-contract 的 in-memory load smoke 判断是否真的属于 runtime，而不是手工维护第五份清单。
-const WEB_RUNTIME_EXCLUDE = new Set(['EXECUTOR_BROWSER', 'INSTALLER', 'KEY_EXTRACT']);
+const WEB_RUNTIME_EXCLUDE = new Set(['EXECUTOR_BROWSER', 'INSTALLER', 'KEY_EXTRACT', 'CREATE_BASELINE']);
 const RUNTIME_BLOCKS = BLOCKS.filter(b => !WEB_RUNTIME_EXCLUDE.has(b.name));
 const blockEntry = b => [
   '/' + b.file,
@@ -39,14 +70,18 @@ const MODULES = RUNTIME_BLOCKS
     ['/web/flight-export.js', path.join(WEB, 'src', 'flight-export.js')],
     ['/web/judge-host-io.js', path.join(WEB, 'src', 'judge-host-io.js')],
     ['/web/report-host.js', path.join(WEB, 'src', 'report-host.js')],
+    ['/web/report-markdown.js', path.join(WEB, 'src', 'report-markdown.js')],
+    ['/web/ui-locales.js', path.join(WEB, 'src', 'ui-locales.js')],
+    ['/web/ui-i18n.js', path.join(WEB, 'src', 'ui-i18n.js')],
     ['/web/ui.js', path.join(WEB, 'src', 'ui.js')]
   ]);
 
 // ------------------------------------------------------------
-// 2) 静态种子文件（BLOCKS 非 JS + canonical Skill；内嵌到虚拟 FS）
+// 2) 静态种子文件（BLOCKS 非 JS + 两个交付镜像；内嵌到虚拟 FS）
 // ------------------------------------------------------------
 const STATIC_FILES = [
-  ['/Skill-Judge.md', path.join(CORE, 'Skill-Judge.md')]
+  ['/Skill-Judge.md', path.join(CORE, 'Skill-Judge.md')],
+  ['/Debate-Judge.md', path.join(CORE, 'Debate-Judge.md')]
 ].concat(RUNTIME_BLOCKS.filter(b => b.lang !== 'javascript').map(blockEntry));
 
 // ------------------------------------------------------------
@@ -54,6 +89,8 @@ const STATIC_FILES = [
 // ------------------------------------------------------------
 const RUNTIME_PRELUDE = `(function () {
 'use strict';
+
+var PRODUCTION_SEMANTIC = ${JSON.stringify(PRODUCTION_SEMANTIC_ATTESTATION)};
 
 /* ---------- TextEncoder 兜底 / 字节长度 ---------- */
 var TextEncoderImpl = (typeof TextEncoder !== 'undefined') ? TextEncoder : null;
@@ -209,13 +246,16 @@ var PATH_SHIM = {
   extname: posixExtname,
   resolve: posixResolve,
   relative: posixRelative,
-  normalize: posixNorm
+  normalize: posixNorm,
+  isAbsolute: function (p) { return String(p || '').charAt(0) === '/'; }
 };
 
 /* ---------- 虚拟文件系统（Map<路径,字符串>；目录由前缀推导+dirs 集合） ---------- */
 function createVfs() {
   var files = new Map();
   var dirs = new Set();
+  var fds = new Map();
+  var nextFd = 10;
   function ensureDir(p) {
     var n = posixNorm(p);
     var segs = n.split('/').filter(Boolean);
@@ -232,10 +272,11 @@ function createVfs() {
         files.set(posixNorm(k), String(obj[k]));
       }
     },
-    readFileSync: function (p) {
+    readFileSync: function (p, encoding) {
       var n = posixNorm(p);
       if (!files.has(n)) throw errNoEnt(p);
-      return files.get(n);
+      var text = files.get(n);
+      return encoding ? text : Buffer.from(text, 'utf8');
     },
     writeFileSync: function (p, data) {
       var n = posixNorm(p);
@@ -288,9 +329,38 @@ function createVfs() {
       if (dirs.has(n)) return { size: 0, isDirectory: function () { return true; }, isFile: function () { return false; } };
       throw errNoEnt(p);
     },
-    copyFileSync: function (a, b) { vfs.writeFileSync(b, vfs.readFileSync(a)); },
+    copyFileSync: function (a, b) { vfs.writeFileSync(b, vfs.readFileSync(a, 'utf8')); },
     unlinkSync: function (p) { files.delete(posixNorm(p)); },
-    renameSync: function (a, b) { vfs.writeFileSync(b, vfs.readFileSync(a)); vfs.unlinkSync(a); },
+    renameSync: function (a, b) { vfs.writeFileSync(b, vfs.readFileSync(a, 'utf8')); vfs.unlinkSync(a); },
+    // S4A-I3：Node host semantic sidecar 的最小 fd 兼容层。
+    // VFS 写入同步完成；浏览器真实 durability 由 engine/UI 的 IndexedDB barrier 承担。
+    openSync: function (p, flags) {
+      var n = posixNorm(p);
+      var f = String(flags || 'r');
+      if (f === 'wx' && files.has(n)) { var ex = new Error('EEXIST: file already exists: ' + p); ex.code = 'EEXIST'; throw ex; }
+      if (f === 'r' && !files.has(n)) throw errNoEnt(p);
+      if (f === 'w' || f === 'wx') vfs.writeFileSync(n, '');
+      if (f === 'a' && !files.has(n)) vfs.writeFileSync(n, '');
+      var fd = nextFd++;
+      fds.set(fd, { path: n, flags: f });
+      return fd;
+    },
+    writeSync: function (fd, data) {
+      var rec = fds.get(fd);
+      if (!rec) throw new Error('EBADF: bad file descriptor ' + fd);
+      var text = String(data == null ? '' : data);
+      var current = files.has(rec.path) ? files.get(rec.path) : '';
+      files.set(rec.path, rec.flags === 'a' ? current + text : text);
+      return byteLen(text);
+    },
+    fsyncSync: function (fd) {
+      if (!fds.has(fd)) throw new Error('EBADF: bad file descriptor ' + fd);
+      return undefined;
+    },
+    closeSync: function (fd) {
+      if (!fds.has(fd)) throw new Error('EBADF: bad file descriptor ' + fd);
+      fds.delete(fd);
+    },
     rmSync: function (p, opts) {
       var n = posixNorm(p), force = !!(opts && opts.force), recursive = !!(opts && opts.recursive);
       if (files.has(n)) { files.delete(n); return; }
@@ -336,19 +406,32 @@ function createVfs() {
 }
 
 /* ---------- 内建 shims ---------- */
-var cryptoShim = {  createHash: function (algo) {
+var cryptoShim = {
+  createHash: function (algo) {
     if (algo !== 'sha256') throw new Error('[judge-web] 浏览器仅支持 sha256（' + algo + ' 为 CLI 基线工具专用）');
     return {
       _data: '',
       update: function (d) { this._data += String(d); return this; },
       digest: function () { return sha256Hex(this._data); }
     };
+  },
+  randomBytes: function (n) {
+    var size = Math.max(0, Number(n) || 0);
+    var bytes = new Uint8Array(size);
+    var gc = (typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function')
+      ? globalThis.crypto : null;
+    if (gc) gc.getRandomValues(bytes);
+    else for (var i = 0; i < size; i++) bytes[i] = Math.floor(Math.random() * 256);
+    var hex = '';
+    for (var j = 0; j < bytes.length; j++) hex += bytes[j].toString(16).padStart(2, '0');
+    return new WebBuffer('', hex);
   }
 };
 
 var processShim = {
   env: {},
   argv: ['browser'],
+  pid: 1,
   platform: 'linux',
   execPath: 'browser',
   cwd: function () { return '/'; },
@@ -362,7 +445,19 @@ var processShim = {
 };
 var process = processShim;
 
-var Buffer = { byteLength: function (s) { return byteLen(String(s)); } };
+function WebBuffer(text, hexValue) {
+  this._text = String(text == null ? '' : text);
+  this._hex = hexValue == null ? null : String(hexValue);
+}
+WebBuffer.prototype.toString = function (encoding) {
+  return encoding === 'hex' && this._hex !== null ? this._hex : this._text;
+};
+WebBuffer.prototype.equals = function (other) { return this._text === String(other); };
+var Buffer = {
+  from: function (value) { return value instanceof WebBuffer ? new WebBuffer(value._text, value._hex) : new WebBuffer(value); },
+  isBuffer: function (value) { return value instanceof WebBuffer; },
+  byteLength: function (s) { return byteLen(String(s)); }
+};
 
 var vmShim = { Script: function (src) { this._src = src; } };
 vmShim.Script.prototype.runInThisContext = function () { return (0, eval)(this._src); };
@@ -440,6 +535,7 @@ function loadModule(id) {
 /* ---------- 对外 API ---------- */
 var BUNDLE = {
   vfs: VFS,
+  productionSemantic: PRODUCTION_SEMANTIC,
   processShim: processShim,
   cryptoShim: cryptoShim,
   sha256Hex: sha256Hex,
@@ -450,6 +546,7 @@ var BUNDLE = {
     pipelineController: function () { return loadModule('/pipeline-controller.js'); },
     renderReport: function () { return loadModule('/render-report.js'); },
     hostNode: function () { return loadModule('/executor/host-node.js'); },
+    semanticWorkflow: function () { return loadModule('/executor/semantic-workflow.js'); },
     apiProvider: function () { return loadModule('/executor/api-provider.js'); },
     core: function () { return loadModule('/executor/core.js'); },
     tendency: function () { return loadModule('/web/tendency.js'); },
@@ -460,6 +557,7 @@ var BUNDLE = {
     flightExport: function () { return loadModule('/web/flight-export.js'); },
     judgeHostIO: function () { return loadModule('/web/judge-host-io.js'); },
     reportHost: function () { return loadModule('/web/report-host.js'); },
+    uiI18n: function () { return loadModule('/web/ui-i18n.js'); },
     ui: function () { return loadModule('/web/ui.js'); }
   }
 };
@@ -483,22 +581,23 @@ Object.defineProperty(GLOBAL_ROOT.JUDGE_WEB_GLOBALS, 'tendency', {
 // ------------------------------------------------------------
 const API_PROVIDER_PATCH = {
   anchor:
-`      return await requestCompletionStream(cfg.baseUrl, cfg.apiKey, {
+`      return await requestCompletionStream(cfg.baseUrl, cfg.apiKey, withOptionalThinking({
         model: cfg.model,
         messages: [{ role: 'system', content: system }].concat(msgs),
         temperature: cfg.temperature !== undefined ? cfg.temperature : 0.3,
         max_tokens: cfg.maxTokens || DEFAULT_MAX_TOKENS   // 批 5（260812 P0-3）：补发 max_tokens（此前配置死旋钮）
-      }, { timeoutMs: cfg.timeoutMs, signal: opts.signal });`,
+      }, cfg), { timeoutMs: cfg.timeoutMs, signal: opts.signal });`,
   replacement:
 `      var extraBody = (typeof cfg.extraBody === 'object' && cfg.extraBody && !Array.isArray(cfg.extraBody)) ? cfg.extraBody : {};
       // [judge-web P1] 厂商请求形状仅在 Web adapter 层转换；根 Judge/api-provider 不感知供应商 preset。
+      // 260910 S5：现役 Node provider 已统一经过 withOptionalThinking；Web adapter 仅叠加 UI extraBody/omit*，不得绕过 thinking 归一。
       var requestBody = Object.assign({
         model: cfg.model,
         messages: [{ role: 'system', content: system }].concat(msgs)
       }, extraBody);
       if (!cfg.omitTemperature) requestBody.temperature = cfg.temperature !== undefined ? cfg.temperature : 0.3;
       if (!cfg.omitMaxTokens) requestBody.max_tokens = cfg.maxTokens || DEFAULT_MAX_TOKENS;
-      return await requestCompletionStream(cfg.baseUrl, cfg.apiKey, requestBody, { timeoutMs: cfg.timeoutMs, signal: opts.signal });`
+      return await requestCompletionStream(cfg.baseUrl, cfg.apiKey, withOptionalThinking(requestBody, cfg), { timeoutMs: cfg.timeoutMs, signal: opts.signal });`
 };
 
 // Web Flight Recorder：仅浏览器 bundle 生效的观测 sidecar；observer 返回值永不进入请求路径。
@@ -709,8 +808,8 @@ const API_PROVIDER_FR_FINISH = {
 };
 
 const API_PROVIDER_P2D = {
-  anchor: `requestBody, { timeoutMs: cfg.timeoutMs, signal: opts.signal });`,
-  replacement: `requestBody, { timeoutMs: cfg.timeoutMs, onProgress: opts.onProgress, signal: opts.signal });`
+  anchor: `withOptionalThinking(requestBody, cfg), { timeoutMs: cfg.timeoutMs, signal: opts.signal });`,
+  replacement: `withOptionalThinking(requestBody, cfg), { timeoutMs: cfg.timeoutMs, onProgress: opts.onProgress, signal: opts.signal });`
 };
 
 // ------------------------------------------------------------
@@ -766,17 +865,24 @@ const HOST_NODE_P4_1 = {
 `    const r = await runRound({
       workDir, round, cfg, mockResponder: opts.mockResponder, onLog,
       force: opts.force, realValidate, newContract, sourceAnchorExemptions,
-      codexRunner: opts.codexRunner
+      apiStub: opts.apiStub,
+      codexRunner: opts.codexRunner, consumerBinding,
+      semanticFirstMode: sfMode,
+      productionRoot: path.resolve(opts.productionRoot || path.join(__dirname, '..')),
+      productionSemanticAuthorityText
     });`,
   replacement:
 `    const r = await runRound({
       workDir, round, cfg, mockResponder: opts.mockResponder, onLog,
       force: opts.force, realValidate, newContract, sourceAnchorExemptions,
       apiStub: opts.apiStub,
-      codexRunner: opts.codexRunner
+      codexRunner: opts.codexRunner, consumerBinding,
+      semanticFirstMode: sfMode,
+      productionRoot: path.resolve(opts.productionRoot || path.join(__dirname, '..')),
+      productionSemanticAuthorityText
     });
     // [judge-web P4] 结构化 onRound 回调（260815 C1）：事件采集不依赖日志正则（CLI 不传 onRound → 零影响）
-    if (typeof opts.onRound === 'function') { try { opts.onRound(r); } catch (e) {} }`
+    if (!r.reviewRequests && typeof opts.onRound === 'function') { try { opts.onRound(r); } catch (e) {} }`
 };
 const HOST_NODE_P4_2A = {
   anchor:
@@ -854,16 +960,29 @@ const SOURCE_PATCHES = {
   ]
 };
 
+function isolateCandidateStorage(vp, src) {
+  if (vp === '/web/ui.js') {
+    return src.replaceAll("'judge_web_", "'judge_original_sc_general_")
+      .replaceAll("'debate_judge_tendency_", "'judge_original_sc_general_tendency_")
+      .replace("var DB_NAME = 'judge-web';", "var DB_NAME = 'judge-original-sc-gpt6-general';")
+      .replace("title: '辩论筑基 · Debate-Judge · 评委与复盘AI · 完全版'", "title: '辩论筑基 · Debate-Judge · Semantic Edition'");
+  }
+  if (vp === '/web/flight-recorder.js') return src.replace("const DB_NAME = 'judge-web-flight-recorder';", "const DB_NAME = 'judge-original-sc-gpt6-general-flight-recorder';");
+  return src;
+}
+
 function applyPatches(vp, src) {
   const patches = SOURCE_PATCHES[vp] || [];
-  let out = src;
-  for (const p of patches) {
+  let out = String(src).replace(/\r\n/g, '\n');
+  for (let i = 0; i < patches.length; i++) {
+    const p = { anchor: patches[i].anchor.replace(/\r\n/g, '\n'), replacement: patches[i].replacement.replace(/\r\n/g, '\n') };
     if (out.indexOf(p.anchor) === -1) {
-      throw new Error('[build-judge-web] 补丁锚点缺失（根目录 Judge 主版本已漂移，请复核补丁）: ' + vp);
+      const preview = String(p.anchor).split('\n')[0].slice(0, 120);
+      throw new Error('[build-judge-web] 补丁锚点缺失（根目录 Judge 主版本已漂移，请复核补丁）: ' + vp + ' patch#' + (i + 1) + ' anchor=' + preview);
     }
     out = out.replace(p.anchor, p.replacement);
   }
-  return out;
+  return isolateCandidateStorage(vp, out);
 }
 
 // ------------------------------------------------------------
@@ -874,14 +993,26 @@ function safeForHtml(src) {
 }
 
 const APP_CSS_PATH = path.join(WEB, 'src', 'app.css');
-
+// Local artwork edition: inline existing theme images into the standalone HTML.
+const UI_ASSETS = Object.freeze({
+  dark: path.join(WEB, 'assets', 'sanctum-dark.webp'),
+  light: path.join(WEB, 'assets', 'sanctum-light.webp')
+});
 function inlineAppCssAssets(css) {
-  return String(css);
+  let out = String(css);
+  for (const key of ['dark', 'light']) {
+    const fp = UI_ASSETS[key];
+    if (!fs.existsSync(fp)) throw new Error('[build-judge-web] UI asset missing: ' + fp);
+    const token = '__JUDGE_ASSET_' + key.toUpperCase() + '__';
+    if (!out.includes(token)) throw new Error('[build-judge-web] UI asset token missing in app.css: ' + token);
+    out = out.replaceAll(token, 'data:image/webp;base64,' + fs.readFileSync(fp).toString('base64'));
+  }
+  return out;
 }
 
 function buildBundle() {
   const parts = [];
-  parts.push('/* judge-web bundle v1 · reproducible build */');
+  parts.push('/* Debate-Judge Semantic Edition · 20260928-r2 · R8 recovery v6 · reproducible bundle */');
   // 种子文件以 JSON 字符串嵌入；</script 需转义（JSON 中 \/ 合法且解析回 /）
   parts.push('var SEED_FILES = ' + JSON.stringify(
     Object.fromEntries(STATIC_FILES.map(([vp, fp]) => [vp, fs.readFileSync(fp, 'utf-8')]))
@@ -908,13 +1039,14 @@ function buildBundle() {
 }
 
 function buildHtml(bundleJs, appCss, uiJs, sourceOf) {
+  const ver = '20260924';
   const summary = Object.entries(sourceOf).map(([vp, src]) => vp + ' (' + src.length + 'B)').join('\n  ');
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Debate-Judge · 网页版</title>
+<title>Debate-Judge Semantic Edition · 20260928-r2 · R8 recovery v6</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>">
 <style>
 ${safeForHtml(appCss)}
@@ -952,6 +1084,9 @@ function verifyBundle(js) {
   for (const [vp, fp] of STATIC_FILES) {
     if (!fs.existsSync(fp)) checks.push({ name: '种子存在 ' + vp, ok: false });
   }
+  for (const [key, fp] of Object.entries(UI_ASSETS)) {
+    if (!fs.existsSync(fp)) checks.push({ name: 'UI 资产存在 ' + key, ok: false });
+  }
   // Wayfinder semantic-core no-patch gate：semantic core只能来自 BLOCKS 单一源码，Web 不得 anchor-patch。
   const semanticCoreIds = new Set();
   for (const b of RUNTIME_BLOCKS.filter(x => x.semantic_core === true)) {
@@ -981,7 +1116,7 @@ function main() {
   const { js, sourceOf } = buildBundle();
   const appCssSource = fs.readFileSync(APP_CSS_PATH, 'utf-8');
   const appCss = inlineAppCssAssets(appCssSource);
-  const uiJs = fs.readFileSync(path.join(WEB, 'src', 'ui.js'), 'utf-8');
+  const uiJs = isolateCandidateStorage('/web/ui.js', fs.readFileSync(path.join(WEB, 'src', 'ui.js'), 'utf-8'));
 
   const checks = verifyBundle(js);
   const failed = checks.filter(c => !c.ok);
@@ -997,10 +1132,17 @@ function main() {
   // --emit-bundle 标志保留兼容解析（恒写后为无操作，外部脚本带标志运行不受影响）
   fs.writeFileSync(outBundlePath, js, 'utf-8');
   console.log('[build-judge-web] bundle → ' + outBundlePath + ' (' + js.length + 'B)' + (emitBundle ? '' : '（恒写；--emit-bundle 已非必需）'));
-  // W-C2 + UI2.0：模块、种子与 source CSS 均是一等 freshness 输入。
-  const inputSnapshot = MODULES.concat(STATIC_FILES).map(([, fp]) => ({ p: fp, mtimeMs: fs.statSync(fp).mtimeMs }));
-  inputSnapshot.push({ p: APP_CSS_PATH, mtimeMs: fs.statSync(APP_CSS_PATH).mtimeMs });
-  fs.writeFileSync(path.join(WEB, 'dist', '.inputs.json'), JSON.stringify({ schema: 'judge-web-dist-inputs-v1', builtAt: new Date().toISOString(), files: inputSnapshot }));
+  // W-C2 + S5D + UI2.0：模块、种子、source CSS 与独立 UI 美术均是一等 freshness 输入。
+  // 内容 SHA-256 是 freshness 权威；mtime 仅用于诊断，避免 read-only 验证造成 touch 假 stale。
+  const snapshotFile = fp => ({
+    p: fp,
+    mtimeMs: fs.statSync(fp).mtimeMs,
+    sha256: crypto.createHash('sha256').update(fs.readFileSync(fp)).digest('hex')
+  });
+  const inputSnapshot = MODULES.concat(STATIC_FILES).map(([, fp]) => snapshotFile(fp));
+  inputSnapshot.push(snapshotFile(APP_CSS_PATH));
+  Object.values(UI_ASSETS).forEach(fp => inputSnapshot.push(snapshotFile(fp)));
+  fs.writeFileSync(path.join(WEB, 'dist', '.inputs.json'), JSON.stringify({ schema: 'judge-web-dist-inputs-v2', builtAt: new Date().toISOString(), files: inputSnapshot }));
   const html = buildHtml(js, appCss, uiJs, sourceOf);
   fs.writeFileSync(outHtmlPath, html, 'utf-8');
   console.log('[build-judge-web] judge.html → ' + outHtmlPath + ' (' + html.length + 'B)');

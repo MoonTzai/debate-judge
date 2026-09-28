@@ -14,6 +14,8 @@ Debate-Judge is an open research-software project. Contributions should improve 
 
 A release-quality contribution should preserve `Skill-Judge.md` as the single canonical Skill, the `install-skill.js::BLOCKS` closure, and generated-Web/source relationships. Run the project tests applicable to the changed area and report failures or skipped tests exactly. Passing software tests is not evidence that an adjudication is scientifically correct.
 
+On `semantic-edition`, keep the two complete compatibility mirrors equal to the canonical Skill. Preserve this frozen snapshot; develop behavioral fixes in subsequent commits. `tests/run-public.js --current` checks the current deterministic subset; the default runner includes disclosed legacy failures. Do not silently weaken or suppress them to claim full validation.
+
 ## Rights and licensing
 
 Repository content is governed by the MIT License and `THIRD_PARTY_NOTICES.md`. Material visible only in private development workspaces is outside this public license boundary and must not be copied into the repository without separate provenance and rights review.

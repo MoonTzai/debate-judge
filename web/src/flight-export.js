@@ -242,7 +242,136 @@ function buildFlightExportArchive(input) {
   return { bytes: makeZip(entries), manifest: manifest, entries: entries.map(function (e) { return e.path; }) };
 }
 
+function summarizeFlightManifest(manifest) {
+  var s = { sessions: 0, requests: 0, missingItems: 0, affectedRequests: 0, truncatedRequests: 0, truncatedRuns: 0, complete: true };
+  // Top-level missing repeats nested details; count the nested evidence once.
+  (manifest.sessions || []).forEach(function (session) {
+    s.sessions++;
+    s.missingItems += (session.missing || []).length;
+    (session.flightRuns || []).forEach(function (run) {
+      s.missingItems += (run.missing || []).length;
+      if (run.capture_truncated) s.truncatedRuns++;
+      (run.requests || []).forEach(function (req) {
+        s.requests++;
+        if (req.capture_truncated) s.truncatedRequests++;
+        if ((req.missing || []).length || (req.mismatch || []).length || req.capture_truncated || req.artifact_read_error) s.affectedRequests++;
+      });
+    });
+  });
+  s.complete = !(s.missingItems || s.affectedRequests || s.truncatedRuns);
+  return s;
+}
+
+// Current-session diagnostics only. Inputs are snapshots; this function cannot
+// mutate Judge, storage, or the recorder, and does not infer semantic approval.
+function buildDebugExportArchive(input) {
+  input = input || {};
+  var redactions = [], seenRedactions = Object.create(null);
+  var secrets = (input.secrets || []).filter(function (s) { return typeof s === 'string' && s.length > 0; });
+  var replacement = utf8Bytes('[REDACTED_CREDENTIAL]');
+  function noteRedaction(where) {
+    if (!seenRedactions[where]) { seenRedactions[where] = true; redactions.push(where); }
+  }
+  function scrub(value, where) {
+    if (typeof value === 'string') {
+      secrets.forEach(function (secret) {
+        if (value.indexOf(secret) >= 0) { value = value.split(secret).join('[REDACTED_CREDENTIAL]'); noteRedaction(where); }
+      });
+      return value;
+    }
+    if (value instanceof Uint8Array || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+      var out = utf8Bytes(value);
+      secrets.forEach(function (secret) {
+        var needle = utf8Bytes(secret), parts = [], start = 0;
+        for (var i = 0; i <= out.length - needle.length; i++) {
+          var match = true;
+          for (var j = 0; j < needle.length; j++) if (out[i + j] !== needle[j]) { match = false; break; }
+          if (!match) continue;
+          parts.push(out.subarray(start, i), replacement);
+          i += needle.length - 1; start = i + 1;
+        }
+        if (parts.length) { parts.push(out.subarray(start)); out = concatBytes(parts); noteRedaction(where); }
+      });
+      return out;
+    }
+    if (Array.isArray(value)) return value.map(function (v, i) { return scrub(v, where + '[' + i + ']'); });
+    if (!value || typeof value !== 'object') return value;
+    var copy = {};
+    Object.keys(value).forEach(function (key) {
+      if (/^(?:api[-_]?key|x-api-key|authorization|access[-_]?token|password|client[-_]?secret)$/i.test(key)) {
+        copy[key] = '[REDACTED_CREDENTIAL]'; noteRedaction(where + '/' + key);
+      } else if (/(?:^|\/)(?:\.?api-config|credentials|secrets)\.json$/i.test(key)) {
+        noteRedaction(where + '/' + key); // Credential files are not diagnostic artifacts.
+      } else copy[key] = scrub(value[key], where + '/' + key);
+    });
+    return copy;
+  }
+  var data = {};
+  Object.keys(input).forEach(function (key) { if (key !== 'secrets') data[key] = scrub(input[key], key); });
+  var workDir = String(data.workDir || ''), exportedAt = data.exportedAt || new Date().toISOString();
+  var files = data.files || {}, errors = data.readErrors || [];
+  var flightSource = data.flightSource || { sessionRecord: { id: workDir, dir: workDir }, flightRuns: [] };
+  var flight = buildFlightExportArchive({ sessions: [flightSource], exportedAt: exportedAt });
+  var summary = summarizeFlightManifest(flight.manifest);
+  var entries = [];
+  function addJson(name, value) { entries.push(jsonEntry(name, value)); }
+  var sessionPayload = {
+    kind: 'judge-web-session-v1', exportedAt: exportedAt, workDir: workDir,
+    files: files, settings: data.settings || {}, captureState: data.captureState,
+    sessionRecord: data.sessionRecord || null, runModel: data.runModel || null
+  };
+  if (workDir && Object.keys(files).length) addJson('session/session-export.json', sessionPayload);
+  addJson('session/files.json', files);
+  addJson('session/session-record.json', data.sessionRecord || null);
+  addJson('session/run-model.json', data.runModel || null);
+  addJson('session/settings.json', data.settings || {});
+  addJson('session/persisted-checkpoint.json', data.persistedSnapshot || null);
+  addJson('session/previous-versions.json', data.versions || []);
+  addJson('debug/environment.json', data.environment || {});
+  addJson('debug/telemetry.json', data.telemetry || {});
+  entries.push({ path: 'logs/Judge-run-log.txt', data: '\ufeff' + String(data.logText || '') });
+  entries.push({ path: 'flight/flight-evidence.zip', data: flight.bytes });
+  entries.push(jsonEntry('flight/manifest.json', flight.manifest));
+  var artifacts = {};
+  [['.tmp-debate.txt', 'source/transcript.txt'], ['report.html', 'reports/report.html'],
+    ['report-plain.html', 'reports/report-plain.html']].forEach(function (pair) {
+    var content = files[workDir + '/' + pair[0]];
+    artifacts[pair[0]] = typeof content === 'string';
+    if (typeof content === 'string') entries.push({ path: pair[1], data: content });
+  });
+  var manifest = {
+    kind: 'judge-web-debug-bundle-v1', version: 1, exportedAt: exportedAt,
+    captureFinishedAt: data.captureFinishedAt || exportedAt, workDir: workDir,
+    captureState: data.captureState || 'unknown', authority: 'evidence-only-readonly',
+    fileCount: Object.keys(files).length, artifacts: artifacts,
+    liveFilesUsed: !!data.liveFilesUsed, persistedSnapshotPresent: !!data.persistedSnapshot,
+    flightSummary: summary, pendingFlightBytesAtStart: data.pendingFlightBytes || 0,
+    readErrors: errors, redactedLocations: redactions,
+    missing: flight.manifest.missing.slice(),
+    notes: [
+      'Only this session is included. Missing or partial evidence is not reconstructed.',
+      'Current memory files and durable checkpoints are saved separately; export never changes either.',
+      'Live capture is not an atomic checkpoint across the UI, Judge, and Flight stores. Requests may continue during export.',
+      'Detailed missing/truncated/mismatched request evidence is in flight/manifest.json.',
+      'Credential fields and known local API key values are redacted in exported copies. Transcripts and model output remain sensitive.',
+      'This bundle does not certify a judgment or that an interrupted stage can be resumed without repeating its request.'
+    ],
+    entries: ['manifest.json', 'README.txt'].concat(entries.map(function (e) { return e.path; }))
+  };
+  if (!workDir || !Object.keys(files).length) manifest.missing.push({ item: 'session_files' });
+  if (!data.logText) manifest.missing.push({ item: 'ui_run_log' });
+  entries.unshift(jsonEntry('manifest.json', manifest), { path: 'README.txt', data:
+    'Debate-Judge Semantic Edition - Debug bundle\n' +
+    'logs/: complete captured UI log. session/: current export, durable checkpoints, settings, run model and prior versions.\n' +
+    'source/ and reports/: available transcript and HTML reports. Other round outputs, prompts and review artifacts remain in session/files.json.\n' +
+    'flight/flight-evidence.zip: recorded requests and raw responses for all runs associated with this session.\n' +
+    'Read both manifests for missing, partial or redacted evidence. Contains private transcript/model content; share deliberately.\n' });
+  return { bytes: makeZip(entries), manifest: manifest };
+}
+
 module.exports = {
+  buildDebugExportArchive: buildDebugExportArchive,
+  summarizeFlightManifest: summarizeFlightManifest,
   buildFlightExportArchive: buildFlightExportArchive,
   makeZip: makeZip,
   crc32: crc32,

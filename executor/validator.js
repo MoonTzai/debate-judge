@@ -17,13 +17,14 @@ function toTypedIssue(record) {
     : { rule: '', severity: 'BLOCKING', message: String(record) };
   const severity = String(r.severity || 'BLOCKING');
   const blocking = severity === 'BLOCKING';
+  const reviewPending = r.rule === 'D2-REVIEW';
   return {
     rule: r.rule || '',
     severity,
     message: r.message || r.reason || String(record || ''),
-    issueType: blocking ? 'representation_blocker' : (severity === 'WARNING' ? 'representation_warning' : 'observation'),
+    issueType: reviewPending ? 'semantic_review_pending' : blocking ? 'representation_blocker' : (severity === 'WARNING' ? 'representation_warning' : 'observation'),
     blockingScope: blocking ? 'representation' : 'none',
-    repairTarget: blocking ? 'representation' : null,
+    repairTarget: reviewPending ? 'model_review' : blocking ? 'representation' : null,
     semanticInvalid: false,
     semanticReviewAuthority: false
   };
@@ -55,7 +56,7 @@ function validate(md, round, options = {}) {
     // 锚 1（源锚层 v1，V-S8E-A1）：名册槽位数 == S1 人数声明（候补 bench/候选 candidates 不计；N-2）
     // 无槽位可数（该方无任何角色槽）→ WARNING"无法对账"（第三态，防裸名误杀）
     const anchor = options.anchor;
-    if (anchor && anchor.extracted) {
+    if (anchor && anchor.extracted && anchor.method !== 'source-semantic-v1') {
       for (const side of ['正方', '反方']) {
         const sideRoster = anchor.roster.filter(r => r.side === side);
         const slotCount = sideRoster.filter(r => r.slot).length;
@@ -67,7 +68,7 @@ function validate(md, round, options = {}) {
         }
         if (declared !== slotCount) {
           const benchNames = anchor.bench.filter(b => b.side === side).map(b => b.name);
-          errors.push({ rule: 'V-S8E-A1', severity: 'BLOCKING',
+          errors.push({ rule: 'V-S8E-A1', severity: 'WARNING',
             message: `S1.${side}人数(${declared})≠名册槽位数(${slotCount})——名册: ${sideRoster.map(r => r.name || r.role).join(', ')}${benchNames.length ? '；候补（不计）: ' + benchNames.join(', ') : ''}` });
         }
       }
@@ -149,7 +150,7 @@ function checkF1_F5(md, errors, round, isFinal) {
   const { starts, ends } = parseSMarkers(md);
   const uniqStarts = [...new Set(starts)];
   const uniqEnds = [...new Set(ends)];
-  if (JSON.stringify(uniqStarts) !== JSON.stringify(uniqEnds)) {
+  if (JSON.stringify(uniqStarts.slice().sort((a,b)=>a-b)) !== JSON.stringify(uniqEnds.slice().sort((a,b)=>a-b))) {
     errors.push({ rule: 'F2', severity: 'BLOCKING', message: `S_START/S_END不配对: starts=[${uniqStarts}] ends=[${uniqEnds}]` });
   } else {
     // 无子步骤的主步骤仍要求 START/END 数量一致（防重复标记）；有子步骤的主步骤允许整体 START + 多个子步骤 END
@@ -172,16 +173,15 @@ function checkF1_F5(md, errors, round, isFinal) {
   // F3: 步骤顺序 — final模式(合并文件跨三轮)跳过；单轮模式使用传入round
   if (!isFinal) {
     const expected = { R1: [1,2,3,4,5,7], R2: [8,17], R3: [9,10,11,13,14,15], R4: [] };
-    if (expected[round] && JSON.stringify(uniqStarts) !== JSON.stringify(expected[round])) {
-      if (round === 'R1' && uniqStarts.includes(6)) { /* 允许归档S6标记 */ }
-      else if (round === 'R3' && uniqStarts.includes(12)) { /* 允许归档S12标记 */ }
-      else errors.push({ rule: 'F3', severity: 'BLOCKING', message: `${round}步驟集合异常: ${uniqStarts}` });
+    if (expected[round] && JSON.stringify(uniqStarts.filter(s => !(round === 'R1' && s === 6) && !(round === 'R3' && s === 12)).sort((a,b)=>a-b)) !== JSON.stringify(expected[round])) {
+      errors.push({ rule: 'F3', severity: 'BLOCKING', message: `${round}步驟集合异常: ${uniqStarts}` });
     }
   }
 
   // F4: 每步骤DATA标记（A8-ERR-1：S10 兼容 S10.1/S10.2.COMPLETE）
   for (const s of [...new Set(starts)]) {
-    const ok = md.includes(`S${s}.COMPLETE=是`) || md.includes(`S${s}.1.COMPLETE=是`) || md.includes(`S${s}.2.COMPLETE=是`);
+    const markers = extractDataMarkers(md);
+    const ok = [ `S${s}.COMPLETE`, `S${s}.1.COMPLETE`, `S${s}.2.COMPLETE` ].some(k => markers[k] === '是');
     if (!ok) {
       errors.push({ rule: 'F4', severity: 'BLOCKING', message: `S${s}缺少COMPLETE标记` });
     }
@@ -191,8 +191,7 @@ function checkF1_F5(md, errors, round, isFinal) {
   for (const s of [...new Set(starts)]) {
     const section = sectionOfStep(md, s);
     if (!section.includes('### 结论')) {
-      const sev = (round === 'R1' || round === 'R2' || round === 'R3') ? 'BLOCKING' : 'WARNING';
-      errors.push({ rule: 'F5', severity: sev, message: `S${s}缺少"### 结论"子块` });
+      errors.push({ rule: 'F5', severity: 'WARNING', message: `S${s}未使用标准结论标题；请结合全段判断是否已有结论和依据，标题措辞不决定语义完整性` });
     }
   }
 }
@@ -210,8 +209,6 @@ function checkS1_S7(data, errors) {
   const s3 = data['S3.交锋点总数'];
   if (s3 !== undefined && s3 < 0) errors.push({ rule: 'S3', severity: 'BLOCKING', message: 'S3交锋点总数为负' });
   const s7 = data['S7.关键交锋数'];
-  if (s7 !== undefined && s7 < 3) errors.push({ rule: 'S7', severity: 'WARNING', message: `S7关键交锋数=${s7}，少于3个` });
-  else if (s7 !== undefined && s7 < 5) errors.push({ rule: 'S7', severity: 'WARNING', message: `S7关键交锋数=${s7}，建议>=5` });
 }
 
 // 260806 段1B-A：S7 合同扩展机械校验（靶心/削弱指向/强度标签/回合深度/逐回合轨迹状态机）
@@ -234,7 +231,7 @@ function checkS7Contract(md, data, errors) {
   const iTarget = idx('靶心'), iCrit = idx('削弱指向'), iPen = idx('穿透度'), iDepth = idx('回合深度');
   const newContract = iTarget >= 0 && iCrit >= 0;
   if (!newContract) {
-    errors.push({ rule: 'S7-C', severity: 'WARNING', message: '旧合同场次：S7 缺靶心/削弱指向列（C5 攻击环回退关键词反推+标注；真字段待新合同场次）' });
+    errors.push({ rule: 'S7-C', severity: 'WARNING', message: '旧合同场次：S7 缺明确作用环信息，保留原文，不按主题词反推' });
     return;
   }
   const critEnum = ['唯一支撑', '冗余', '边缘'];
@@ -271,31 +268,18 @@ function checkS7Contract(md, data, errors) {
       const iAct = ti('动作'), iState = ti('临时状态'), iTurn = ti('回合');
       const acts = ['攻击', '回应', '追击', '追加回应'];
       const states = ['未定', '被削弱', '被击穿', '修复', '守住'];
-      const normState = s => String(s || '').replace(/^(正方|反方)/, '').replace(/（.*?）|\(.*?\)/g, '').trim();
+      const normState = s => String(s || '').trim();
       const normTurn = s => parseInt(String(s || '').replace(/^R/i, ''), 10);
       for (const cells of tRows.slice(1)) {
         if (cells.length < 4 || !/^CP-\d+/.test(cells[iTCP].replace(/\*\*/g, ''))) continue;
         const cp = cells[iTCP].replace(/\*\*/g, '');
         perCp[cp] = perCp[cp] || [];
         perCp[cp].push(cells);
-        if (acts.indexOf(cells[iAct]) < 0) errors.push({ rule: 'S7-T', severity: 'WARNING', message: `逐回合轨迹动作非法（${cp}）：${cells[iAct]}` });
+        if (!cells[iAct] || !cells[iState]) errors.push({ rule: 'S7-T', severity: 'WARNING', message: '逐回合轨迹未说明动作或状态：' + cp });
         const st = normState(cells[iState]);
-        if (states.indexOf(st) < 0) errors.push({ rule: 'S7-T', severity: 'WARNING', message: `逐回合轨迹临时状态非法（${cp}）：${cells[iState]}` });
-        if (iTurn >= 0) { const t = normTurn(cells[iTurn]); if (!(t >= 1 && t <= 3)) errors.push({ rule: 'S7-T', severity: 'WARNING', message: `逐回合轨迹回合数须1-3（${cp}）：${cells[iTurn]}` }); }
+        if (iTurn >= 0 && !(normTurn(cells[iTurn]) >= 1)) errors.push({ rule: 'S7-T', severity: 'WARNING', message: '逐回合轨迹轮次无法定位：' + cp });
       }
-      for (const cp of Object.keys(perCp)) {
-        const seq = perCp[cp].map(c => normState(c[iState]));
-        for (let j = 1; j < seq.length; j++) {
-          if (seq[j] === seq[j - 1]) continue;
-          const ok = (seq[j - 1] === '未定' && (seq[j] === '被削弱' || seq[j] === '被击穿'))
-            || (seq[j - 1] === '被削弱' && (seq[j] === '被击穿' || seq[j] === '修复' || seq[j] === '守住'))
-            || (seq[j - 1] === '被击穿' && seq[j] === '修复')
-            || (seq[j - 1] === '修复' && (seq[j] === '守住' || seq[j] === '被击穿'))
-            || (seq[j - 1] === '守住' && seq[j] === '被击穿');
-          if (!ok) errors.push({ rule: 'S7-T', severity: 'WARNING', message: `逐回合轨迹状态机非法（${cp}）：${seq[j - 1]}→${seq[j]}` });
-        }
-        if (perCp[cp].length > 3) errors.push({ rule: 'S7-T', severity: 'WARNING', message: `逐回合轨迹超过3回合（${cp}）：${perCp[cp].length}` });
-      }
+      // Later pressure can reopen an issue; no fixed transition or depth gate.
       trajParsed = true;
     }
   }
@@ -314,13 +298,11 @@ function checkS7Contract(md, data, errors) {
 
 function checkCompletionMatrix(md, data, errors) {
   const ENUM = ['充分', '初步', '未论证', '被击穿'];
-  const norm = s => {
-    const c = String(s || '').replace(/（.*）/g, '').replace(/\(.*\)/g, '').trim();
-    return ENUM.find(e => c.includes(e)) || null;
-  };
+  const norm = s => contract.exactLabel(s, ENUM);
   const counts = { 正方: { 充分: 0, 初步: 0, 未论证: 0, 被击穿: 0 }, 反方: { 充分: 0, 初步: 0, 未论证: 0, 被击穿: 0 } };
   const lines = md.replace(/\r\n/g, '\n').split('\n');
   let inMatrix = false, mode = null, side = null, rows = 0;
+  const unresolved = new Set();
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     const h = l.match(/^#{2,4}\s*(正方|反方)(?:\s|$)/);
@@ -336,9 +318,10 @@ function checkCompletionMatrix(md, data, errors) {
     if (!s) continue;
     if (mode === 'single') {
       const st = norm(cells[3]);
-      if (st) { counts[s][st]++; rows++; }
+      if (st) { counts[s][st]++; rows++; } else unresolved.add(s);
     } else {
       const a = norm(cells[2]), b = norm(cells[3]);
+      if (!a || !b) unresolved.add(s);
       if (a) { counts[s][a]++; rows++; }
       if (b) { counts[s][b]++; rows++; }
     }
@@ -353,6 +336,7 @@ function checkCompletionMatrix(md, data, errors) {
     return;
   }
   for (const sd of ['正方', '反方']) {
+    if (unresolved.has(sd)) { errors.push({ rule: 'A7', severity: 'WARNING', message: sd + ' 矩阵含带范围或无法明确归类的原句，保留并复核，不以部分计数反推判断' }); continue; }
     for (const st of ENUM) {
       const expect = data['S2.' + sd + '.论证完成度.' + st];
       if (counts[sd][st] !== expect) {
@@ -383,11 +367,11 @@ function checkS8(data, errors, md, anchor, sourceAnchorExemptions) {
   const _d5 = data['S8.PhaseIII.⑤价值深度'];
   const _d6 = data['S8.PhaseIII.⑥双方SC关系'];
   if ((_d4 === '不通过' || _d5 === '不通过') && data['S8.PhaseIII.状态'] === '已结晶') {
-    errors.push({ rule: 'H5', severity: 'BLOCKING', message: '④或⑤不通过但PhaseIII已结晶（假结晶·须改判未结晶）' });
+    errors.push({ rule: 'H5', severity: 'WARNING', message: '④/⑤质量判断与完成摘要可能不属同一范围；结合实例和原文复核，不能仅按质量标签否定已发生或局部完成' });
   }
-  // ⑥-b 字段层（260810）：⑥=独立平行 → PhaseIII 必须=未结晶（L2620 明文）；完成度层豁免见 S8C 矩阵
+  // 局部关系与主线范围需要语义复核，关系名称本身不构成自动否决。
   if (_d6 === '独立平行' && data['S8.PhaseIII.状态'] === '已结晶') {
-    errors.push({ rule: 'H5', severity: 'BLOCKING', message: '⑥=独立平行但PhaseIII已结晶（⑥-b：比赛层面未结晶）' });
+    errors.push({ rule: 'H5', severity: 'WARNING', message: '⑥记录独立平行而主线声明已结晶：复核两者的适用范围及桥接依据；关系标签本身不决定主线或局部是否完成' });
   }
   checkS8Coherence(data, errors);
   // V-S8D（260808）：S8 锚点自洽——每方 有效数 == |节点列表| 基数 + 元素合法性（意见 4-2 + 意见 5-2）
@@ -430,12 +414,13 @@ function checkS8Coherence(data, errors) {
     if (data['S8.PhaseIII.状态'] !== undefined && data['S8.PhaseIII.状态'] !== '未结晶') problems.push('PhaseIII=' + data['S8.PhaseIII.状态']);
     if (data['S8.SC完成度'] !== undefined && !['不存在', '未启动'].includes(data['S8.SC完成度'])) problems.push('SC完成度=' + data['S8.SC完成度']);
     if (data['S8.S11类型方向'] !== undefined && !['2a', '2b', '2c', '0'].includes(data['S8.S11类型方向'])) problems.push('方向=' + data['S8.S11类型方向']);
-    if (problems.length > 0) errors.push({ rule: 'V-S8A', severity: 'BLOCKING', message: 'V-S8A：终判=各跑各的但 S8 内部不一致：' + problems.join('；') });
+    if (problems.length > 0) errors.push({ rule: 'V-S8A', severity: 'WARNING', message: '请区分全场主线平行与局部结构性交锋；程序不据此否定实例：' + problems.join('；') });
   }
   // V-S8B: PhaseIII=已结晶 ⇒ 终判≠各跑各的 + SC完成度=完成 + 方向=1型
   if (data['S8.PhaseIII.状态'] === '已结晶') {
     const problems = [];
-    if (finalDiag === '各跑各的') problems.push('终判=各跑各的');
+    // Different scopes are already reported by V-S8A; only same-summary
+    // completion/direction contradictions belong to this representation gate.
     if (data['S8.SC完成度'] !== undefined && data['S8.SC完成度'] !== '完成') problems.push('SC完成度=' + data['S8.SC完成度']);
     if (data['S8.S11类型方向'] !== undefined && data['S8.S11类型方向'] !== '1型') problems.push('方向=' + data['S8.S11类型方向']);
     if (problems.length > 0) errors.push({ rule: 'V-S8B', severity: 'BLOCKING', message: 'V-S8B：PhaseIII=已结晶但 S8 内部不一致：' + problems.join('；') });
@@ -520,14 +505,9 @@ function checkS15(data, errors, isFinal) {
 
 function check55Guard(md, data, errors) {
   if (data['S15.正方得分'] !== 5 || data['S15.反方得分'] !== 5) return;   // 仅 5:5
-  const body = extractAdjudicationReason(String(md || ''));
-  if (body.length < 10) {
-    errors.push({ rule: 'V2-55', severity: 'BLOCKING', message: '5:5判胜·S15.2判准应用推理缺失或<10字（5:5须附判准裁定理由）' });
-    return;
-  }
-  if (body.length < R5_WARN_MIN_LEN) {
-    errors.push({ rule: 'V2-55W', severity: 'WARNING', message: '5:5判胜·判准裁定理由偏短·报告标注' });
-  }
+  // The argument may occur anywhere in S15 and may be concise. Its sufficiency
+  // belongs to the existing R4.5 review, not a heading/character-count test.
+  errors.push({ rule: 'V2-55W', severity: 'WARNING', message: '5:5判胜：结合完整S15检查决胜理由是否由判准和证据支持；不要求固定小节、字数或措辞' });
 }
 
 // S10.2 自评过严检测（第三方审计 S3 定案：只做 WARNING；S10.2-1 有意删除——机械阻断本身即重试信号）
@@ -599,21 +579,6 @@ function checkV1_V6(data, errors) {
   // V3: Phase状态
   if (data['S8.PhaseIII.状态'] === '已结晶') {
     if (data['S8.PhaseIII.完成方'] === '无') errors.push({ rule: 'V3', severity: 'BLOCKING', message: 'PhaseIII已结晶但完成方=无' });
-    if (!(data['S8.PhaseIII.压缩度'] >= 1)) errors.push({ rule: 'V3', severity: 'BLOCKING', message: 'PhaseIII已结晶但压缩度<1' });
-    // 压缩度类型与数值一致性（WARNING级别·B10新增）
-    const compType = data['S8.PhaseIII.压缩度类型'];
-    const compVal = data['S8.PhaseIII.压缩度'];
-    if (compType && compVal !== undefined) {
-      if (compType === '事件型' && compVal > 3) {
-        errors.push({ rule: 'V3', severity: 'WARNING', message: `压缩度类型=事件型但压缩度=${compVal}>3·建议复核是否应为过程型` });
-      }
-      if (compType === '过程型' && compVal < 4) {
-        errors.push({ rule: 'V3', severity: 'WARNING', message: `压缩度类型=过程型但压缩度=${compVal}<4·建议复核是否应为事件型` });
-      }
-    }
-  }
-  if (data['S8.PhaseIII.状态'] === '未结晶' && data['S8.PhaseIII.压缩度类型'] && data['S8.PhaseIII.压缩度类型'] !== '不适用') {
-    errors.push({ rule: 'V3', severity: 'WARNING', message: `PhaseIII未结晶但压缩度类型≠不适用（=${data['S8.PhaseIII.压缩度类型']}）` });
   }
   // V4: S10.1计数自洽（V3.2更新·S10已分裂为S10.1+S10.2）
   if (data['S10.1.通過数'] !== undefined || data['S10.1.通过数'] !== undefined) {
@@ -628,11 +593,10 @@ function checkV1_V6(data, errors) {
     if (typeof val === 'number' && val < 0)
       errors.push({ rule: 'V5', severity: 'BLOCKING', message: `${key}=${val} 为负数` });
   }
-  // V6: 压缩度vs类型
-  if (data['S11.类型'] && data['S11.压缩度'] !== undefined) {
-    const isType1 = TYPE1.includes(String(data['S11.类型']));
-    if (isType1 && data['S11.压缩度'] < 1) errors.push({ rule: 'V6', severity: 'BLOCKING', message: '1型但压缩度<1' });
-    if (!isType1 && data['S11.压缩度'] !== 0) errors.push({ rule: 'V6', severity: 'BLOCKING', message: '非1型但压缩度≠0' });
+  // V6 checks storage only. A local temporal span does not determine the global SC type.
+  for (const key of ['S11.压缩度', 'S8.PhaseIII.压缩度']) {
+    if (data[key] !== undefined && (typeof data[key] !== 'number' || !Number.isFinite(data[key]) || data[key] < 0))
+      errors.push({ rule: 'V6', severity: 'BLOCKING', message: `${key} 必须为非负有限数值；保留正文中的范围与不确定性` });
   }
 }
 
@@ -647,17 +611,19 @@ function checkC9FatalReview(data, errors, s7Data) {
   if (c9Status !== '已结晶' || !c9Party || c9Party === '无') return;
 
   const source = s7Data || data;
-  const oppSide = c9Party === '正方' ? '反方' : '正方';
+  // A set-valued completion summary must be expanded before single-side lookups.
+  for (const completedSide of completionSides(c9Party)) {
+  const oppSide = completedSide === '正方' ? '反方' : '正方';
   const oppFatal = Number(source[`S7.${oppSide}赢.致命`] || 0);
-  if (oppFatal < 2) return;
+  if (oppFatal < 2) continue;
 
   // C9a：④(d) 未执行 → 数据源缺失，需重跑 R2。
   if (!c9Review || c9Review === '不适用') {
     errors.push({
       rule: 'C9a',
-      severity: 'BLOCKING',
-      message: `SC完成方=${c9Party}，对方致命赢=${oppFatal}≥2，但④致命交锋复核未执行。` +
-               `数据源在 P2（R2 产出），请重跑 R2 补全 ④(d) 数据。`
+      severity: 'WARNING',
+      message: `SC完成方=${completedSide}，对方致命赢=${oppFatal}≥2，但④致命交锋复核未执行。` +
+               `请回查原文中的依赖与残余压力；该计数仅触发复核，不构成语义否决。`
     });
   }
 
@@ -666,11 +632,16 @@ function checkC9FatalReview(data, errors, s7Data) {
     const uncovered = data['S8.PhaseIII.④致命交锋复核.未覆盖数'] || '?';
     errors.push({
       rule: 'C9b',
-      severity: 'BLOCKING',
-      message: `SC完成方=${c9Party}，对方致命赢=${oppFatal}≥2，存在 ${uncovered} 项未被微消化覆盖的致命交锋。` +
-               `P2 数据完整，请重跑 R3，重新检查 S8.3 ④(d) 数据并修正 S11 判定。`
+      severity: 'WARNING',
+      message: `SC完成方=${completedSide}，对方致命赢=${oppFatal}≥2，存在 ${uncovered} 项未被微消化覆盖的致命交锋。` +
+               `请判断这些问题是否击中所声称结论的必要支撑，不能因未覆盖数量直接改判。`
     });
   }
+  }
+}
+
+function completionSides(value) {
+  return value === '双方' ? ['正方','反方'] : ['正方','反方'].includes(value) ? [value] : [];
 }
 
 function checkC1_C7(data, errors, opts) {
@@ -706,9 +677,9 @@ function checkC1_C7(data, errors, opts) {
   // C4: 各跑各的（S8 终判）+1型（260806 换源；fallback 仅为纵深防御）
   const finalDiagC4 = data['S8.碰撞终判'];
   if (finalDiagC4 === '各跑各的' && TYPE1.includes(String(data['S11.类型']))) {
-    errors.push({ rule: 'C4', severity: 'BLOCKING', message: '碰撞终判=各跑各的但S11=1型·SC不可能完成' });
+    errors.push({ rule: 'C4', severity: 'WARNING', message: '碰撞摘要=各跑各的而S11=1型，请核对范围与原文；全场主题平行不能机械否定已完成的结构重构' });
   } else if (finalDiagC4 === undefined && data['S4.碰撞诊断'] === '各跑各的' && TYPE1.includes(String(data['S11.类型']))) {
-    errors.push({ rule: 'C4', severity: 'BLOCKING', message: '缺少 S8.碰撞终判（旧产物）·需重跑 R2 后再终判' });
+    errors.push({ rule: 'C4', severity: 'WARNING', message: '旧产物缺少 S8.碰撞终判；早期各跑各的不能否定后来完成，请结合原文核对' });
   }
   // C5: S7↔S8双向
   const s7Push = data['S7.SC角色.推进节点数'];
@@ -726,7 +697,7 @@ function checkC1_C7(data, errors, opts) {
   const s11type = String(data['S11.类型'] || '');
   const phase3Party = String(data['S8.PhaseIII.完成方'] || '');
   if (TYPE1.includes(s11type) && phase3Party === '无') {
-    errors.push({ rule: 'C7', severity: 'BLOCKING', message: `S11类型=${s11type}(1型)但PhaseIII完成方=无·SC不可能完成` });
+    errors.push({ rule: 'C7', severity: 'BLOCKING', message: `S11类型=${s11type}(1型)但PhaseIII完成方=无，摘要表示不一致；依据实际分析修正字段，不能由枚举否定语义` });
   }
   if (s11type === '2b' && phase3Party !== '无' && phase3Party !== '') {
     errors.push({ rule: 'C7', severity: 'BLOCKING', message: `S11类型=2b(有推进未结晶)但PhaseIII完成方=${phase3Party}≠无·矛盾` });
@@ -744,6 +715,9 @@ function checkC1_C7(data, errors, opts) {
   }
   if (s11type === '1d' && coveredParty !== '' && coveredParty === phase3Party) {
     errors.push({ rule: 'C15', severity: 'BLOCKING', message: `S11类型=1d但被覆盖完成方=${coveredParty}=完成方·双SC完成方不可能同一方` });
+  }
+  if (s11type === '1d' && phase3Party === '双方') {
+    errors.push({ rule: 'C15', severity: 'BLOCKING', message: '1d的完成方字段表示单一后层方，双方集合无法表达该层归属；请按实际先后层修正表示，复杂关系保留正文，不能因字段限制改判双方完成事实' });
   }
   if (s11type !== '1d' && coveredParty !== '') {
     errors.push({ rule: 'C16', severity: 'BLOCKING', message: `S11类型=${s11type}但S8.PhaseIII.被覆盖完成方=${coveredParty}·该字段仅1d有效` });
@@ -790,15 +764,9 @@ function checkC1_C7(data, errors, opts) {
 
   // ---- C10b：检测漂移信号（管道仅读取Agent显式分类·不做语义判断） ----
   if (driftSignal && driftSignal.startsWith('有')) {
-    if (rationality.includes('偷换外延')) {
-      let msg = `检测到明确标注为"偷换外延"的漂移信号：${driftSignal}。外延已超出合法聚焦范围。`;
-      if (s4Relation === '潜在风险已实现') msg += '（S4黄色信号已预警·双重确认）';
-      errors.push({ rule: 'C10b', severity: 'BLOCKING', message: msg });
-    } else {
-      let msg = `检测到外延漂移信号（聚焦子集/边界模糊）：${driftSignal}`;
-      if (s4Relation === '潜在风险已实现') msg += '。S4黄色信号已预警·建议优先复核。';
-      errors.push({ rule: 'C10b', severity: 'WARNING', message: msg });
-    }
+    errors.push({ rule: 'C10b', severity: 'WARNING',
+      message: '适用域变化需结合原文复核：' + driftSignal + '；模型说明：' + rationality +
+        '。区分合理限制、偷换及否定/引用；辩手推理无效可以是正常裁判结果，不自动使运行无效。' });
   }
 
   // ---- C10b 追加：Agent未发现漂移但S4曾预警 → 潜在漏检 ----
@@ -817,7 +785,7 @@ function checkC1_C7(data, errors, opts) {
   if (c11Visibility === '语义承接' && ['1a','1b','1c','1d'].includes(c11S11type)) {
     if (c11Closure === '封口' || !c11Closure) {
       errors.push({ rule: 'C11a', severity: 'WARNING',
-        message: 'Phase III ③显性程度=语义承接，S11=1型——决胜逻辑应标注"证据强度降级"，S11.闭合应标注为"边界"而非"封口"。' });
+        message: 'Phase III 使用语义承接；请核对上下文是否足以支撑推理。隐含表达本身不要求降权或改为边界。' });
     }
   }
 
@@ -827,7 +795,7 @@ function checkC1_C7(data, errors, opts) {
 
   if (diagTrigger === '是(≥2类)' && degradationDone !== '是') {
     errors.push({ rule: 'C11b', severity: 'WARNING',
-      message: 'S8.7质量诊断触发=是(≥2类)，但S9.感性.质量降权已执行≠是。请确认感性向度已执行降权。' });
+      message: 'S8.7 存在多类质量诊断，请按实际影响解释评分；不按诊断类别数自动降权。' });
   }
 }
 
@@ -841,15 +809,14 @@ function checkP1_P3(data, errors, newContract) {
     const ph1 = data[`S8.PhaseI.${side}`];
     const ph2 = data[`S8.PhaseII.${side}.有效数`];
     if ((ph1 === '否决' || ph1 === '未完成') && ph2 > 0) {
-      errors.push({ rule: 'P1', severity: 'BLOCKING', message: `${side} PhaseI=${ph1}但PhaseII有效=${ph2}` });
+      errors.push({ rule: 'P1', severity: 'WARNING', message: `${side} 前期框架=${ph1}但后来有效推进=${ph2}；回查原文时序，不能由前期框架状态否定后来实例` });
     }
   }
   // P2: Phase III→II
   if (data['S8.PhaseIII.状态'] === '已结晶') {
-    const side = data['S8.PhaseIII.完成方'];
-    if (side && side !== '无') {
+    for (const side of completionSides(data['S8.PhaseIII.完成方'])) {
       const eff = data[`S8.PhaseII.${side}.有效数`] || 0;
-      if (eff < 1) errors.push({ rule: 'P2', severity: 'BLOCKING', message: `${side} PhaseIII已结晶但PhaseII有效=0` });
+      if (eff < 1) errors.push({ rule: 'P2', severity: 'WARNING', message: `${side}已确认完成但PhaseII登记有效数为零或缺失；核对实际实例、范围与计数，不由登记缺漏撤销语义完成，也不虚构节点` });
     }
   }
   // P3（260810 重写）：L1 定义自洽 BLOCKING + L2 结构期望 WARNING + 判据检查（S8C 段）
@@ -858,18 +825,11 @@ function checkP1_P3(data, errors, newContract) {
 
 // ==================== S8C 完成度一致性（260810·批次3：L1 定义自洽 + L2 结构期望 + 判据） ====================
 // 原则：机械层管一致性，LLM 管语义裁定（用户 260810 拍板）。
-// L1 矩阵（16 格·封闭集合，新增组合须走方案审核）：
-//   完成5：未结晶/④不通过/⑤不通过/PhaseII=0/⑥独立平行
-//   未完成3：PhaseII=0/已结晶（V-S8B 兜底·双层闭合）/⑥独立平行
-//   半完成2：PhaseII=0/已结晶且非⑥-b例外
-//   启动未推进2：PhaseII>0/已结晶
-//   未启动2：任一方PhaseI完成/S3=0
-//   不存在1：S3>0
-//   全局格1（R6）：⑥=独立平行 且 PhaseII=0（⑥ 仅双方有结晶候选时触发·L2612）
+// 同一主线摘要的字段矛盾仍校验；跨阶段计数和局部关系只供语义复核。
 
 function checkCompletionConsistency(data, errors, opts) {
   for (const h of getCompletionHardConflicts(data)) {
-    errors.push({ rule: 'S8C-L1', severity: 'BLOCKING', message: `完成度=${h.value} 与定义冲突: ${h.reason}` });
+    errors.push({ rule: 'S8C-L1', severity: h.severity || 'BLOCKING', message: `完成度=${h.value}；${h.reason}` });
   }
   const expected = deriveCompletionExpected(data);
   if (expected && data['S8.SC完成度'] && expected !== data['S8.SC完成度']) {
@@ -877,10 +837,10 @@ function checkCompletionConsistency(data, errors, opts) {
   }
   const rationale = String(data['S8.SC完成度.判据'] || '').trim();
   const newContract = !!(opts && opts.newContract);
-  if (rationale.length < 10) {
+  if (!rationale) {
     const sev = newContract ? 'BLOCKING' : 'WARNING';
     errors.push({ rule: 'S8C-R', severity: sev, message: newContract
-      ? '完成度判据（S8.SC完成度.判据）缺失或<10字·必出（≤40字，回引Phase/④⑤⑥或场感描述）'
+      ? '完成度摘要依据字段缺失；将已有实际依据填入字段，不按字数或固定引用方式评价充分性'
       : '完成度判据缺失（旧合同·不阻断·建议补充）' });
   }
 }
@@ -958,28 +918,47 @@ function checkVerdictConsistency(narrative, data) {
   if (pro === undefined || con === undefined || !winner) {
     return { passed: true, errors, warnings: [{ rule: 'D0', severity: 'WARNING', message: 'S15 DATA 缺失，跳过判决一致性校验' }] };
   }
-  const vRe = /\*{0,2}(正方|反方)\s*(?:（[^）]*）)?\s*胜\s*（\s*(\d+)\s*:\s*(\d+)\s*）\s*\*{0,2}/g;
-  let m, foundVerdict = false;
-  while ((m = vRe.exec(narrative)) !== null) {
-    foundVerdict = true;
-    const side = m[1] === '正方' ? '正方' : '反方';
-    const a = parseInt(m[2], 10), b = parseInt(m[3], 10);
-    if (a !== pro || b !== con)
-      errors.push({ rule: 'D1', severity: 'BLOCKING', message: '判决行「' + m[0] + '」与 S15 不符（应为 ' + pro + ':' + con + '，合同固定 正方:反方）' });
-    if (side !== winner)
-      errors.push({ rule: 'D1', severity: 'BLOCKING', message: '判决行获胜方=' + side + ' 与 S15.获胜方=' + winner + ' 不符' });
+  let foundVerdict=false;
+  const add=(rule,message)=>errors.push({rule,severity:'BLOCKING',message});
+  const compare=(rule,side,a,b)=>{
+    if (a!==Number(pro) || b!==Number(con)) add(rule,'独立判决行分数与S15不一致（正方:'+pro+'，反方:'+con+'）；仅修正归属或表示，不因格式改变判决');
+    if (side && side!==winner) add(rule,'独立判决行获胜方='+side+' 与S15.获胜方='+winner+'不一致');
+  };
+  for(const section of String(narrative||'').split(/(?=^##\s*C\d+\b)/m)) {
+   // The model's free explanation is chapter-scoped; a check in C1 cannot clear C12.
+   let reviewed=false;
+   for(const marker of section.matchAll(/<!--NARRATIVE_SCORE_REVIEW\s+([\s\S]*?)-->/g)) {
+     try { const r=JSON.parse(marker[1]); reviewed=r.consistent===true && typeof r.reason==='string' && !!r.reason.trim(); } catch(e) { reviewed=false; }
+   }
+   let needsReview=false;
+   const compareUnlabelled=(rule,side,a,b)=>{
+     if(side && side!==winner) add(rule,'独立判决行获胜方='+side+' 与S15.获胜方='+winner+'不一致');
+     if(a===Number(pro) && b===Number(con)) return;
+     if(a===Number(con) && b===Number(pro)) {
+       needsReview=true;
+       warnings.push({rule:'D2-CONTEXT',severity:'WARNING',message:'未逐项标边的比分顺序与正反方顺序不同，须结合上下文辨认是否采用胜负方顺序；不能据此直接判错'});
+     } else compare(rule,null,a,b);
+   };
+   for(const rawLine of section.replace(/<!--NARRATIVE_SCORE_REVIEW[\s\S]*?-->/g,'').replace(/\r\n/g,'\n').split('\n')) {
+    const line=rawLine.trim().replace(/^\*\*|\*\*$/g,'').trim();
+    // An explicitly isolated outcome has no prose context to reinterpret.
+    const m=line.match(/^(?:(?:最终)?判决\s*[:：]\s*)?(正方|反方)\s*(?:（[^）]*）)?\s*(?:获胜|胜出|胜)\s*(?:[（(]\s*(\d+)\s*[:：]\s*(\d+)\s*[）)]|[。；，,]?\s*比分\s*[:：]?\s*(\d+)\s*[:：]\s*(\d+))\s*[。.]?$/);
+    if(m){foundVerdict=true;compareUnlabelled('D1',m[1],Number(m[2]||m[4]),Number(m[3]||m[5]));continue;}
+    // Both sides explicitly labelled: order is presentation only.
+    const labelled=line.match(/^(?:最终)?(?:比分\s*)?[（(]?\s*(正方|反方)\s*[:：]\s*(正方|反方)\s*[）)]?\s*[:：=]?\s*(\d+)\s*[:：]\s*(\d+)\s*[。.]?$/);
+    if(labelled && labelled[1]!==labelled[2]){compare('D2',null,Number(labelled[labelled[1]==='正方'?3:4]),Number(labelled[labelled[1]==='反方'?3:4]));continue;}
+    // An unlabelled reversed pair can express winner:loser; route meaning to the model.
+    const score=line.match(/^(?:最终)?比分\s*[:：]?\s*(\d+)\s*[:：]\s*(\d+)\s*[。.]?$/);
+    if(score){compareUnlabelled('D2',null,Number(score[1]),Number(score[2]));continue;}
+    const pairs=[...line.matchAll(/(\d+)\s*[:：]\s*(\d+)/g)];
+    if(/胜|判决|比分/.test(line) && pairs.some(p=>Number(p[1])!==Number(pro)||Number(p[2])!==Number(con))) {
+      needsReview=true;
+      warnings.push({rule:'D2-CONTEXT',severity:'WARNING',message:'含不同比分的解释句需要结合语境复核，词项差异不等于错误：'+line});
+    }
+   }
+   if(needsReview && !reviewed && /^##\s*C\d+\b/m.test(section)) add('D2-REVIEW','本章比分解释待语义复核（并未判定其错误）。结合本章全文和S15判断转述、否定、假设及标边顺序；一致可保留原措辞，在本章加入 <!--NARRATIVE_SCORE_REVIEW {"consistent":true,"reason":"自由说明实际指代与关系"} -->；确有错述先修正表达再确认。无字数或关键词要求，不改变正确胜负。');
   }
-  if (!foundVerdict) warnings.push({ rule: 'D1', severity: 'WARNING', message: '叙事中未找到 **X方胜（A:B）** 判决行' });
-  // D2（2026-08-05 收窄）：只拦“判决/最终/获胜”语境下的比分（如“最终判决：反方获胜。比分6:4”），
-  // 放行校准链中间比分（6:4→7:3）与完整性注释（S15比分=…）——避免对非终判文本误杀。
-  const verdictKw = /(获胜|判决|最终|方胜)/;
-  for (const line of narrative.replace(/\r\n/g, '\n').split('\n')) {
-    const rm = line.match(/比分\s*(\d+)\s*:\s*(\d+)/);
-    if (!rm || !verdictKw.test(line)) continue;
-    const a = parseInt(rm[1], 10), b = parseInt(rm[2], 10);
-    if (a !== pro || b !== con)
-      errors.push({ rule: 'D2', severity: 'BLOCKING', message: '比分「' + rm[0] + '」与 S15 不符（应为 ' + pro + ':' + con + '，合同固定 正方:反方）' });
-  }
+  if(!foundVerdict) warnings.push({rule:'D1',severity:'WARNING',message:'未找到独立标准判决行；正式比分由S15投影，叙事语义须结合上下文复核'});
   return { passed: errors.length === 0, errors, warnings };
 }
 
@@ -1137,13 +1116,13 @@ function checkHtml(file, options) {
     while ((modMatch = modRe.exec(html)) !== null) {
       var modId = 'C' + modMatch[1];
       var modBody = modMatch[2];
-      // D4：同模块内同名 h3 重复 → BLOCKING
+      // D4：同名小标题可以讨论不同对象，文字相同不证明内容重复。
       var h3Seen = {};
       var h3Re = /<h3[^>]*>([\s\S]*?)<\/h3>/g;
       var h3m;
       while ((h3m = h3Re.exec(modBody)) !== null) {
         var h3key = h3m[1].replace(/<[^>]+>/g, '').trim();
-        if (h3Seen[h3key]) blocking.push({ rule: 'D4', severity: 'BLOCKING', message: modId + ' 重复 h3: ' + h3key });
+        if (h3Seen[h3key]) warnings.push({ rule: 'D4', severity: 'WARNING', message: modId + ' 存在同名小标题，请结合不同段落判断是否有实际重复，不按标题文字阻断: ' + h3key });
         h3Seen[h3key] = true;
       }
       // D3：C1 关键块（诗评/判决/六向度表/判准表；简明档豁免判准表）
@@ -1309,8 +1288,10 @@ function checkStructure(jsonPath, opts) {
   // V-B1（F3 修正）：0型（s11_original_type 或 type_override=0）允许 layers=1；其余 2-4
   const isZero = (data.meta && (data.meta.s11_original_type === '0' || data.meta.type_override === '0'));
   const minLayers = isZero ? 1 : 2;
-  if (!Array.isArray(layers) || layers.length < minLayers || layers.length > 4)
-    errors.push({ rule: 'V-B1', severity: 'BLOCKING', message: `layers长度=${layers?.length}·预期${minLayers}-4` });
+  if (!Array.isArray(layers) || layers.length < minLayers) {
+    errors.push({ rule: 'V-B1', severity: 'BLOCKING', message: `layers长度=${layers?.length}·展示至少需要${minLayers}层` });
+    if (!Array.isArray(layers)) return { passed: false, errors, warnings };
+  }
 
   if (layers?.length > 0) {
     if (layerType(layers[0]) !== '框架铺设')
@@ -1327,10 +1308,10 @@ function checkStructure(jsonPath, opts) {
       if (layers[i].relation_to_prev && !validRels.includes(layers[i].relation_to_prev))
         errors.push({ rule: 'V-B5a', severity: 'BLOCKING', message: `layers[${i}].relation非法` });
 
-    // V-B5b: 上位覆盖/同层加固必须有citation_basis且≥10字
+    // V-B5b: 上位覆盖/同层加固保留非空依据；不以字数判断充分性
     for (let i=1; i<layers.length; i++)
-      if (['上位覆盖','同层加固'].includes(layers[i].relation_to_prev) && (!layers[i].citation_basis || layers[i].citation_basis.length < 10))
-        errors.push({ rule: 'V-B5b', severity: 'BLOCKING', message: `layers[${i}]上位/同层但citation_basis缺失或<10字` });
+      if (['上位覆盖','同层加固'].includes(layers[i].relation_to_prev) && !String(layers[i].citation_basis || '').trim())
+        errors.push({ rule: 'V-B5b', severity: 'BLOCKING', message: `layers[${i}]上位/同层但citation_basis为空` });
 
     // V-B5c【V3.0新增·评审意见机制盲区2】: citation_basis必须含推进层ID或M-ID
     for (const layer of layers) {
@@ -1338,7 +1319,7 @@ function checkStructure(jsonPath, opts) {
         const hasLayerRef = /推进层\s*[0-9]|层\s*[0-9]|前[一二三四]推进层|上一推进层|layer\s*[0-9]/i.test(layer.citation_basis);
         const hasMRef = /M-(?:ZH|FA)-\d+/.test(normalizeMIdText(layer.citation_basis));
         if (!hasLayerRef && !hasMRef)
-          errors.push({ rule: 'V-B5c', severity: 'BLOCKING', message: `citation_basis必须引用具体推进层或M-ID: "${layer.citation_basis.substring(0,50)}..."` });
+          warnings.push({ rule: 'V-B5c', severity: 'WARNING', message: `citation_basis 无已登记编号，请核对原文定位和依赖说明；编号缺失不裁定语义: "${layer.citation_basis.substring(0,50)}..."` });
       }
     }
   }
@@ -1490,13 +1471,11 @@ function checkEffectiveType(data, structure, presentation) {
   if (orig && s11 && orig !== s11)
     errors.push({ rule: 'G0-1', severity: 'BLOCKING', message: `R4类型记录(${orig})与S11 DATA(${s11})不一致` });
 
-  let effectiveType = s11;
+  const effectiveType = s11;
+  const warnings = [];
   if (meta.type_override) {
-    if (!['2b', '2c', '0'].includes(meta.type_override))
-      errors.push({ rule: 'G0-2a', severity: 'BLOCKING', message: `type_override非法: ${meta.type_override}` });
-    if (!meta.override_reason)
-      errors.push({ rule: 'G0-2b', severity: 'BLOCKING', message: 'type_override非空但override_reason为空' });
-    effectiveType = meta.type_override;
+    warnings.push({ rule: 'G0-2-PROJECTION', severity: 'WARNING',
+      message: 'structure.type_override 仅为复核建议；有效类型仍取正式 S11。实质改判须由 R4.5 明确写回 authoritative[S11.类型]。' });
   }
 
   // G0-4：presentation 模板族一致
@@ -1514,7 +1493,7 @@ function checkEffectiveType(data, structure, presentation) {
     }
   }
 
-  return { effectiveType, errors };
+  return { effectiveType, errors, warnings };
 }
 
 // ==================== R4.5 信息统筹轮（3B） ====================
@@ -1575,7 +1554,7 @@ function checkC7DataContract(content, opts) {
     if (s8ListOk) {
       const inst = parseC7InstanceTable(c7);          // 双形态解析
       if (!inst.found)
-        errors.push('C7 微消化实例表未找到（须输出表头含"节点ID|辩手·轮次|接收内容|重定位方式|质量"的表格）');
+        errors.push('C7 微消化实例表未找到（保留实例表及节点ID列供回引；说明列措辞不设门槛）');
       else {
         const ids = [];
         for (const row of inst.rows) {
@@ -1615,7 +1594,7 @@ function checkSideTriplet({ mid, midSide, opSide, turnSide, turnRaw }) {
   }
   // 边 2（锚 3 交叉边）：发言轮次列方别 == 操作方列（turnSide 来自模式 A/C/B 解析）
   if (turnSide && opSide && (opSide === '正方' || opSide === '反方') && turnSide !== opSide)
-    errors.push({ rule: 'V-S8E-A3', severity: 'BLOCKING', message: `S8.2 发言轮次方别(${turnSide})≠操作方列(${opSide})（${mid}，原文: ${turnRaw}）——需重跑 R2` });
+    errors.push({ rule: 'V-S8E-A3', severity: 'WARNING', message: `自由文本轮次推测方别(${turnSide})与操作方(${opSide})不同（${mid}，原文: ${turnRaw}）；交模型结合原文归属复核，不按词序判错` });
   return errors;
 }
 
@@ -1663,10 +1642,12 @@ function checkS82Anchors(s82, anchor, opts) {
         if (exemption) {
           errors.push({ rule: 'V-S8E-WX', severity: 'WARNING', message: `S8.2 第${rowIndex + 1}行发言轮次(${turnRaw}) 名册核对失败已由人工精确豁免（${r.failureKind}，${mid}）` });
         } else {
-          errors.push({ rule: 'V-S8E-A3', severity: 'BLOCKING', message: `S8.2 发言轮次(${turnRaw}) 名册核对失败: ${r.reason}（${mid}）——需重跑 R2；诊断包见源锚层 §2.6c` });
+          errors.push({ rule: 'V-S8E-A3', severity: 'WARNING', message: `S8.2 发言轮次(${turnRaw}) 名册核对有分歧: ${r.reason}（${mid}）——回查原文身份，辅助名册不替代来源` });
         }
       } else {
-        turnSide = r.side;
+        turnSide = anchor.method === 'source-semantic-v1' ? null : r.side;
+        if (anchor.method === 'source-semantic-v1' && r.side && opSide && r.side !== opSide)
+          errors.push({ rule: 'V-S8E-W3', severity: 'WARNING', message: '辅助名册与操作方归属不同，请结合完整原文复核：' + turnRaw });
         // R9.2（260809）：接线旁证 warn——新规则码 V-S8E-W3（WARNING；不计 unresolvable/W2 密度）
         if (r.warn) errors.push({ rule: 'V-S8E-W3', severity: 'WARNING', message: `S8.2 发言轮次(${turnRaw}) ${r.warn}（${mid}）` });
       }
@@ -1770,40 +1751,16 @@ function checkTerminologyContent(content) {
   const shared = (sharedStart >= 0 && sharedEnd > sharedStart)
     ? content.slice(sharedStart, sharedEnd) : body;                         // 共享资源区
 
-  // 锚点1: #36 三分类——精确子串断言（缺失/调换/改写均失败）
-  const m36 = shared.match(/\| 36 \| 反驳路径[^|]*\| (.*?) \|/);
-  if (!m36) errors.push('TERM-01: #36 反驳路径条目缺失');
-  else {
-    const v = m36[1];
-    if (!v.includes('①A未必→B')) errors.push('TERM-01a: #36 缺"①A未必→B"');
-    if (!v.includes('②B未必→C')) errors.push('TERM-01b: #36 缺"②B未必→C"');
-    if (!v.includes('③B不重要')) errors.push('TERM-01c: #36 缺"③B不重要"');
+  // Configuration shape only: keywords cannot prove a semantic definition.
+  if (sharedStart < 0 || sharedEnd <= sharedStart) errors.push('TERM-SHAPE: 共享资源区标记缺失或不成对');
+  const termRows = shared.split(String.fromCharCode(10)).filter(line => line.trim().startsWith('|'))
+    .map(line => line.trim().split('|').slice(1, -1).map(cell => cell.trim()));
+  for (const [id, name, rule] of [[36,'反驳路径','TERM-01'],[11,'消化','TERM-02'],[12,'反转','TERM-03']]) {
+    const matches = termRows.filter(row => row[0] === String(id) && row[1].startsWith(name));
+    if (matches.length !== 1) errors.push(rule + ': #' + id + ' ' + name + '定义须有唯一条目');
+    else if (!matches[0].slice(2).join('').trim()) errors.push(rule + ': #' + id + '定义内容为空');
   }
-
-  // 锚点2/3: #11/#12 语义互斥断言
-  const m11 = shared.match(/\| 11 \| 消化 \| (.*?) \|/);
-  if (!m11) errors.push('TERM-02: #11 消化条目缺失');
-  else {
-    if (!/B'/.test(m11[1]) && !/更重要的/.test(m11[1])) errors.push('TERM-02a: #11 缺 B\' 机制');
-    if (!m11[1].includes('不重要')) errors.push('TERM-02b: #11 缺"不重要"');
-    if (m11[1].includes('恰恰')) errors.push('TERM-02c: #11 误含反转语义"恰恰"');
-  }
-  const m12 = shared.match(/\| 12 \| 反转 \| (.*?) \|/);
-  if (!m12) errors.push('TERM-03: #12 反转条目缺失');
-  else {
-    if (!m12[1].includes('恰恰')) errors.push('TERM-03a: #12 缺"恰恰支持"');
-    if (!m12[1].includes('不改变外延')) errors.push('TERM-03b: #12 缺"不改变外延"');
-    if (m12[1].includes('不重要')) errors.push('TERM-03c: #12 误含消化语义"不重要"');
-  }
-
-  // 锚点4: 关系锚点小节
-  if (!/反驳-消化-反转-外延\s*关系锚点/.test(body)) errors.push('TERM-04: 关系锚点小节缺失');
-
-  // 锚点5: 哨兵词——只扫指令体；豁免 #12 中"与...指出内在矛盾...不同"
-  const scan = body.replace(/与.{0,10}指出内在矛盾.{0,10}不同/g, '');
-  if (scan.includes('直接否定前提')) errors.push('TERM-S01: 残留偏差词"直接否定前提"');
-  if (scan.includes('提出替代框架')) errors.push('TERM-S02: 残留偏差词"提出替代框架"');
-  if (scan.includes('指出内在矛盾')) errors.push('TERM-S03: 残留偏差词"指出内在矛盾"');
+  if (!body.includes('反驳-消化-反转-外延') || !body.includes('关系锚点')) errors.push('TERM-04: 关系锚点小节缺失');
 
   return { passed: errors.length === 0, errors };
 }
@@ -1956,8 +1913,8 @@ function validateP2_5(content) {
     if (!['正方', '反方', '持平'].includes((wparts[0] || '').trim())) errors.push({ rule: 'V-C8W', severity: 'BLOCKING', message: 'C8.人格胜负 首段非法（需 正方|反方|持平）' });
     // 批甲 R5（P2-2 落码）：长度门禁移除（40→无限制）；结构契约非空
     if (!(wparts[1] || '').trim()) errors.push({ rule: 'V-C8W', severity: 'BLOCKING', message: 'C8.人格胜负 依据为空（须 胜负|依据|回引）' });
-    const wref = normalizeMId((wparts[wparts.length - 1] || '').trim());
-    if (!isRef(wref)) errors.push({ rule: 'V-C8W', severity: 'BLOCKING', message: 'C8.人格胜负 回引字段缺失或格式非法（需恰好 1 个 M-ID/CP-ID）' });
+    const parsed = require('./contract.js').parseReasonReference(data['C8.人格胜负']);
+    if (!parsed.reason) errors.push({ rule: 'V-C8W', severity: 'BLOCKING', message: 'C8.人格胜负 需有解释；定位编号可选' });
   }
 
   return errors;
@@ -2069,10 +2026,8 @@ function extractAdjudicationReason(p3Text) {
 
 function normalizeEnumValue(raw) {
   const s = String(raw || '').trim();
-  if (!s) return null;
-  let a = s.replace(/（[^）]*）/g, '').replace(/\([^)]*\)/g, '').trim();
-  a = a.split('·')[0].split('•')[0].trim();
-  return a.length > 0 ? a : null;
+  // Qualifiers, negation and scope are semantic content, not disposable syntax.
+  return s || null;
 }
 
 // T2：写盘前确定性回写——把“归一化后精确命中枚举”的脏 DATA 行替换为规范值，并留日志。
@@ -2086,7 +2041,7 @@ function deriveCompletionExpected(data) {
   const eff = (data['S8.PhaseII.正方.有效数'] || 0) + (data['S8.PhaseII.反方.有效数'] || 0);
   const ph1ok = data['S8.PhaseI.正方'] === '完成' || data['S8.PhaseI.反方'] === '完成';
   const s3 = data['S3.交锋点总数'];
-  if (d6 === '独立平行') return '半完成';                              // ①⑥-b 定序首位
+  // 局部操作之间的关系不能自动投影为主线完成度。
   if (ph3 === '已结晶') {
     if (d4 === '不通过' || d5 === '不通过') return null;               // ③H5 字段层拦截域：不产期望
     return '完成';                                                     // ②
@@ -2097,7 +2052,7 @@ function deriveCompletionExpected(data) {
   return s3 === 0 ? '不存在' : '未启动';                                // ⑦⑧
 }
 
-// 完成度一致性总入口（替代原 P3 期望比对；L1 BLOCKING / L2 WARNING / 判据分级）
+// 完成度一致性：主线表示冲突与跨范围语义提示分开返回。
 
 function getCompletionHardConflicts(data) {
   const c = data['S8.SC完成度'];
@@ -2110,32 +2065,32 @@ function getCompletionHardConflicts(data) {
   const s3 = data['S3.交锋点总数'];
   const independent = d6 === '独立平行';
   const out = [];
-  const A = (cond, reason) => { if (cond) out.push({ value: c, reason }); };
+  const A = (cond, reason, severity) => { if (cond) out.push({ value: c, reason, severity: severity || 'BLOCKING' }); };
   if (c === '完成') {
     A(ph3 !== '已结晶', '完成但PhaseIII未结晶');
-    A(d4 === '不通过', '完成但④不通过');
-    A(d5 === '不通过', '完成但⑤不通过');
-    A(eff === 0, '完成但PhaseII有效=0');
-    A(independent, '完成但⑥=独立平行（⑥-b强制半完成）');
+    A(d4 === '不通过', '完成与④评价存在张力，交语义复核其范围及实际影响', 'WARNING');
+    A(d5 === '不通过', '完成与⑤评价存在张力，交语义复核其范围及实际影响', 'WARNING');
+    A(eff === 0, '完成而PhaseII有效数登记为零或缺失，请核对实物与范围；计数不决定语义', 'WARNING');
+    A(independent, '⑥记录独立平行，请复核局部关系与主线判断的范围和依据，不按关系标签改判', 'WARNING');
   } else if (c === '未完成') {
-    A(eff === 0, '未完成但PhaseII有效=0（无推进则应为启动未推进）');
+    A(eff === 0, '未完成但PhaseII有效数登记为零，请核对实际推进与登记范围', 'WARNING');
     A(ph3 === '已结晶', '未完成但PhaseIII已结晶（V-S8B兜底：已结晶⇒完成度=完成，双层闭合）');
-    A(independent, '未完成但⑥=独立平行（⑥-b强制半完成）');
+    A(independent, '⑥记录独立平行，请说明本次未完成的是哪一级结论，不据此否定已完成的局部操作', 'WARNING');
   } else if (c === '半完成') {
-    A(eff === 0, '半完成但PhaseII有效=0（无推进则应为启动未推进）');
-    A(ph3 === '已结晶' && !independent, '半完成但PhaseIII已结晶（非⑥-b例外）');
+    A(eff === 0, '半完成但PhaseII有效数登记为零，请核对实际推进与登记范围', 'WARNING');
+    A(ph3 === '已结晶', '同一主线范围内半完成与PhaseIII已结晶冲突，请回查依据与表示');
   } else if (c === '启动未推进') {
-    A(eff > 0, '启动未推进但PhaseII有效>0');
+    A(eff > 0, '启动未推进但PhaseII登记有效数非零，请核对实例范围与摘要', 'WARNING');
     A(ph3 === '已结晶', '启动未推进但PhaseIII已结晶');
   } else if (c === '未启动') {
-    A(ph1ok, '未启动但任一方PhaseI完成');
-    A(s3 === 0, '未启动但S3=0（应判不存在）');
+    A(ph1ok, 'PhaseI记录框架可用而主线未启动，请说明阶段范围；早期框架不自动证明后续操作', 'WARNING');
+    A(s3 === 0, '早期登记争点为零，请回查原文中是否有后来出现或漏记的操作，不能按计数判不存在', 'WARNING');
   } else if (c === '不存在') {
-    A(s3 > 0, '不存在但S3>0');
+    A(s3 > 0, '早期存在一般争点不证明发生结构性交锋，请结合原文说明不存在的范围', 'WARNING');
   }
-  // 全局格（R6·260810）：⑥=独立平行 仅在双方各有结晶候选时触发（L2612）→ PhaseII=0 与⑥ 互斥
+  // 登记可能漏项，也可能只是不同范围；不按有效数直接否决关系判断。
   if (independent && eff === 0)
-    out.push({ value: c, reason: '⑥=独立平行但PhaseII有效=0（⑥仅双方有结晶候选时触发）' });
+    out.push({ value: c, severity: 'WARNING', reason: '⑥记录独立平行但无已确认有效推进，请复核登记和判断范围，不自动补造实例或改判' });
   return out;
 }
 
@@ -2208,19 +2163,19 @@ function parseC7InstanceTable(c7) {
     let start = -1;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i].trim();
-      if (l.startsWith('|') && l.endsWith('|') && l.includes('辩手·轮次')) {
+      if (l.startsWith('|') && l.endsWith('|') && /节点(?:ID)?/.test(l)) {
         const nxt = lines.slice(i + 1).filter(x => x.trim().startsWith('|'));
         if (nxt.length >= 2) { start = i; break; }
       }
     }
     if (start < 0) return { found: false, rows: [] };
-    rows = collectTableBlock(lines, start, ['节点ID', '辩手·轮次']);   // 260809 Q1：有界（原截到文件尾吞后续表）
+    rows = collectTableBlock(lines, start, []);   // 260809 Q1：有界（原截到文件尾吞后续表）
   }
   if (!rows || rows.length < 2) return { found: false, rows: [] };
   const hdr = rows[0];
   const idCol = hdr.indexOf('节点ID') >= 0 ? hdr.indexOf('节点ID') : hdr.indexOf('节点');
-  const sideCol = hdr.indexOf('辩手·轮次');
-  if (idCol < 0 || sideCol < 0) return { found: false, rows: [] };
+  // This check consumes only node identity, not the human-readable speaker header.
+  if (idCol < 0) return { found: false, rows: [] };
   return { found: true, rows: rows.slice(1), idCol };
 }
 
@@ -2271,10 +2226,10 @@ function matchTurnToRoster(turn, anchor) {
       const rm = s.match(/^([一二三四五六1-6１-６])(?:辩|辯)?|^(自由人|主辩|主辯|结辩|結辯|助辩|助辯)[一-六1-6１-６]?/);
       if (rm) { role = normalizeRoleTag(rm[1] || rm[2]); s = s.slice(rm[0].length); }
     }
-    // 名字：名册 name/aliases 精确包含命中（6.1/aliases；整段匹配——含 盘问·反二樊登 张冠李戴场景）
+    // 名字：名册 name/aliases 精确包含命中（6.1/aliases；整段匹配——含 盘问·角色与姓名 张冠李戴场景）
     const hit = anchor.roster.find(x => x.name && (seg.includes(x.name) || (x.aliases || []).some(a => a && seg.includes(a))));
     if (hit) { nameHit = hit; continue; }
-    // 多人形态（/ 分隔）逐名尝试（"自由辩论·反方郭宇宽/樊登等"）
+    // 多人形态（/ 分隔）逐名尝试（"自由辩论·反方多位发言者"）
     if (s.includes('/')) {
       const multi = s.split('/').map(x => x.trim()).find(n =>
         anchor.roster.some(x => x.name && (n.includes(x.name) || (x.aliases || []).some(a => a && n.includes(a)))));

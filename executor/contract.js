@@ -1,4 +1,4 @@
-// executor/contract.js — 产物契约模块（卡 6，260815；公开运行不依赖私有设计文件）
+// executor/contract.js — 产物契约模块（卡 6，260815——方案见 Upload/方案-260815-卡6-产物契约模块-细化方案.md）
 // parseInputs：读取/校验/归一化 transition-final + structure.json + adjudication.json + presentation.json
 //   → 单一契约对象 { data, structure, adjudication, presentation, modelSnapshot }
 // 解析器单一事实源：extractDataMarkers/parseStructureJson/aggregateData/validateAdjudication/mergeAdjudicationData
@@ -70,7 +70,7 @@ function extractDataMarkers(md) {
   const lines = md.replace(/\r\n/g, '\n').split('\n');
   for (const line of lines) {
     // 260806 实测容错：模型偶发输出闭合式 <!--/DATA: ... -->，按 <!--DATA: 解析
-    const m = line.match(/^<!--\s*\/?DATA:\s*(\S+?)=(.+?)\s*-->$/);
+    const m = line.trim().match(/^<!--\s*\/?DATA:\s*(\S+?)\s*=\s*(.+?)\s*-->$/);
     if (m) {
       const key = m[1];
       let value = m[2].trim();
@@ -105,6 +105,20 @@ function parseStructureJson(content) {
   const e = t.lastIndexOf('}');
   if (s < 0 || e <= s) throw new Error('未找到 JSON 对象边界');
   return normalizeStructureIds(JSON.parse(t.slice(s, e + 1)));
+}
+
+// Optional locators are recognized only as whole trailing fields. Never discard a final reason clause.
+function parseReasonReference(raw) {
+  const parts = String(raw == null ? '' : raw).split('|').map(s => s.trim());
+  const label = parts.shift() || '';
+  const refs = [];
+  while (parts.length > 1) {
+    const tail = parts[parts.length - 1];
+    const ids = tail.split(/[,，、;；\s]+/).filter(Boolean).map(normalizeMId);
+    if (!ids.length || !ids.every(isRef)) break;
+    refs.unshift(...ids); parts.pop();
+  }
+  return { label, reason: parts.join(' | ').trim(), refs };
 }
 
 // ==================== 仲裁键空间单一事实源（维度常量/派生键/可裁决前缀/白名单） ====================
@@ -173,11 +187,41 @@ function adjudicationWhitelist() {
   return adjudicableKeys();
 }
 
+// S4A-I2：contract 只消费 host/controller 已验证的 authority plan。
+// 未提供 authorityPlan = legacy-unversioned，完全保持旧场次行为；semantic-bound 下
+// authoritative/left/right 只能是同 semantic/projection version 的表示修复，绝无 semantic current 写权限。
+function adjudicationAuthorityState(opts) {
+  opts = opts || {};
+  const plan = opts.authorityPlan || null;
+  if (!plan) return { mode: 'legacy-unversioned', allowed: true, projectionRepair: false, semanticRevisionAuthority: false };
+  if (plan.mode !== 'semantic-bound') return { mode: plan.mode || 'unknown', allowed: false, projectionRepair: false, semanticRevisionAuthority: false, blockingReason: 'semantic adjudication authority plan mode 非法' };
+  if (plan.allowed !== true) return { mode: 'semantic-bound', allowed: false, projectionRepair: false, semanticRevisionAuthority: false, blockingReason: plan.blockingReason || 'semantic adjudication authority plan 未获准' };
+  if (plan.mutationKind !== 'projection_repair' || plan.projectionRepair !== true || plan.semanticRevisionAuthority !== false) {
+    return { mode: 'semantic-bound', allowed: false, projectionRepair: false, semanticRevisionAuthority: false, blockingReason: 'R4.5/contract 仅允许 same-version projection_repair；semantic revision 必须走 review + CAS' };
+  }
+  return { mode: 'semantic-bound', allowed: true, projectionRepair: true, semanticRevisionAuthority: false, versionKey: plan.versionKey || null };
+}
+function pairAssignment(expr) {
+  const m = String(expr || '').match(/^([^=]+)=(.*)$/);
+  return m ? { key: m[1].trim(), value: m[2] } : null;
+}
+
+// Decode explicit storage labels only; preserve free prose and scope for review.
+function exactLabel(value, allowed) {
+  const text = String(value == null ? '' : value).trim();
+  return allowed.includes(text) ? text : null;
+}
+
 // R4.5：adjudication 结构/白名单/登记一致性校验（BLOCKING = 越权/缺 reason/复核未过）
 function validateAdjudication(adj, opts) {
   opts = opts || {};
   const errors = [];
   const warnings = [];
+  const authorityState = adjudicationAuthorityState(opts);
+  const semanticBound = authorityState.mode === 'semantic-bound';
+  if (semanticBound && !authorityState.allowed) {
+    errors.push({ rule: 'ADJ-AUTH', severity: 'BLOCKING', message: authorityState.blockingReason || 'semantic-bound adjudication authority 无效' });
+  }
   if (!adj || typeof adj !== 'object') return { passed: false, errors: [{ rule: 'ADJ-0', severity: 'BLOCKING', message: 'adjudication 不是对象' }], warnings };
   if (adj.schema_version !== '0.1.0') errors.push({ rule: 'ADJ-1', severity: 'BLOCKING', message: 'schema_version 必须为 0.1.0' });
   if (!Array.isArray(adj.conflicts)) errors.push({ rule: 'ADJ-2', severity: 'BLOCKING', message: 'conflicts 必须是数组' });
@@ -187,14 +231,15 @@ function validateAdjudication(adj, opts) {
     if (seen.has(c.conflict_id)) errors.push({ rule: 'ADJ-3b', severity: 'BLOCKING', message: 'conflict_id 重复: ' + c.conflict_id });
     seen.add(c.conflict_id);
     if (!['left', 'right', 'reject'].includes(c.adjudicated)) errors.push({ rule: 'ADJ-4', severity: 'BLOCKING', message: c.conflict_id + ' adjudicated 必须为 left/right/reject' });
-    if (!c.reason || String(c.reason).length < 30) errors.push({ rule: 'ADJ-4b', severity: 'BLOCKING', message: c.conflict_id + ' reason <30 字' });
+    if (!String(c.reason || '').trim()) errors.push({ rule: 'ADJ-4b', severity: 'BLOCKING', message: c.conflict_id + ' 缺少裁决依据' });
+    else if (String(c.reason).length < 30) warnings.push({ rule: 'ADJ-4b', severity: 'WARNING', message: c.conflict_id + ' 理由简短，复核其依据，不以字数判成败' });
     if (!['高', '中', '低'].includes(c.confidence)) errors.push({ rule: 'ADJ-4c', severity: 'BLOCKING', message: c.conflict_id + ' confidence 非法' });
     if (c.reviewed_by !== 'R4.5') errors.push({ rule: 'ADJ-4d', severity: 'BLOCKING', message: c.conflict_id + ' reviewed_by 必须为 R4.5' });
     // T3：多范式——每条裁决必须声明范式；计数式理由被机械拒绝
     const paradigms = ['semantic_fit', 'explanatory_power', 'structural_coherence', 'provenance', 'criteria_derivation'];
     if (!paradigms.includes(c.paradigm)) errors.push({ rule: 'ADJ-12', severity: 'BLOCKING', message: c.conflict_id + ' paradigm 非法（必须为 ' + paradigms.join('/') + '）' });
     if (/(\d+\s*(处|项|条|个)\s*(证据|支持|一致))|((证据|支持|一致)\s*(处|项|条|个)\s*\d+)|多数|投票|\d+\s*:\s*\d+\s*支持/.test(String(c.reason || '')))
-      errors.push({ rule: 'ADJ-REASON-COUNT', severity: 'BLOCKING', message: c.conflict_id + ' reason 含计数/投票式论据（禁止"N 处证据/多数/投票"类论证）' });
+      warnings.push({ rule: 'ADJ-REASON-COUNT', severity: 'WARNING', message: c.conflict_id + ' 理由涉及计数/多数/投票用语；复核实际含义，包括否定、引用及实质证据，不能按词存在判无效' });
     // ADJ-13（批甲 A6）：dimension 必须 ∈ DIMENSIONS（防 excluded 失配）
     if (!DIMENSIONS.includes(c.dimension)) errors.push({ rule: 'ADJ-13', severity: 'BLOCKING', message: c.conflict_id + ' dimension 非法: ' + c.dimension + '（须 ∈ DIMENSIONS 六类之一）' });
   }
@@ -220,25 +265,33 @@ function validateAdjudication(adj, opts) {
         message: r.conflict_id + ' 未裁决（登记表冲突必须全部处理）——复核将失败，提前拦截' });
   }
 
-  // ADJ-15（批甲六审 N1）：S11↔structure类型 必须 reject 写值（right/left 不写值 → 渲染 G0-1 死锁）
+  // ADJ-15/16 legacy 行为原样保留；semantic-bound 下不再为“让旧门禁可消费”强迫改判。
+  // 新 lane 的 left/right/reject 只在有效 same-version projection_repair authority 下解释为表示选择。
   for (const c of (adj.conflicts || [])) {
-    if (c.dimension === 'S11↔structure类型' && c.adjudicated !== 'reject')
-      errors.push({ rule: 'ADJ-15', severity: 'BLOCKING',
-        message: 'S11↔structure类型 冲突必须 reject 裁决（authoritative 写 S11.类型）——right/left 不写值将导致渲染 G0-1 死锁' });
-    if (c.dimension === 'S11↔structure类型' && c.adjudicated === 'reject' && !((adj.authoritative || {})['S11.类型']))
-      errors.push({ rule: 'ADJ-15', severity: 'BLOCKING', message: 'S11↔structure类型 reject 裁决必须同时写 authoritative[\'S11.类型\']' });
+    if (c.dimension === 'S11↔structure类型') {
+      if (!semanticBound && c.adjudicated !== 'reject')
+        errors.push({ rule: 'ADJ-15', severity: 'BLOCKING',
+          message: 'S11↔structure类型 冲突必须 reject 裁决（authoritative 写 S11.类型）——right/left 不写值将导致渲染 G0-1 死锁' });
+      if (!semanticBound && c.adjudicated === 'reject' && !((adj.authoritative || {})['S11.类型']))
+        errors.push({ rule: 'ADJ-15', severity: 'BLOCKING', message: 'S11↔structure类型 reject 裁决必须同时写 authoritative[\'S11.类型\']' });
+      if (semanticBound && c.adjudicated === 'reject' && !((adj.authoritative || {})['S11.类型']))
+        errors.push({ rule: 'ADJ-15-PROJECTION', severity: 'BLOCKING', message: 'semantic-bound reject 表示修复必须给出 S11.类型 projection 值；不得把 reject 本身当 semantic revision' });
+    }
   }
 
-  // ADJ-16（批甲七审）：终判×3 必须 reject 写真实键（类型门禁只消费 S8.碰撞终判，right/left 无生效路径）
   const TERMINAL_DIMS = ['终判↔S8方向', '终判↔PhaseIII', '终判↔S11类型'];
   for (const c of (adj.conflicts || [])) {
-    if (TERMINAL_DIMS.includes(c.dimension) && c.adjudicated !== 'reject')
+    if (!semanticBound && TERMINAL_DIMS.includes(c.dimension) && c.adjudicated !== 'reject')
       errors.push({ rule: 'ADJ-16', severity: 'BLOCKING',
         message: c.dimension + ' 冲突必须 reject 裁决（写 S8.碰撞终判 或对侧真实键）——类型门禁只消费 S8.碰撞终判，right/left 裁决无生效路径' });
-    if (TERMINAL_DIMS.includes(c.dimension) && c.adjudicated === 'reject'
+    if (!semanticBound && TERMINAL_DIMS.includes(c.dimension) && c.adjudicated === 'reject'
         && !((adj.authoritative || {})['S8.碰撞终判']) && !((adj.authoritative || {})['S8.S11类型方向'])
         && !((adj.authoritative || {})['S8.PhaseIII.状态']) && !((adj.authoritative || {})['S11.类型']))
       errors.push({ rule: 'ADJ-16', severity: 'BLOCKING', message: c.dimension + ' reject 裁决必须写真实键（S8.碰撞终判/S8.S11类型方向/S8.PhaseIII.状态/S11.类型 之一）' });
+    if (semanticBound && TERMINAL_DIMS.includes(c.dimension) && c.adjudicated === 'reject'
+        && !((adj.authoritative || {})['S8.碰撞终判']) && !((adj.authoritative || {})['S8.S11类型方向'])
+        && !((adj.authoritative || {})['S8.PhaseIII.状态']) && !((adj.authoritative || {})['S11.类型']))
+      errors.push({ rule: 'ADJ-16-PROJECTION', severity: 'BLOCKING', message: c.dimension + ' semantic-bound reject 表示修复必须给出被修 projection 的真实键；不得由机械一致性生成 semantic truth' });
   }
 
   const registeredFields = new Set();
@@ -257,7 +310,7 @@ function validateAdjudication(adj, opts) {
   const smo = adj.structure_meta_override;
   if (smo) {
     if (!['2b', '2c', '0'].includes(smo.type_override)) errors.push({ rule: 'ADJ-7', severity: 'BLOCKING', message: 'structure_meta_override.type_override 非法: ' + smo.type_override });
-    if (!smo.override_reason || String(smo.override_reason).length < 10) errors.push({ rule: 'ADJ-8', severity: 'BLOCKING', message: 'structure_meta_override.override_reason <10 字' });
+    if (!String(smo.override_reason || '').trim()) errors.push({ rule: 'ADJ-8', severity: 'BLOCKING', message: 'structure_meta_override.override_reason 为空' });
   }
   const aud = adj.audit || {};
   if (aud.merged_validate && aud.merged_validate.passed === false) errors.push({ rule: 'ADJ-9', severity: 'BLOCKING', message: 'audit.merged_validate 未通过' });
@@ -266,11 +319,28 @@ function validateAdjudication(adj, opts) {
   return { passed: errors.length === 0, errors, warnings };
 }
 
-// R4.5：authoritative 合并进 transition-final 数据视图（返回合并后文本，供 R5/渲染/校验统一消费）
-function mergeAdjudicationData(tfContent, adjudication) {
+// R4.5：authoritative 合并进 transition-final 数据视图（返回合并后文本，供 R5/渲染/校验统一消费）。
+// legacy 调用保持旧 ABI；semantic-bound 调用必须显式携带有效 projection_repair authorityPlan。
+function mergeAdjudicationData(tfContent, adjudication, opts) {
+  opts = opts || {};
+  const authorityState = adjudicationAuthorityState(opts);
+  if (authorityState.mode === 'semantic-bound' && !authorityState.allowed) {
+    const e = new Error('[contract] semantic-bound adjudication merge 被拒绝: ' + (authorityState.blockingReason || 'authority plan invalid'));
+    e.code = 'ERR_ADJUDICATION_AUTHORITY';
+    throw e;
+  }
   const data = extractDataMarkers(tfContent);
   for (const [k, v] of Object.entries((adjudication && adjudication.authoritative) || {})) {
     data[k] = /^\d+$/.test(String(v)) ? parseInt(String(v), 10) : String(v);
+  }
+  // I2：S11↔structure 的 right 选择在 semantic-bound lane 中只是“选择已绑定 projection 的 structure 表示”，
+  // 为让既有 renderer/G0 消费同一选择，将右侧 structure 类型物化到 DATA projection；不触碰 semantic current。
+  if (authorityState.mode === 'semantic-bound') {
+    for (const c of ((adjudication && adjudication.conflicts) || [])) {
+      if (c.dimension !== 'S11↔structure类型' || c.adjudicated !== 'right') continue;
+      const right = pairAssignment((c.pair || [])[1]);
+      if (right && right.key === 'structure.s11_original_type') data['S11.类型'] = right.value;
+    }
   }
   const lines = tfContent.replace(/\r\n/g, '\n').split('\n').filter(l => !/^<!--DATA:/.test(l.trim()));
   const appended = Object.entries(data).map(([k, v]) => '<!--DATA: ' + k + '=' + v + ' -->');
@@ -373,7 +443,8 @@ function parseInputs(files, options) {
   return contract;
 }
 
-module.exports = {
+module.exports = { parseReasonReference,
+  exactLabel,
   MID_SPEC, CP_SPEC,
   normalizeMId, normalizeMIdText, normalizeStructureIds,
   isMid, isCpId, isRef, sideOfMid,

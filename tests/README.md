@@ -1,30 +1,12 @@
-# Public Tests
+# Public deterministic tests
 
-Run the public deterministic suite from the repository root:
+Build first with `node web/build-judge-web.js`.
 
-```sh
-node tests/run-public.js
-```
+- `node tests/run-public.js --current`: installer closure plus the current deterministic suites. Exclusions are explicit, not counted as passing; the runner discovers every public `.test.js` file.
+- `node tests/run-public.js`: all public test files, installer verifier and legacy project self-check. Currently exits nonzero because two legacy suites and the project self-check fail.
 
-The runner performs:
+Coverage includes source/round propagation, semantic boundary contracts, judge settings, plain-language paragraph context and review/repair, reader-guide metadata binding and old-draft recovery, responsibility review and interruption recovery, Debug ZIP completeness/partial-evidence handling/credential redaction/non-mutation, browser module/prompt parity, complete Skill mirrors, embedded project backgrounds, and reproducible packaging. Inputs are synthetic/source-integrity fixtures; there are no paid model calls.
 
-1. embedded-closure verification through `install-skill.js --verify-only`;
-2. `pipeline-controller.js self-check`;
-3. Web-source syntax checks;
-4. single-file parity checks;
-5. selected deterministic runtime and source-integrity tests.
+Inherited failures remain in `self-check.test.js` and `key-engine.test.js`, described in [snapshot notes](../docs/semantic-edition.md). The runner executes them by default. There is no catch-all expected-failure conversion.
 
-Current suites include:
-
-- `self-check.test.js`
-- `single-file-parity.test.js`
-- `wayfinder-runtime.test.js`
-- `slicing-contract.test.js`
-- `rounds-source.test.js`
-- `dictionary-consistency.test.js`
-- `key-engine.test.js`
-- `dead-assets.test.js`
-
-A PASS supports source-closure, syntax, runtime-contract, deterministic ABI, and release-hygiene claims. It does **not** establish adjudication accuracy, human agreement, benchmark superiority, research impact, or independent scientific validation.
-
-The private development project has broader evidence-dependent tests that are not redistributed merely to increase the public suite count. Any new public fixture must first be cleared for copyright, privacy, personal data, and local-path leakage.
+Private tests requiring competition transcripts, historical runs or external audit directories are omitted for rights and independent reproducibility, not counted as passing. Public semantic benchmarks require a separately documented data and annotation protocol.

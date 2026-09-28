@@ -56,6 +56,26 @@ const LENGTH_THRESHOLDS = { C1: 100, C3: 80, DEFAULT: 50 };
 // 表行数硬阈值：C6 裁决表 ≥3 数据行；C9 倾向表 ≥3 数据行
 const TABLE_MIN_ROWS = { C6: 3, C9: 3 };
 
+// Detect a provably empty transport shell, not semantic adequacy. Unknown DATA stays readable.
+function hasReadableAnalysis(text, enums, knownKeys) {
+  const registered = new Set((knownKeys || []).concat(Object.keys(enums || {})));
+  let notes = [];
+  const body = String(text || '').replace(/<!--DATA:\s*([^=]+)=([\s\S]*?)-->/g, (_, key, value) => {
+    key=key.trim(); value=value.trim();
+    const allowed=(enums || {})[key] || [];
+    const atoms = new Set(Object.values(enums || {}).flat().concat(['有','无','是','否','能','不适用','已处理','未处理']));
+    const summary = registered.has(key) && (/^FILE\./.test(key) || /\.COMPLETE$/.test(key) ||
+      /^S1\./.test(key) || /\.B0$/.test(key) || key === 'S7.入选标准' ||
+      /^[-+]?\d+(?:\.\d+)?$/.test(value) || allowed.includes(value) || value.split(/[+|]/).every(v => atoms.has(v.trim())) || /^(?:Q[1-4]|Lv[0-9]+|(?:A→B0|B0→C)层)$/.test(value) ||
+      /^(?:CP-\d+|M-(?:ZH|FA)-\d+|T\d+(?:\.\d+)?[a-z]?)(?:[|,，](?:CP-\d+|M-(?:ZH|FA)-\d+|T\d+(?:\.\d+)?[a-z]?))*$/.test(value));
+    if (!summary && value) notes.push(value);
+    return '';
+  }).replace(/<!--([\s\S]*?)-->/g, (_, value) => { if (!/^\s*(?:TABLE|FILE|SCHEMA|HEADER|INSERT|SECTION)[_:]/.test(value)) notes.push(value.trim()); return ''; })
+    .replace(/\[(?:S_START=[^\]]+|S_END=[^\]]+|FILE_END)\]/g, '')
+    .replace(/^\s*#{1,6}\s*结论\s*$/gm, '').replace(/^\s*[-|:]+\s*$/gm, '').trim();
+  return !!body || notes.some(Boolean);
+}
+
 function retryDelayMs(attempt) {
   // attempt = 第几次重试（1..MAX_RETRIES）
   return BACKOFF_MS[Math.min(Math.max(1, attempt), BACKOFF_MS.length - 1)] || 0;
@@ -116,26 +136,28 @@ function tableDataRows(text) {
 
 // 单轮产物门禁（R5 半区按模块切片检查；其余轮仅占位残留）
 function assessArtifact(roundName, text) {
-  const errors = [];
+  const errors = [], warnings = [];
   if (hasPlaceholderResidue(text)) errors.push('占位残留（[块N]）');
   if (String(roundName || '').startsWith('R5') && hasFenceResidue(text)) errors.push('代码围栏残留（```）');
   if (roundName === 'R5A' || roundName === 'R5') {
     for (const m of ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']) {
       const r = moduleLengthCheck(text, m);
-      if (!r.ok) errors.push('篇幅不足 ' + m + '=' + r.current + '<' + r.min);
+      if (!sliceModule(text,m).trim()) errors.push('缺少报告章节 ' + m);
+      else if (!r.ok) warnings.push('报告章节较短，请按实际内容复核覆盖，不按字数否决：' + m);
     }
     const c6 = tableDataRows(sliceModule(text, 'C6'));
-    if (c6 < TABLE_MIN_ROWS.C6) errors.push('C6 裁决表数据行不足 ' + c6 + '<' + TABLE_MIN_ROWS.C6);
+    if (c6 < TABLE_MIN_ROWS.C6) warnings.push('C6实际交锋较少；应忠实覆盖，不为满足三行而拆分或虚构交锋');
   }
   if (roundName === 'R5B' || roundName === 'R5') {
     for (const m of ['C8', 'C9', 'C10', 'C11', 'C12']) {
       const r = moduleLengthCheck(text, m);
-      if (!r.ok) errors.push('篇幅不足 ' + m + '=' + r.current + '<' + r.min);
+      if (!sliceModule(text,m).trim()) errors.push('缺少报告章节 ' + m);
+      else if (!r.ok) warnings.push('报告章节较短，请按实际内容复核覆盖，不按字数否决：' + m);
     }
     const c9 = tableDataRows(sliceModule(text, 'C9'));
     if (c9 < TABLE_MIN_ROWS.C9) errors.push('C9 倾向表数据行不足 ' + c9 + '<' + TABLE_MIN_ROWS.C9);
   }
-  return { ok: errors.length === 0, errors, warnings: [] };
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 // 切片契约维度（260816 小项合并批）：secs/roundKeys/endMap 三清单单一事实源
@@ -152,7 +174,7 @@ function isArtifactUsable(roundName, text) {
   return text && assessArtifact(roundName, text).ok;
 }
 
-module.exports = {
+module.exports = { hasReadableAnalysis,
   ROUNDS, R5_HALVES, SECTION_ROUNDS, SECTION_ENDMAP, MAX_RETRIES, BACKOFF_MS, LENGTH_THRESHOLDS, TABLE_MIN_ROWS,
   DEFAULT_CONTEXT_LIMIT_TOKENS, TOKEN_ESTIMATE_FACTOR, estimateTokens, assertWithinContextLimit,
   retryDelayMs, hasPlaceholderResidue, hasFenceResidue, sliceModule, moduleLengthCheck,

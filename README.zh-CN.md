@@ -1,103 +1,39 @@
-# Debate-Judge
+# Debate-Judge 语义版 · Semantic Edition
 
-面向华语竞技辩论的结构化分析与裁判研究系统
+[English](README.md) · 分支：`semantic-edition` · 定版：`semantic-2026.09.28-r8-debug`
 
-[English](README.md)
+以 GPT6 r6 白话增强版为基础，保留完整裁判轮次、SC 语义识别、评委倾向、成熟报告布局、续跑恢复、白话解释和章节导览。名称代表发展重心，运行时模型可自行配置。
 
-Debate-Judge 用于研究如何把**持方结构、跨发言展开的交锋过程与最终裁决**连接起来。系统采用分阶段 LLM 分析、显式中间表示、产物契约、恢复机制与浏览器报告。
+本次包含中英文界面切换、运行状态面板遮挡修复、R8 导览元数据与草稿恢复，以及项目本地 ComfyUI 生成的深浅背景；进一步修通最终交锋判断与报告汇总、R8 实质异议的责任轮回查和后续重建。运行日志右侧新增一键 Debug 导出，新建与续跑提示按实际入口区分。语言按钮只切换界面；辩词、报告、原始日志及裁判提示词保持原文。
 
-**当前公开状态：v0.1.2 Research Preview。** 仓库采用 MIT 许可，并已完成软件层面的公开复现验证；不宣称达到 SOTA、等同人类评委、普遍有效，或已经完成独立裁判质量验证。
+**这是供后续研究和开发的定版快照，不是已经证明裁判准确、也不是全部历史测试通过的版本。** 当前确定性测试子集和公开打包检查通过；两个旧测试套件及旧 self-check 仍失败，完整公开测试入口如实返回失败。详情见[定版说明](docs/semantic-edition.md)。
 
-## 仓库里有什么
+## 使用和验证
 
-仓库只维护一个规则/runtime 权威源：
+下载后在现代浏览器打开 `web/judge.html`，自行配置 API。单文件表示应用资源已内嵌，不表示模型推理离线运行。
 
-- `Skill-Judge.md` —— 唯一 canonical Skill，也是单文件自包含分发源。
-
-其它文件围绕它组成实现：
-
-- `pipeline-controller.js` —— 管道编排、校验、续跑规划与源码同步。
-- `executor/` —— Provider/runtime 执行与契约校验。
-- `schemas/` —— 机器可读产物契约。
-- `assets/` —— 报告模板、CSS、字典与图表常量。
-- `scripts/` —— 构建、内嵌、校验、发行与文本处理工具。
-- `web/src/` —— 可维护的浏览器源码。
-- `web/judge.html` —— 生成的单文件浏览器版本。
-- `tests/` —— 经过公开权利/隐私边界筛选的确定性测试。
-- `MANIFEST.sha256` —— 公开源码树校验清单。
-
-仓库**不再保存** `Debate-Judge.md` 或 `.claude/skills/.../SKILL.md` 这种逐字节副本。需要安装到 Agent/Skill 目录时由安装流程生成目标文件，不把安装产物当成第二份源码维护。
-
-## 执行模型
-
-当前核心执行单元以 `executor/core.js::ROUNDS` 为准：
-
-`R1 → R2 / R2.5 → R3 → R4 → R4.5 → R5A / R5B → R6a → R6b`
-
-R7 白话化与 R8 导览属于可选后处理。依赖图、恢复门禁和软件自检只能证明工程一致性，不能证明裁判结论本身正确。
-
-## 快速验证
-
-当前源码不需要 npm install 或第三方 Node 包。
+源码构建已在 Node.js 24.16.0 / Windows x64 验证，无需安装 npm 依赖：
 
 ```sh
+git clone --branch semantic-edition https://github.com/MoonTzai/debate-judge.git
+cd debate-judge
 node install-skill.js --verify-only
-node pipeline-controller.js self-check
-node tests/run-public.js
-```
-
-重新生成浏览器单文件：
-
-```sh
 node web/build-judge-web.js
+node tests/run-public.js --current
 ```
 
-不要直接手改 `web/judge.html`；应修改源文件后重新构建。
+`--current` 明确排除已披露的旧测试，不把排除项记作通过。完整现状复现使用 `node tests/run-public.js`，目前会返回非零。
 
-## 真实裁判
+## 公开范围
 
-对你有权使用的逐字稿执行：
+保留运行和构建依赖、完整规则文本、Codex/Claude 兼容入口、单文件网页、可公开的合成输入测试及必要文档。两个 Skill 镜像与根 `Skill-Judge.md` 完全相同。原包里未使用的过期嵌套 controller 不发布，现役控制器仍为根 `pipeline-controller.js`。
 
-```sh
-node pipeline-controller.js pipeline run /path/to/transcript.txt --provider auto --plain --reader-guide
-```
+不发布真实辩词、私人报告或飞行记录、API 配置、私人审计交接及旧 vendor 快照。深浅背景是项目本地 ComfyUI 生成素材，所有者已确认纳入 MIT 发布，图片源文件与单文件 HTML 均包含。此前将其列为待确认第三方素材并排除，是错误分类，现已更正。保留 SC 判准、评分机制与报告结构；本次明确最终判断来源和复核职责，不按计数机械改判，详见定版说明。
 
-真实运行会调用外部模型服务，可能产生费用，也可能把逐字稿发送到外部 Provider。运行前应检查数据授权、服务条款与本地配置。不要提交 API key、私有逐字稿或私有裁判报告。
+## 研究复现
 
-Provider 与续跑说明见 [Usage](docs/usage.md)。
+论文实验应引用固定 tag 或 commit，并记录模型、设置、允许使用的数据、失败案例及人工评价方法。仓库包含完整源码，不依赖私人文件引用或校验码恢复。文件校验清单只是附加完整性检查，不代替完整源码。
 
-## 研究边界
+本次没有新增真实模型评测，不宣称人工一致率、领先性或论文录用。参阅[架构](docs/architecture.md)、[复现说明](docs/reproducibility.md)、[AI 使用披露](docs/ai-usage.md)和 [CITATION.cff](CITATION.cff)。
 
-本项目主要研究：
-
-- 如何表示持方架构，而不是把整场辩论当作平面文本；
-- 如何追踪交锋在不同发言中的发展过程；
-- 如何显式表达有语境的裁判视角；
-- 如何保存可回查的中间产物与恢复状态。
-
-这些都是建模选择。软件门禁通过不等于裁判准确、人类一致、基准领先或科学有效。
-
-Debate-Judge 与 Debate Universal Grammar / 辩论筑基研究体系存在理论与历史联系，但这个仓库只代表当前公开的软件实现。仓库外的理论草案、私有审计或设计冻结记录不会自动变成 public runtime 的能力声明。
-
-## 文档
-
-- [安装](docs/installation.md)
-- [使用](docs/usage.md)
-- [架构](docs/architecture.md)
-- [复现](docs/reproducibility.md)
-- [数据与权利](docs/data-and-rights.md)
-- [支持与治理](docs/support-and-governance.md)
-- [AI 使用披露规范](docs/ai-usage.md)
-- [公开测试](tests/README.md)
-- [贡献指南](CONTRIBUTING.md)
-- [变更记录](CHANGELOG.md)
-
-## 许可与数据边界
-
-仓库中项目自有的代码、规则文本、测试、文档与生成产物按 [MIT License](LICENSE) 发布；[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 记录学术归因与第三方边界。
-
-仓库不分发真实比赛语料库、课程媒体、模型权重、Provider 凭据、私有裁判产物，也不包含此前隔离的 Sanctum 背景图。
-
-## 引用 / JOSS
-
-当前是公开 research-software preview，不是 JOSS 论文。真实公开开发历史从 2026-09-07 的 GitHub 历史开始计算。引用元数据、归档 DOI 与 JOSS paper 应在对应版本与研究证据真实存在后再加入。
+项目所有者已确认此次公开内容统一沿用 [MIT](LICENSE)。第三方材料不因此获得重新授权，具体边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

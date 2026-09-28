@@ -300,10 +300,9 @@ function parseArrowAssessment(c5SlotText) {
 
 const ARROW_STATUS_ENUM = ['充分', '初步', '未论证', '被击穿'];
 
-// 状态列归一化：真实数据形如"初步（罗列了…）"或"初步"；中文/英文括号说明均剥离
+// 精确状态仅用于画图；带限定或无法无损归类的原文另行保留。
 function normalizeStatus(cell) {
-  const clean = String(cell || '').replace(/（.*）/g, '').replace(/\(.*\)/g, '').trim();
-  return ARROW_STATUS_ENUM.find(s => clean.includes(s)) || null;
+  return contract.exactLabel(cell, ARROW_STATUS_ENUM);
 }
 
 // S2 论证完成度矩阵表现场解析（任务 5：废弃 16 键方案）
@@ -335,11 +334,18 @@ function parseArrowStatusFromS2(transitionMd) {
     const side = sideOf(cells[0]) || lastRowSide || lastHeadingSide;
     if (!side) { warnings.push('S2 判方失败，跳过行 L' + (i + 1) + ': ' + cells[0]); continue; }
     lastRowSide = side;
+    // Blank B0 group headings carry the side, but are not argument assessments.
+    if (matrixMode === 'dual' && sideOf(cells[0]) &&
+        cells[1].replace(/[*_]/g, '') === 'B0' && cells.slice(2, 4).every(c => /^[-—–]$/.test(c))) continue;
     const key = side === '正方' ? 'pro' : 'con';
     if (matrixMode === 'single') {
       const ring = normalizeRing(cells[2]);
       const st = normalizeStatus(cells[3]);
-      if (!ring || !st) { warnings.push('S2 单环行无法归一化 L' + (i + 1) + ': ' + cells[2] + '|' + cells[3].slice(0, 40)); continue; }
+      if (!ring || !st) {
+        warnings.push('S2 单环行保留限定原文 L' + (i + 1) + ': ' + cells[2] + '|' + cells[3]);
+        rows.push({ side: key, label: cells[1] || '', ring, a: null, b: null, rawRing: cells[2], rawStatus: cells[3], unresolved: true });
+        continue;
+      }
       const idx = ARROW_STATUS_ENUM.indexOf(st);
       if (ring === 'A→B0') out.A_B0[key][idx]++;
       else out.B0_C[key][idx]++;
@@ -352,17 +358,16 @@ function parseArrowStatusFromS2(transitionMd) {
     else warnings.push('S2 状态列无法归一化 L' + (i + 1) + ' A→B0: ' + cells[2].slice(0, 40));
     if (b) out.B0_C[key][ARROW_STATUS_ENUM.indexOf(b)]++;
     else warnings.push('S2 状态列无法归一化 L' + (i + 1) + ' B0→C: ' + cells[3].slice(0, 40));
-    if (a && b) rows.push({ side: key, label: cells[1] || '', a: ARROW_STATUS_ENUM.indexOf(a), b: ARROW_STATUS_ENUM.indexOf(b) });
+    rows.push({ side: key, label: cells[1] || '', a: a ? ARROW_STATUS_ENUM.indexOf(a) : null, b: b ? ARROW_STATUS_ENUM.indexOf(b) : null, rawA: cells[2], rawB: cells[3], unresolved: !a || !b });
   }
   return { counts: out, rows, warnings };
 }
 
 // 260806 单环合同：作用环归一化（A→B0 / B0→C）
 function normalizeRing(cell) {
-  const clean = String(cell || '').replace(/（.*）/g, '').replace(/\(.*\)/g, '').trim();
-  if (clean.includes('A→B0') || clean.includes('A-B0')) return 'A→B0';
-  if (clean.includes('B0→C') || clean.includes('B0-C')) return 'B0→C';
-  return null;
+  const text = String(cell || '').trim();
+  const aliases = { 'A→B0': 'A→B0', 'A-B0': 'A→B0', 'A_B0': 'A→B0', 'B0→C': 'B0→C', 'B0-C': 'B0→C', 'B0_C': 'B0→C' };
+  return aliases[text] || null;
 }
 
 // 260805 C5 口径统一：箭头状态 = 该箭头内分论点的短板（最弱状态）；论证完成度 = 每分论点两箭头短板取劣
@@ -387,7 +392,7 @@ function completionCountsFromRows(rows) {
 
 function matrixEntriesFromRows(rows) {
   const st = arrowStatusFromRows(rows);
-  const lab = i => (i === null ? '未论证' : ARROW_STATUS_ENUM[i]);
+  const lab = i => (i === null ? '未明确归类' : ARROW_STATUS_ENUM[i]);
   return [
     { arrow: 'A→B0', label: 'A→B0（辩题诠释→核心主张）', pro: lab(st.pro.A_B0), con: lab(st.con.A_B0) },
     { arrow: 'B0→C', label: 'B0→C（核心主张→结论）', pro: lab(st.pro.B0_C), con: lab(st.con.B0_C) }
@@ -503,7 +508,7 @@ function parseS7Attack(raw) {
   if (hdrIdx < 0) return [];
   const header = lines[hdrIdx].split('|').map(s => s.trim()).slice(1, -1);
   const idx = name => header.findIndex(h => h.includes(name));
-  const iId = idx('CP-ID'), iContent = idx('交锋'), iVerdict = idx('裁决'), iPen = idx('穿透度'),
+  const iId = idx('CP-ID'), iContent = idx('交锋'), iVerdict = idx('赢家') >= 0 ? idx('赢家') : idx('裁决'), iPen = idx('穿透度'),
     iTarget = idx('靶心'), iCrit = idx('削弱指向'), iDepth = idx('回合深度');
   const out = [];
   for (let k = hdrIdx + 1; k < lines.length; k++) {
@@ -511,12 +516,14 @@ function parseS7Attack(raw) {
     if (cells.length < 3 || !/^CP-\d+/.test(cells[iId >= 0 ? iId : 0].replace(/\*\*/g, ''))) continue;
     const verdict = iVerdict >= 0 ? cells[iVerdict] : '';
     const vm = verdict.match(/(正方|反方|平局)胜?（([^）]+)）/);
-    if (!vm) continue;
     out.push({
       id: cells[iId].replace(/\*\*/g, ''),
       content: iContent >= 0 ? cells[iContent] : '',
       verdict,
-      who: vm[1], weight: vm[2],
+      who: vm ? vm[1] : verdict, weight: vm ? vm[2] : '',
+      attackedSide: idx('受攻方') >= 0 ? cells[idx('受攻方')] : '',
+      ring: idx('作用环') >= 0 ? cells[idx('作用环')] : '',
+      attackResult: idx('攻击结果') >= 0 ? cells[idx('攻击结果')] : '',
       pen: iPen >= 0 ? cells[iPen] : '',
       target: iTarget >= 0 ? cells[iTarget] : '',
       criticality: iCrit >= 0 ? cells[iCrit] : '',
@@ -527,128 +534,93 @@ function parseS7Attack(raw) {
   return out;
 }
 
-// 靶心→环 机械映射（260806 合同）：B0/其分论点 → A→B0；B0→C 推导 → B0→C；边缘 → 不入环
-function targetRing(cp) {
-  const t = String(cp.target || '');
-  if (/边缘|类比|举例/.test(t)) return null;
-  if (/B0→C|推导|推论|结论链|主张到结论/.test(t)) return 'B0_C';
-  return 'A_B0';
-}
-
-// 旧合同回退启发式（关键词反推，标注 derived）
-function heuristicRing(cp) {
-  const t = cp.content + ' ' + cp.verdict;
-  if (/客观存在|自身具备|独立于|美能否脱离|美.*主观|美.*感受|美.*客观|美.*存在|善.*美|标准.*统一|美感差异|美丑|特性/.test(t)) return 'A_B0';
-  return 'B0_C';
-}
-
+// Compatibility name retained; classification is supplied by the semantic owner.
 function heuristicAttackMap(cps) {
-  const atkEffect = { 致命: 3, 重要: 1, 皮毛: 0, 平局: 0 };
-  const out = { pro: { A_B0: [], B0_C: [] }, con: { A_B0: [], B0_C: [] } };
+  const out = { pro: { A_B0: [], B0_C: [] }, con: { A_B0: [], B0_C: [] }, unmapped: [] };
   for (const cp of cps) {
-    const ring = cp.pen === '高' ? (cp.oldContract ? heuristicRing(cp) : targetRing(cp)) : cp.pen === '中' ? 'A_B0' : null;
-    if (!ring) continue;
-    const effect = atkEffect[cp.weight] !== undefined ? atkEffect[cp.weight] : 0;
-    const targets = cp.who === '平局' ? ['pro', 'con'] : [cp.who === '正方' ? 'con' : 'pro'];
-    for (const t of targets) out[t][ring].push({ cp: cp.id, who: cp.who, weight: cp.weight, effect, content: cp.content, criticality: cp.criticality || '', derived: !!cp.oldContract });
+    if (cp.ring === '不入环') continue;
+    const ring = normalizeRing(cp.ring);
+    const side = contract.exactLabel(cp.attackedSide, ['正方', '反方', '双方']);
+    if (!ring || !side) { out.unmapped.push(cp); continue; }
+    const key = ring === 'A→B0' ? 'A_B0' : 'B0_C';
+    const targets = side === '双方' ? ['pro', 'con'] : [side === '正方' ? 'pro' : 'con'];
+    for (const target of targets) out[target][key].push({
+      cp: cp.id, who: cp.who, weight: cp.weight, content: cp.content,
+      result: cp.attackResult || '见具体交锋', criticality: cp.criticality || '', derived: false
+    });
   }
   return out;
 }
 
-function worstStatus(arr) { const v = (arr || []).filter(x => x !== null && x !== undefined); return v.length ? Math.max.apply(null, v) : 0; }
+
+
+
 
 function c5StatusHtml(i) {
+  if (!Number.isInteger(i) || i < 0 || i > 3) return '<span style="color:var(--dim)">未单独标注</span>';
   const color = i === 3 ? 'var(--red)' : i === 2 ? 'var(--dim)' : i === 1 ? 'var(--gold)' : 'var(--green)';
   const name = ['充分', '初步', '未论证', '被击穿'][i];
   return '<span style="color:' + color + ';font-weight:600">' + name + '</span>';
 }
 
-function attackLabel(entries) {
-  if (!entries.length) return '未受攻击';
-  const w = Math.max.apply(null, entries.map(e => e.effect));
-  if (w === 3) return '被击穿';
-  if (w === 1) return '被削弱';
-  return '被交锋未击穿';
-}
-
-function attackEvidence(entries) {
-  if (!entries.length) return '—';
-  return entries.map(e => e.cp + ' ' + e.who + (e.who === '平局' ? '' : '胜') + '（' + e.weight + '）：' + e.content.slice(0, 24)).join('；');
-}
-
-function chainTextOf(n1, n2) {
-  const worst = Math.max(n1, n2);
-  const ringName = n1 > n2 ? 'A→B0' : 'B0→C';
-  if (worst === 3) return '被击穿（短板环：' + ringName + '）';
-  if (worst === 2) return '有缺口（短板环：' + ringName + ' 未论证）';
-  if (worst === 1) return '有缺口（短板环：' + ringName + ' 初步）';
-  return '完整（两环充分）';
-}
-
-// P1-2 单环明细：合同行按自带 ring；旧合同回退=分论点→A→B0 + 价值点/标准合理性→B0→C（测试推导）
+// 单环明细按明确作用环展示；旧双列格式逐列保留，不推造价值点。
 function singleRingDetailRows(rows) {
   const out = [];
-  for (const side of ['pro', 'con']) {
-    const list = rows.filter(r => r.side === side);
-    list.forEach(r => {
-      if (r.ring) {
-        out.push({ side, label: r.label || '支撑环节', ring: r.ring, status: r.ring === 'A→B0' ? r.a : r.b, derived: false });
-      } else {
-        out.push({ side, label: r.label || '分论点', ring: 'A→B0', status: r.a, derived: false });
-      }
-    });
-    if (!list.some(r => r.ring === 'B0→C')) {
-      out.push({ side, label: '价值点/标准合理性（测试推导）', ring: 'B0→C', status: worstStatus(list.map(r => r.b)), derived: true });
+  for (const r of rows || []) {
+    if (r.ring || r.rawRing) {
+      out.push({ side: r.side, label: r.label || '支撑环节', ring: r.ring || r.rawRing,
+        status: r.ring === 'A→B0' ? r.a : r.b, rawStatus: r.rawStatus, derived: false });
+    } else {
+      out.push({ side: r.side, label: r.label || '支撑环节', ring: 'A→B0', status: r.a, rawStatus: r.rawA, derived: false });
+      if (r.b != null || r.rawB) out.push({ side: r.side, label: r.label || '支撑环节', ring: 'B0→C', status: r.b, rawStatus: r.rawB, derived: false });
     }
   }
   return out;
 }
 
-// P1-1/P1-2：箭头级状态表 + 整链结论 + 支撑明细单环（数据：S2 自证 + S7 启发式攻击，标注测试推导）
+// The original C5 layout is retained. Neither the weakest premise nor CP counts
+// establish the whole argument's status; display the owner's scoped assessment.
 function buildC5V2Ui(rows, raw) {
   if (!rows || !rows.length) return '';
-  const ringWorst = (side, ring, get) => {
-    const vals = rows.filter(r => r.side === side && (r.ring ? r.ring === ring : true) && get(r) !== null && get(r) !== undefined).map(get);
-    return vals.length ? Math.max.apply(null, vals) : 2; // 无该环支撑 → 未论证
-  };
-  const self = {
-    pro: { A_B0: ringWorst('pro', 'A_B0', r => r.a), B0_C: ringWorst('pro', 'B0_C', r => r.b) },
-    con: { A_B0: ringWorst('con', 'A_B0', r => r.a), B0_C: ringWorst('con', 'B0_C', r => r.b) }
-  };
+  const data = contract.extractDataMarkers(String(raw || ''));
   const atk = heuristicAttackMap(parseS7Attack(raw));
-  const net = (side, ring) => {
-    const s = self[side][ring];
-    if (s === 2) return 2;
-    const entries = atk[side][ring];
-    if (entries.some(e => e.effect === 3)) return 3; // 击穿 → 被击穿（无论语境）
-    const weakened = entries.some(e => e.effect === 1);
-    if (weakened && entries.some(e => e.effect === 1 && e.criticality === '唯一支撑')) return Math.min(3, s + 1); // 关键/唯一支撑削弱 → 降一级
-    return s; // 冗余/边缘/未削弱 → 不降级（受质疑标记由调用方加）
+  const sideName = side => side === 'pro' ? '正方' : '反方';
+  const assessment = (step, side, ring, field) => {
+    const prefix = step + '.' + sideName(side) + '.' + ring + '.';
+    const value = data[prefix + field];
+    const reason = data[prefix + '判据'];
+    return { value: reason ? normalizeStatus(value) : null, raw: value, reason };
   };
-  const weakenedNoKey = (side, ring) => {
-    const entries = atk[side][ring];
-    return entries.some(e => e.effect === 1) && !entries.some(e => e.effect === 1 && e.criticality === '唯一支撑');
-  };
-  const sideName = s => s === 'pro' ? '正方' : '反方';
+  const statusHtml = a => a.value ? c5StatusHtml(ARROW_STATUS_ENUM.indexOf(a.value))
+    : '<span style="color:var(--dim)">' + escapeHtml(a.raw || '见支撑明细与交锋评述') + '</span>';
   const arrowRows = [];
-  for (const side of ['pro', 'con']) {
-    for (const ring of ['A_B0', 'B0_C']) {
-      const ringName = ring === 'A_B0' ? 'A→B0' : 'B0→C';
-      const netVal = net(side, ring);
-      const questioned = weakenedNoKey(side, ring) && netVal === self[side][ring];
-      const netHtml = c5StatusHtml(netVal) + (questioned ? ' <span style="color:var(--dim);font-size:0.85em">（受质疑）</span>' : '');
-      arrowRows.push('<tr><td>' + sideName(side) + '</td><td>' + ringName + '</td><td>' + c5StatusHtml(self[side][ring]) + '</td><td>' + attackLabel(atk[side][ring]) + '</td><td>' + netHtml + '</td><td>' + attackEvidence(atk[side][ring]) + '</td></tr>');
-    }
+  for (const side of ['pro', 'con']) for (const ring of ['A_B0', 'B0_C']) {
+    const self = assessment('S2', side, ring, '自证状态');
+    const net = assessment('S10.C5', side, ring, '净状态');
+    const entries = atk[side][ring];
+    const attack = entries.length ? entries.map(e => e.result).join('；') : '未单独标注';
+    const evidence = entries.map(e => e.cp + '：' + e.content).join('；');
+    const detail = [net.reason, self.reason, evidence].filter(Boolean).join('；');
+    arrowRows.push('<tr><td>' + sideName(side) + '</td><td>' + (ring === 'A_B0' ? 'A→B0' : 'B0→C')
+      + '</td><td>' + statusHtml(self) + '</td><td>' + escapeHtml(attack) + '</td><td>'
+      + statusHtml(net) + '</td><td>' + escapeHtml(detail || '请结合本章正文理解') + '</td></tr>');
   }
-  const chainRows = ['pro', 'con'].map(s => '<tr><td>' + sideName(s) + '</td><td>' + chainTextOf(net(s, 'A_B0'), net(s, 'B0_C')) + '</td></tr>').join('');
-  const detailRows = singleRingDetailRows(rows).map(d => '<tr><td>' + sideName(d.side) + '</td><td>' + d.label + '</td><td>' + d.ring + '</td><td>' + c5StatusHtml(d.status) + '</td></tr>').join('');
+  const chainRows = ['pro','con'].map(side => {
+    const label = sideName(side);
+    const text = data['S10.C5.' + label + '.整链判据'] || '结合上述各环的范围与本章论证评述理解，未单独归纳全链结论。';
+    return '<tr><td>' + label + '</td><td>' + escapeHtml(text) + '</td></tr>';
+  }).join('');
+  const detailRows = singleRingDetailRows(rows).map(d => '<tr><td>' + sideName(d.side) + '</td><td>' + escapeHtml(d.label)
+    + '</td><td>' + escapeHtml(d.ring) + '</td><td>' + (d.rawStatus ? escapeHtml(d.rawStatus) : c5StatusHtml(d.status)) + '</td></tr>').join('');
+  const unmapped = atk.unmapped.length ? '<p class="ps">尚未按作用环归类的交锋：'
+    + escapeHtml(atk.unmapped.map(cp => cp.id + '：' + cp.content + (cp.target ? '（' + cp.target + '）' : '')).join('；')) + '。具体判断见交锋评述。</p>' : '';
   return '<h3 style="font-size:1.05em;color:var(--text);margin:16px 0 8px 0">箭头级论证状态（自证 × 攻击）</h3>'
-    + '<p class="ps" style="color:var(--dim)">攻击环归属：新合同按 S7 靶心列机械映射；旧合同场次为关键词反推（测试推导标注）。真值表：唯一支撑削弱→降一级；冗余/边缘→不降级（受质疑）。</p>'
-    + '<table class="tb"><thead><tr><th>方</th><th>箭头</th><th>自证状态</th><th>对方攻击</th><th>净状态</th><th>攻击依据（S7）</th></tr></thead><tbody>' + arrowRows.join('') + '</tbody></table>'
+    + '<p class="ps" style="color:var(--dim)">按原文中的实际推理关系及其适用范围评价；各项理由与整体结论分开说明。</p>'
+    + '<table class="tb"><thead><tr><th>方</th><th>箭头</th><th>自证状态</th><th>对方攻击</th><th>净状态</th><th>判断依据与作用范围</th></tr></thead><tbody>' + arrowRows.join('') + '</tbody></table>' + unmapped
     + '<h3 style="font-size:1.05em;color:var(--text);margin:16px 0 8px 0">整链结论（A→B0→C）</h3>'
     + '<table class="tb"><thead><tr><th>方</th><th>整链状态</th></tr></thead><tbody>' + chainRows + '</tbody></table>'
     + '<h3 style="font-size:1.05em;color:var(--text);margin:16px 0 8px 0">支撑环节明细（辅助，不决定完成度）</h3>'
-    + '<p class="ps" style="color:var(--dim)">单环模型：分论点支撑 A→B0，价值点/标准合理性支撑 B0→C；价值点环为测试推导（真字段见段 1B-B）。</p>'
+    + '<p class="ps" style="color:var(--dim)">保留各项理由的作用范围；没有足够说明的项目不作强行归类。</p>'
     + '<table class="tb"><thead><tr><th>方</th><th>支撑环节</th><th>作用环</th><th>自证状态</th></tr></thead><tbody>' + detailRows + '</tbody></table>';
 }
 
@@ -854,9 +826,9 @@ const C2_BADGE_MAP = {
   '1a': { cls: 't1a', label: '事件型·有清晰的决胜逻辑', desc: '结构性交锋三阶段集中在单次交锋中完成·压缩≈1' },
   '1b': { cls: 't1b', label: '过程型·有清晰的决胜逻辑', desc: '结构性交锋分布在全场时间线上·多层推进·渐进收束' },
   '1c': { cls: 't1c', label: '框架内置型·有清晰的决胜逻辑', desc: 'B0=B\'·立论中已内置容纳逻辑·全场持续应用' },
-  '1d': { cls: 't1d', label: '层间迭代型·有清晰的决胜逻辑', desc: '双方各完成一层SC，后完成方B\'\'上位覆盖先完成方B\'·决胜层在最外层' },
+  '1d': { cls: 't1d', label: '层间迭代型·有结构重构', desc: '保留先后完成及覆盖关系；覆盖范围与全场胜负分别评价' },
   '2a': { cls: 't2a', label: '有起点无推进·缺乏聚合的决胜锚点', desc: '立论有容纳潜力但后续未见实质推进' },
-  '2b': { cls: 't2b', label: '有推进未结晶·缺乏聚合的决胜锚点', desc: '存在SC推进但未走到容纳双方的统一结论' },
+  '2b': { cls: 't2b', label: '有推进未结晶·缺乏聚合的决胜锚点', desc: '已有实质推进，但尚未完成有根据、容纳对手相关理由的比较结论；不以双方是否同意作标准' },
   '2c': { cls: 't2c', label: '纯碰撞型·缺乏聚合的决胜锚点', desc: '双方设计层面均无容纳空间·纯平行交火' },
   '0': { cls: 't0', label: '无真正交锋', desc: '双方各说各话·未形成实质碰撞' }
 };
@@ -913,8 +885,8 @@ function c2ScPanelHTML(data, structure, c7Raw) {
       '<div style="text-align:center;font-weight:bold;color:var(--' + (side === '正方' ? 'green' : 'blue') + ');margin-bottom:4px">' + side + ' · ' + count + '次</div>' +
       (chain || '<div class="pn pn-p2">（无机械可读节点）</div>') + '</div>';
   };
-  const p3 = data['S8.PhaseIII.状态'] === '已结晶' ? '结晶完成' : '有推进未结晶';
-  const p3Desc = (data['S8.PhaseIII.完成方'] || '无') === '无' ? '双方均未完成结晶·未走到容纳双方的统一结论' : data['S8.PhaseIII.完成方'] + '方完成结晶';
+  const p3 = data['S8.PhaseIII.状态'] === '已结晶' ? '主线重构已完成' : '主线重构尚未完成';
+  const p3Desc = (data['S8.PhaseIII.完成方'] || '无') === '无' ? '主线尚未确认完成；其他局部操作是否完成、实际缺口及不确定性见逐项分析' : data['S8.PhaseIII.完成方'] + '形成涉及主线的结构重构结论；各自范围与残余压力见逐项分析';
   return '<details style="margin:16px 0">' +
     '<summary style="cursor:pointer;font-weight:bold;font-size:1.05em;color:var(--blue)">结构性交锋过程追迹面板（展开查看）</summary>' +
     '<div class="pw">' +
@@ -953,7 +925,7 @@ function o5ScProgress(data) {
     '<div style="color:var(--dim);font-size:1.2em">→</div>' +
     '<div style="flex:1;text-align:center"><div style="background:' + (p2n > 0 ? blue : gray) + ';height:10px"></div><div style="font-size:0.78em;color:var(--gray);margin-top:4px">Phase II<br>微消化 ' + p2n + '次</div></div>' +
     '<div style="color:var(--dim);font-size:1.2em">→</div>' +
-    '<div style="flex:1;text-align:center"><div style="background:' + (p3 ? blue : gray) + ';height:10px;border-radius:0 5px 5px 0"></div><div style="font-size:0.78em;color:var(--gray);margin-top:4px">Phase III<br>' + (p3 ? '已结晶' : '未结晶') + '</div></div>' +
+    '<div style="flex:1;text-align:center"><div style="background:' + (p3 ? blue : gray) + ';height:10px;border-radius:0 5px 5px 0"></div><div style="font-size:0.78em;color:var(--gray);margin-top:4px">主线整合<br>' + (p3 ? '已结晶' : '未结晶') + '</div></div>' +
     '</div>';
 }
 
@@ -1163,7 +1135,7 @@ function buildLayerTracks(layer, opts, producer) {
       if (frictionIds.has(id) || oppIds.has(id)) push(n, oppSide || '正方');
       else unassigned.push(n);
     }
-    else if (producer) push(n, producer);
+    else if (producer === '正方' || producer === '反方') push(n, producer);
     else unassigned.push(n);
   });
   (layer.opponent_nodes || []).forEach(n => {
@@ -1195,8 +1167,8 @@ function renderSCLayer(layer, idx, opts, type, scCount, structure, covered, comp
     return '<div class="pz ' + cls + '"><b style="font-size:0.85em">' + heading + '</b>' + cards + '</div>';
   };
   parts.push('<div class="pw">' +
-    col('正方轨道' + (producer === '正方' ? ' · 推进方' : ' · 对方/摩擦'), tracks.zh, 'pz-zh', producer === '正方') +
-    col('反方轨道' + (producer === '反方' ? ' · 推进方' : ' · 对方/摩擦'), tracks.fh, 'pz-fh', producer === '反方') +
+    col('正方轨道' + (producer === '正方' || producer === '双方' ? ' · 推进方' : ' · 对方/摩擦'), tracks.zh, 'pz-zh', producer === '正方' || producer === '双方') +
+    col('反方轨道' + (producer === '反方' || producer === '双方' ? ' · 推进方' : ' · 对方/摩擦'), tracks.fh, 'pz-fh', producer === '反方' || producer === '双方') +
     '</div>');
   parts.push('<div class="pf-arr">↘ ↙</div>');
   const tags = operationTagsForLayer(layer, structure);
@@ -1205,11 +1177,11 @@ function renderSCLayer(layer, idx, opts, type, scCount, structure, covered, comp
   if (tags.length) basisParts.push(tags.join('·'));
   if (mIds) basisParts.push(mIds);
   let title = layerLabel + ' · SC推进' + (producer ? ' · ' + producer + '发起' : '');
-  if (isLast && scCount > 1) title += '（决胜层）';
+  if (isLast && scCount > 1) title += '（末个展示层）';
   let pcd = layer.structural_change_summary || layer.push_collision || '';
   if (type === '1d') {
     if (idx === 0 && covered) pcd = '【B\' 层·先完成方 ' + covered + ' 完成】' + pcd;
-    if (isLast && completer) pcd = '【B\'\' 层·后完成方 ' + completer + ' 完成·上位覆盖】' + pcd;
+    if (isLast && ['正方','反方'].includes(completer)) pcd = '【B\'\' 层·后完成方 ' + completer + ' 完成·上位覆盖】' + pcd;
   }
   const pcf = (layer.nodes || []).map(nodeId).join('·');
   parts.push('<div class="pc1" style="max-width:100%">' +
@@ -1231,17 +1203,12 @@ function renderCrystallization(layer, opts, type) {
   const parts = [];
   parts.push('<div class="pc2" style="border:2px solid var(--gold);max-width:100%">');
   let title;
-  if (type === '2a' || type === '2b' || type === '2c') {
-    title = (state.indexOf('完成') >= 0 && state.indexOf('未') < 0) ? ('收束·结晶 · ' + state) : '收束·未结晶';
-  } else {
-    title = '收束·结晶' + (state ? ' · ' + state : '');
-  }
+  title = '主线收束' + (state ? ' · ' + escapeHtml(state) : ' · 结论见下文');
   parts.push('<div class="pct" style="color:var(--gold)">' + title + '</div>');
   const statuses = nodes.map(n => {
     const s = sideOfNode(n, opts) || '—';
     const mark = (n && typeof n === 'object' && n.sc_mark) || '';
-    const st = mark.indexOf('完成') >= 0 ? '完成' : mark.indexOf('未结晶') >= 0 ? '未结晶' : (mark || '—');
-    return st + '·' + s + '（' + nodeId(n) + '）';
+    return escapeHtml(mark || '—') + '·' + s + '（' + nodeId(n) + '）';
   });
   if (statuses.length) parts.push('<p class="ps">' + statuses.join(' / ') + '</p>');
   if (layer.final_unified_conclusion) parts.push('<p class="pcd">' + layer.final_unified_conclusion + '</p>');
@@ -1280,7 +1247,7 @@ function renderC3Funnel(type, layers, structure, opts) {
       parts.push(renderSCLayer(l, i, opts, type, scLayers.length, structure, covered, completer));
       // 1d：层间覆盖发生在 B' 聚合之后、B'' 聚合之前（两条 SC 链的交接处）
       if (type === '1d' && i === 0 && scLayers.length >= 2) {
-        parts.push('<div class="pf-sep"><b>层间覆盖：后完成方 B\'\' 上位覆盖先完成方 B\'，决胜层在最外层</b></div>');
+        parts.push('<div class="pf-sep"><b>层间覆盖：保留先后完成事实，覆盖的有效范围见论证分析</b></div>');
       }
     });
     parts.push(layerSepHtml(false));
@@ -1304,8 +1271,8 @@ function renderC3ThreeColumn(type, layers, structure, opts) {
   (phase1.nodes || []).forEach(n => splitFrameSide(n, opts, zh, fh, unassigned));
   const middle = [];
   const scLayers = layers.slice(1, -1);
-  const pctText = type === '2a' ? '碰撞点·有起点无推进' : type === '2b' ? '碰撞点·有推进未结晶' : '碰撞点·纯碰撞型';
-  const psText = type === '2a' ? '平行轨道·框架已铺设但从未激活' : type === '2b' ? '平行轨道·SC推进存在但未收束' : '平行轨道·纯平行交火';
+  const pctText = '交锋与推进';
+  const psText = '局部操作的状态与范围见本层说明；主线类型不代替局部判断';
   scLayers.forEach((l, i) => {
     // A7-B2/F7：推进层分隔线（2型·每个推进节点前标注推进层 ID）
     const layerLabel = '推进层' + (l.id || (i + 2));
@@ -1335,7 +1302,7 @@ function renderC3ThreeColumn(type, layers, structure, opts) {
     });
     (l.opponent_nodes || []).forEach(n => { (l.producer === '反方' ? zh : fh).push(n); });
   });
-  if (!middle.length) middle.push('<div class="pc2"><div class="pct">' + pctText + '</div><p class="ps">' + psText + '</p><p class="pcd">双方立论有容纳潜力但后续未见实质推进·≤120字</p><p class="pcf"></p></div>');
+  if (!middle.length) middle.push('<div class="pc2"><div class="pct">' + pctText + '</div><p class="ps">' + psText + '</p><p class="pcd">本图未列独立推进层，具体交锋见逐项分析。</p><p class="pcf"></p></div>');
   const descMap = { '2a': '平行主线·缺乏聚合的决胜锚点', '2b': '平行主线·有推进未结晶', '2c': '平行主线·纯碰撞' };
   let out = '<div class="pw">' +
     '<div class="pz pz-zh"><b style="color:var(--green);font-size:13px;margin-bottom:8px">正方 · ' + (type + '轨道') + '</b>' + trackNodes(zh, 'zh', opts) + (zh.length ? '' : '<p class="ps">（无归属确定节点）</p>') + '</div>' +
@@ -1377,22 +1344,22 @@ function renderC3Summary(type, structure, opts) {
       const completer = (opts.data && opts.data['S8.PhaseIII.完成方']) || '';
       units = units.map(u => ({ ...u, pcd: u.pcd }));
       if (units.length >= 1 && covered) units[0].pcd = '【B\' 层·先完成方 ' + covered + ' 完成】' + (units[0].pcd || '');
-      if (units.length >= 2 && completer) units[units.length - 1].pcd = '【B\'\' 层·后完成方 ' + completer + ' 完成·上位覆盖】' + (units[units.length - 1].pcd || '');
+      if (units.length >= 2 && ['正方','反方'].includes(completer)) units[units.length - 1].pcd = '【B\'\' 层·后完成方 ' + completer + ' 完成·上位覆盖】' + (units[units.length - 1].pcd || '');
     }
     units.forEach((u, i) => {
-      const title = units.length === 1 ? '聚合·结构性交锋' : ('聚合·第' + (i + 1) + '次结构性交锋' + (i === units.length - 1 ? '（决胜层）' : ''));
+      const title = units.length === 1 ? '聚合·结构性交锋' : ('聚合·第' + (i + 1) + '次结构性交锋' + (i === units.length - 1 ? '（末个展示层）' : ''));
       parts.push('<div class="pc1"><div class="pct">' + title + '</div><p class="pcd">' + (u.pcd || '') + '</p><p class="pcf">' + (u.pu || '') + '</p></div>');
       if (type === '1d' && i === 0 && units.length >= 2) {
-        parts.push('<div class="pc2" style="border:2px solid var(--gold)"><b>层间覆盖：后完成方 B\'\' 上位覆盖先完成方 B\'，决胜层在最外层</b></div>');
+        parts.push('<div class="pc2" style="border:2px solid var(--gold)"><b>层间覆盖：保留先后完成事实，覆盖的有效范围见论证分析</b></div>');
       }
     });
   } else {
     const scLayers = layers.slice(1, -1);
-    const pctText = type === '2a' ? '碰撞点·有起点无推进' : type === '2b' ? '碰撞点·有推进未结晶' : '碰撞点·纯碰撞型';
+    const pctText = '交锋与推进';
     scLayers.forEach(l => {
-      parts.push('<div class="pc2"><div class="pct">' + pctText + '</div><p class="pcd">' + (l.push_collision || (l.structural_change_summary || '').slice(0, 120) || '') + '</p></div>');
+      parts.push('<div class="pc2"><div class="pct">' + pctText + '</div><p class="pcd">' + (l.push_collision || l.structural_change_summary || '') + '</p></div>');
     });
-    if (!scLayers.length) parts.push('<div class="pc2"><div class="pct">' + pctText + '</div><p class="pcd">双方立论有容纳潜力但后续未见实质推进</p></div>');
+    if (!scLayers.length) parts.push('<div class="pc2"><div class="pct">' + pctText + '</div><p class="pcd">本图未列独立推进层，具体交锋见逐项分析。</p></div>');
   }
   return parts.join('\n');
 }
@@ -1987,14 +1954,14 @@ function renderC8Persona(data) {
   const rows = [];
   for (const [side, raw] of [['正方', pro], ['反方', con]]) {
     if (!raw) continue;
-    const parts = String(raw).split('|');
-    const tag = (parts[0] || '').trim();
-    const desc = (parts[1] || '').trim();
+    const parsed = require('./executor/contract.js').parseReasonReference(raw);
+    const tag = parsed.label;
+    const desc = parsed.reason;
     if (!tag && !desc) continue;
     rows.push('<tr><td>' + side + '</td><td><strong>' + escapeHtml(tag) + '</strong>' + (desc ? '<br>' + escapeHtml(desc) : '') + '</td></tr>');
   }
   const winRow = win
-    ? '<tr><td>人格胜负</td><td><strong>' + escapeHtml(String(win).split('|')[0]) + '</strong></td></tr>' : '';
+    ? '<tr><td>人格胜负</td><td><strong>' + escapeHtml(require('./executor/contract.js').parseReasonReference(win).label) + '</strong><br>' + escapeHtml(require('./executor/contract.js').parseReasonReference(win).reason) + '</td></tr>' : '';
   return '<div id="c8-persona"><h3 style="font-size:1.05em;color:var(--text);margin:16px 0 8px 0">叙事人格</h3>' +
     '<table class="tb"><thead><tr><th>方</th><th>姿态标签与解读</th></tr></thead><tbody>' +
     rows.join('') + winRow + '</tbody></table></div>';

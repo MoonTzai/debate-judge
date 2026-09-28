@@ -2,7 +2,7 @@
 
 ## Repository boundary
 
-This public repository contains project source, the canonical `Skill-Judge.md`, schemas, tests, documentation, and generated browser output.
+This public repository contains project source, the canonical `Skill-Judge.md`, schemas, tests, documentation, project-generated UI backgrounds, and generated browser output.
 
 It does not distribute:
 
@@ -10,10 +10,9 @@ It does not distribute:
 - course PPT/SRT/media;
 - private adjudication reports or logs;
 - model weights or provider credentials;
-- private audit/evidence packages;
-- the earlier Sanctum background images.
+- private audit/evidence packages.
 
-The browser background is generated with project-authored CSS rather than the quarantined artwork.
+The dark/light Sanctum backgrounds in `web/assets/` were generated locally with ComfyUI by the project, as confirmed by the maintainer on 2026-09-25. They are included under the existing MIT publication authorization and embedded into the standalone HTML. The former exclusion as unresolved third-party artwork was an incorrect provenance classification and has been withdrawn. No model weights or generation software are redistributed.
 
 ## License
 

@@ -14,6 +14,38 @@ const { ROUNDS, R5_HALVES, SECTION_ROUNDS, SECTION_ENDMAP } = require('./executo
 // 本文件解构引用（内部调用点零改动）；module.exports 同名导出即委托
 const contract = require('./executor/contract.js');
 const validator = require('./executor/validator.js');
+const runSettings = require('./scripts/judge-run-settings.js');
+
+// S5 post-cutover delivery：Production lifecycle 是 project-side authority，不是 portable/off runtime 的加载前置。
+// 只在确实需要解析 project-root Production state 时 lazy-load；Web/提取版未打包该项目审计模块时默认保持 off/shadow。
+// 仅吞“直接目标模块未打包/不存在”，其嵌套依赖损坏仍必须原样 fail-close。
+function loadProductionCutoverOptional() {
+  const spec = './scripts/sc-semantic-production-cutover.js';
+  try {
+    return require(spec);
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    const directNodeMissing = e && e.code === 'MODULE_NOT_FOUND' && msg.includes("Cannot find module '" + spec + "'");
+    const directWebMissing = msg.includes('[judge-web] 模块未打包: ' + spec + ' ');
+    if (directNodeMissing || directWebMissing) return null;
+    throw e;
+  }
+}
+
+function resolveProductionSemanticFirstMode(argv, productionRoot) {
+  const list = Array.isArray(argv) ? argv.map(String) : [];
+  const invalidSemanticFlags = list.filter(arg => arg.startsWith('--semantic-first-') && arg !== '--semantic-first-shadow');
+  if (invalidSemanticFlags.length) {
+    const e = new Error('unsupported semantic-first CLI flag: ' + invalidSemanticFlags.join(', '));
+    e.code = 'ERR_SEMANTIC_FIRST_MODE_ARG';
+    throw e;
+  }
+  const productionCutover = loadProductionCutoverOptional();
+  if (!productionCutover) return list.includes('--semantic-first-shadow') ? 'shadow' : 'off';
+  return productionCutover.resolveMode(path.resolve(productionRoot || __dirname), {
+    shadowRequested: list.includes('--semantic-first-shadow')
+  });
+}
 const {
   MID_SPEC, CP_SPEC,
   normalizeMId, normalizeMIdText, normalizeStructureIds,
@@ -53,13 +85,13 @@ function planResumeStart(input) {
   const active = {};
   order.forEach(n => { active[n] = true; });
   if (requested === 'auto') {
-    return { requestedNode: 'auto', effectiveStartNode: 'auto', effectiveNodes: [], invalidatedNodes: [], preservedNodes: order.slice(), staleExpansion: [], reasons: [], requirePlainCacheHit: false, allowed: true, blockingReason: null };
+    return { requestedNode: 'auto', effectiveStartNode: 'auto', effectiveNodes: [], invalidatedNodes: [], preservedNodes: order.slice(), staleExpansion: [], reasons: [], requirePlainCacheHit: false, allowed: true, blockingReason: null, taskClass: 'legacy_auto_resume', semanticInvalidated: false, preserveSemanticCurrent: true };
   }
   if (!active[requested]) {
     const why = requested === 'R7' && settings.plain !== true ? 'R7 仅在 plain=true 时可选'
       : requested === 'R8' && settings.readerGuide !== true ? 'R8 仅在 readerGuide=true 时可选'
       : '未知或当前设置下不可用的续跑节点: ' + requested;
-    return { requestedNode: requested, effectiveStartNode: null, effectiveNodes: [], invalidatedNodes: [], preservedNodes: order.slice(), staleExpansion: [], reasons: [why], requirePlainCacheHit: false, allowed: false, blockingReason: why };
+    return { requestedNode: requested, effectiveStartNode: null, effectiveNodes: [], invalidatedNodes: [], preservedNodes: order.slice(), staleExpansion: [], reasons: [why], requirePlainCacheHit: false, allowed: false, blockingReason: why, taskClass: 'legacy_round_recompute', semanticInvalidated: false, preserveSemanticCurrent: true };
   }
   const deps = {
     R1: [], R2: ['R1'], 'R2.5': ['R1'], R3: ['R2','R2.5'], R4: ['R3'], 'R4.5': ['R4'],
@@ -124,9 +156,245 @@ function planResumeStart(input) {
     effectiveNodes: invalidated.slice(), invalidatedNodes: invalidated, preservedNodes: preserved,
     staleExpansion, reasons,
     requirePlainCacheHit: requested === 'R8' && settings.plain === true && !invalid.R7,
-    allowed: true, blockingReason: null
+    allowed: true, blockingReason: null,
+    taskClass: 'legacy_round_recompute',
+    semanticInvalidated: false,
+    preserveSemanticCurrent: true
   };
 }
+
+// S4A-I1：恢复任务先分类，再决定“要修表示、重渲染、续未完成调用，还是确有语义复核”。
+// 该 planner 纯函数、零 IO；任何机械失效都显式 semanticInvalidated=false。
+const RECOVERY_TASK_CLASSES = Object.freeze([
+  'representation_repair',
+  'render_rebuild',
+  'unfinished_call',
+  'semantic_review',
+  'user_rejudge',
+  'legacy_round_recompute'
+]);
+function planRecoveryTask(input) {
+  input = input || {};
+  const taskClass = String(input.taskClass || 'legacy_round_recompute');
+  if (!RECOVERY_TASK_CLASSES.includes(taskClass)) {
+    return {
+      allowed: false,
+      taskClass,
+      blockingReason: '未知 recovery taskClass: ' + taskClass,
+      semanticInvalidated: false,
+      preserveSemanticCurrent: true,
+      automaticFileDeletion: false
+    };
+  }
+  if (taskClass === 'legacy_round_recompute') {
+    const plan = planResumeStart(input);
+    return Object.assign({}, plan, {
+      taskClass,
+      semanticInvalidated: false,
+      preserveSemanticCurrent: true,
+      automaticFileDeletion: true
+    });
+  }
+  const base = {
+    allowed: true,
+    taskClass,
+    semanticInvalidated: false,
+    preserveSemanticCurrent: true,
+    automaticFileDeletion: false,
+    requiresModelCall: false,
+    requiresConcreteIssue: false,
+    mayCreateSemanticRevision: false,
+    reasons: []
+  };
+  if (taskClass === 'representation_repair') {
+    base.reasons.push('仅修复当前语义版本的表示/投影；不得重判源语义');
+  } else if (taskClass === 'render_rebuild') {
+    base.reasons.push('仅从已验证投影重渲染；0 semantic rejudge');
+  } else if (taskClass === 'unfinished_call') {
+    base.requiresModelCall = true;
+    base.reasons.push('只恢复明确未完成的调用任务；partial/unknown 不得冒充 complete');
+  } else if (taskClass === 'semantic_review') {
+    base.requiresModelCall = true;
+    base.requiresConcreteIssue = true;
+    base.mayCreateSemanticRevision = true;
+    if (!input.issueRef && !input.issueText) {
+      base.allowed = false;
+      base.blockingReason = 'semantic_review 必须携带具体 issueRef 或 issueText；机械 gate 失败本身不构成语义复核理由';
+    } else {
+      base.reasons.push('基于具体 source/context 异议进行受控语义复核；旧 current 在 CAS 成功前保持有效');
+    }
+  } else if (taskClass === 'user_rejudge') {
+    base.requiresModelCall = true;
+    base.mayCreateSemanticRevision = true;
+    base.reasons.push('用户显式要求重新裁判；旧 semantic current 作为 immutable parent 保留');
+  }
+  return base;
+}
+
+// S4A-I2：consumer authority 只接受显式 same-version binding。
+// 不传 binding = legacy-unversioned 兼容 lane；只有 legacy lane 允许沿用历史 exists-first。
+// semantic-bound lane 必须把每个消费视图绑定到同一个 semantic/projection object id，
+// 不能从 mtime / 文件存在性猜“当前权威”。
+const CONSUMER_BINDING_SCHEMA = 'judge-consumer-binding-v1';
+function consumerRefObjectId(ref) {
+  if (!ref) return null;
+  if (typeof ref === 'string') return ref;
+  return ref.objectId ? String(ref.objectId) : null;
+}
+function invalidConsumerBinding(message, extra) {
+  return Object.assign({
+    allowed: false,
+    mode: 'semantic-bound',
+    existsFirstAllowed: false,
+    blockingReason: message,
+    semanticInvalidated: false,
+    preserveSemanticCurrent: true
+  }, extra || {});
+}
+function planConsumerBinding(input) {
+  input = input || {};
+  const binding = input.binding || null;
+  const requiredViews = Array.isArray(input.requiredViews) ? input.requiredViews.map(String) : [];
+  if (!binding) {
+    return {
+      allowed: true,
+      mode: 'legacy-unversioned',
+      schema: null,
+      versionKey: 'legacy-unversioned',
+      revision: null,
+      semanticRef: null,
+      projectionRef: null,
+      sourceSha256: null,
+      contextSha256: null,
+      views: {},
+      requiredViews,
+      existsFirstAllowed: true,
+      semanticInvalidated: false,
+      preserveSemanticCurrent: true
+    };
+  }
+  if (!binding || typeof binding !== 'object') return invalidConsumerBinding('consumer binding 必须为对象');
+  if (binding.schema !== CONSUMER_BINDING_SCHEMA) {
+    return invalidConsumerBinding('consumer binding schema 非法: ' + String(binding.schema || 'missing'));
+  }
+  if (binding.mode !== 'semantic-bound') {
+    return invalidConsumerBinding('新 consumer lane 只接受 mode=semantic-bound；legacy 请完全不传 binding');
+  }
+  const semanticId = consumerRefObjectId(binding.semanticRef);
+  const projectionId = consumerRefObjectId(binding.projectionRef);
+  if (!semanticId || !projectionId) return invalidConsumerBinding('semantic-bound 必须同时绑定 semanticRef 与 verified projectionRef');
+  if (binding.projectionState !== 'verified') return invalidConsumerBinding('semantic-bound projectionState 必须为 verified');
+  if (binding.semanticReviewPending === true) return invalidConsumerBinding('semantic review pending 时不得发布 consumer authority');
+  const revision = Number(binding.revision);
+  if (!Number.isInteger(revision) || revision < 1) return invalidConsumerBinding('semantic-bound revision 必须为正整数');
+  const viewRevision = binding.viewRevision == null ? 1 : Number(binding.viewRevision);
+  if (!Number.isInteger(viewRevision) || viewRevision < 1) return invalidConsumerBinding('semantic-bound viewRevision 必须为正整数');
+  if (!/^[a-f0-9]{64}$/i.test(String(binding.sourceSha256 || ''))) {
+    return invalidConsumerBinding('semantic-bound sourceSha256 缺失或非法');
+  }
+  if (binding.contextSha256 != null && !/^[a-f0-9]{64}$/i.test(String(binding.contextSha256))) {
+    return invalidConsumerBinding('semantic-bound contextSha256 非法');
+  }
+  const views = binding.views && typeof binding.views === 'object' ? binding.views : {};
+  const normalizedViews = {};
+  for (const [name, view] of Object.entries(views)) {
+    if (!view || typeof view !== 'object') return invalidConsumerBinding('consumer view 非对象: ' + name);
+    const rel = String(view.path || '').replace(/\\/g, '/');
+    if (!rel || rel.startsWith('/') || /^[A-Za-z]:\//.test(rel) || rel.split('/').includes('..')) {
+      return invalidConsumerBinding('consumer view path 非工作目录相对安全路径: ' + name);
+    }
+    if (!/^[a-f0-9]{64}$/i.test(String(view.sha256 || ''))) {
+      return invalidConsumerBinding('consumer view sha256 缺失或非法: ' + name);
+    }
+    if (String(view.semanticObjectId || '') !== semanticId || String(view.projectionObjectId || '') !== projectionId) {
+      return invalidConsumerBinding('consumer view 与 current semantic/projection 版本不一致: ' + name);
+    }
+    normalizedViews[name] = {
+      path: rel,
+      sha256: String(view.sha256).toLowerCase(),
+      semanticObjectId: semanticId,
+      projectionObjectId: projectionId
+    };
+  }
+  const missing = requiredViews.filter(name => !normalizedViews[name]);
+  if (missing.length) return invalidConsumerBinding('semantic-bound 缺少 required consumer view: ' + missing.join(', '));
+  return {
+    allowed: true,
+    mode: 'semantic-bound',
+    schema: CONSUMER_BINDING_SCHEMA,
+    versionKey: revision + '.' + viewRevision + ':' + semanticId + ':' + projectionId,
+    revision,
+    viewRevision,
+    semanticRef: binding.semanticRef,
+    projectionRef: binding.projectionRef,
+    semanticObjectId: semanticId,
+    projectionObjectId: projectionId,
+    sourceSha256: String(binding.sourceSha256).toLowerCase(),
+    contextSha256: binding.contextSha256 == null ? null : String(binding.contextSha256).toLowerCase(),
+    views: normalizedViews,
+    requiredViews,
+    existsFirstAllowed: false,
+    semanticInvalidated: false,
+    preserveSemanticCurrent: true
+  };
+}
+
+// R4.5 在 I2 中只拥有“同语义版本的表示修复”权限。
+// 真正 semantic revision 必须回到 semantic workflow 的 source/context issue + review + CAS，
+// contract/host 的 authoritative overlay 自身永远不能晋升 semantic current。
+function planAdjudicationAuthority(input) {
+  input = input || {};
+  const bindingPlan = planConsumerBinding({
+    binding: input.binding || null,
+    requiredViews: Array.isArray(input.requiredViews) ? input.requiredViews : []
+  });
+  if (!bindingPlan.allowed) return Object.assign({}, bindingPlan, {
+    mutationKind: input.mutationKind || 'projection_repair',
+    semanticRevisionAuthority: false
+  });
+  if (bindingPlan.mode === 'legacy-unversioned') {
+    return Object.assign({}, bindingPlan, {
+      mutationKind: 'legacy-adjudication',
+      projectionRepair: false,
+      semanticRevisionAuthority: false,
+      requiresSemanticReview: false
+    });
+  }
+  const mutationKind = String(input.mutationKind || 'projection_repair');
+  if (mutationKind === 'semantic_revision') {
+    const review = planRecoveryTask({
+      taskClass: 'semantic_review',
+      issueRef: input.issueRef || null,
+      issueText: input.issueText || ''
+    });
+    return Object.assign({}, bindingPlan, {
+      allowed: false,
+      mutationKind,
+      projectionRepair: false,
+      semanticRevisionAuthority: false,
+      requiresSemanticReview: true,
+      reviewPlan: review,
+      blockingReason: review.allowed
+        ? 'R4.5/contract 无 semantic revision 权限；请经 semantic workflow review + CAS 生成新的 current 后重新投影'
+        : review.blockingReason
+    });
+  }
+  if (mutationKind !== 'projection_repair') {
+    return invalidConsumerBinding('未知 adjudication mutationKind: ' + mutationKind, {
+      mutationKind,
+      semanticRevisionAuthority: false
+    });
+  }
+  return Object.assign({}, bindingPlan, {
+    mutationKind,
+    projectionRepair: true,
+    semanticRevisionAuthority: false,
+    requiresSemanticReview: false,
+    semanticInvalidated: false,
+    preserveSemanticCurrent: true
+  });
+}
+
 const RESUME_R8_FILES = [
   'report.html', 'reader-guide-input.json', 'reader-guide.json', 'reader-guide-plain.json', 'reader-guide.html',
   '.tmp-reader-guide-cache.json', '.tmp-reader-guide-draft.json', '.tmp-reader-guide-plain-draft.json'
@@ -174,6 +442,8 @@ function buildResumePlanForDir(workDir, requestedNode, settings) {
   return planResumeStart({ requestedNode, runModel: { staleRounds: {} }, settings: settings || {} });
 }
 function applyResumeRewindFs(workDir, plan) {
+  // legacy rewind 只删根目录 projection/report 产物；.semantic-first-v1 是目录且永不进入删除集合。
+  // 这条不变量明确表示：下游重算 != 上游 semantic current 被机械否定。
   const names = fs.readdirSync(workDir, { withFileTypes: true }).filter(e => e.isFile()).map(e => e.name);
   const remove = resumeInvalidationNames(plan, names);
   for (const name of remove) {
@@ -387,8 +657,32 @@ function selfCheck() {
   const afterOk = after === '' || /^<!-- EMBED_ASSET_LIST -->[\s\S]*$/.test(after);
   results.push({ name: 'JS内嵌一致', ok: eb.ok && norm(eb.code) === src && afterOk });
 
-  // 2) 单一权威 Skill：读取成功即为唯一规则源；不维护仓库内镜像副本。
-  results.push({ name: '单一权威 Skill', ok: norm(skill).length > 0 });
+  // 2) 三镜像一致
+  const peers = ['Debate-Judge.md', '.claude/skills/debate-judge/SKILL.md']
+    .map(p => { try { return norm(fs.readFileSync(__dirname + '/' + p, 'utf-8')); } catch (e) { return ''; } });
+  // 单文件交付模式：镜像副本不存在（接收者只拿到 Skill-Judge.md）→ 跳过比对视为通过；
+  // 开发工作区（镜像齐全）→ 仍严格逐字一致
+  const missingMirror = !fs.existsSync(__dirname + '/Debate-Judge.md') || !fs.existsSync(__dirname + '/.claude/skills/debate-judge/SKILL.md');
+  results.push({ name: '三镜像一致', ok: missingMirror || (peers[0] === norm(skill) && peers[1] === peers[0]) });
+
+  // 2b) 项目根 Claude 入口壳形态检查（批 5 / 260812 P0-1）：存在但过期视同 FAIL——
+  // 根 .claude/skills/debate-judge/SKILL.md 与根 Debate-Judge.md 必须为轻量壳（shellTemplate 生成物，
+  // 含壳特征标记且 <50KB）；若为全量副本（>100KB）则必须逐字等于权威（历史形态兼容）。
+  // 项目根布局守卫（AGENTS.md 存在性）：单文件交付/异地解包等无根布局场景跳过（仿 missingMirror 逃生舱）。
+  const rootLayoutOk = fs.existsSync(path.join(__dirname, '..', 'AGENTS.md'));
+  const shellMark = '按需从权威文件切片加载规则';
+  if (rootLayoutOk) {
+    for (const rel of ['.claude/skills/debate-judge/SKILL.md', 'Debate-Judge.md']) {
+      const p = path.join(__dirname, '..', rel);
+      const name = '根壳同步: ' + rel;
+      if (!fs.existsSync(p)) { results.push({ name, ok: false }); continue; }
+      const c = fs.readFileSync(p, 'utf-8').replace(/\r\n/g, '\n');
+      const ok = c.length > 100 * 1024
+        ? (norm(c) === norm(skill))
+        : (c.includes(shellMark) && c.length < 50 * 1024);
+      results.push({ name, ok });
+    }
+  }
 
   // 3) JS 语法（编译，不执行）
   let syntaxOk = true;
@@ -804,6 +1098,7 @@ function validateTablePairing(content) {
 }
 
 function buildRoundPrompt(prompt, roundNum, speech, tendency) {
+  prompt = require('./executor/sc-original-integration.js').adaptPrompt(prompt, roundNum);
   let full = `# Debate-Judge V1.0 · R${roundNum} Prompt\n`;
   full += `> 生成时间: ${new Date().toISOString()}\n`;
   if (tendency) full += `> 裁判倾向: ${tendency}\n`;
@@ -934,11 +1229,35 @@ function loadRunSemanticAuthorities(skillPath, options) {
 
 function runAll(speechFile, options = {}) {
   const speech = fs.readFileSync(speechFile, 'utf-8');
-  const tendency = options.tendency || '';
+  let tendency = options.tendency || '';
   // A8-ERR-1：工作目录统一经场次隔离门禁——未显式指定时自动新建时间戳目录，不再跟随辩词文件所在目录
   const { dir: workDir } = ensureFreshOutputDir(speechFile, options.outputDir, options.force);
   // 正式场次事务绑定：同一 output dir 只能对应同一份规范化辩词；force 只控制重算，不得绕过绑定。
   assertDebateBinding(workDir, speech);
+  const settingsPath = path.join(workDir, '.judge-run-settings.json');
+  const savedSettings = fs.existsSync(settingsPath) ? JSON.parse(fs.readFileSync(settingsPath, 'utf8')) : null;
+  const normalized = runSettings.normalizeRunSettings(options.runSettings !== undefined ? options.runSettings : savedSettings && savedSettings.settings);
+  tendency = options.runSettings !== undefined ? runSettings.tendencyText(normalized.analysis.dimWeights, normalized.analysis.tendencyWeights)
+    : (options.tendency !== undefined ? String(options.tendency || '') : savedSettings && savedSettings.tendency || '');
+  // Compare the actual saved values, not a reference-only fingerprint. A changed
+  // criterion cannot reuse old analysis under ordinary resume.
+  if (savedSettings && !options.force && (savedSettings.tendency !== tendency ||
+      runSettings.stableJson(savedSettings.settings.analysis) !== runSettings.stableJson(normalized.analysis))) {
+    const err = new Error('本场分析设置已改变；请新建场次或显式全量重跑，不能混用旧分析与新判准');
+    err.code = 'ANALYSIS_SETTINGS_CHANGED';
+    throw err;
+  }
+  fs.writeFileSync(settingsPath, JSON.stringify({version:1,settings:normalized,tendency}, null, 2), 'utf8');
+  if (options.force) {
+    // Explicit full rerun starts a fresh bounded review; retain the complete old record.
+    for (const name of ['.analysis-review.json','.analysis-pristine-prompts.json','.tmp-reader-guide-review.json']) {
+      const p=path.join(workDir,name);
+      if (fs.existsSync(p)) { fs.writeFileSync(p+'.previous-'+Date.now(),fs.readFileSync(p,'utf8'),'utf8'); fs.unlinkSync(p); }
+    }
+  }
+  const settingOverlay = round => runSettings.tendencyReviewPrompt(tendency, round.name) +
+    runSettings.projectJudgeContext(normalized.analysis.judgeContext, round.name) +
+    (round.half ? runSettings.depthBlockText(normalized.analysis.depth) : '');
   // mandatory semantic-authority preflight：在任何 prompt / 并行元数据落盘前完成。
   const authorities = loadRunSemanticAuthorities(__dirname + '/Skill-Judge.md');
   const registry = authorities.registry;
@@ -985,7 +1304,7 @@ function runAll(speechFile, options = {}) {
       const contract = generateInsertContract(halfRegistry, 'R5');
       full = full + contract;
       const constraint = '\n\n---\n## 输出范围约束\n\n**你只负责输出 ' + half.range + ' 章节。** 不要输出 ' + half.exclude + '。\n\n**INSERT 处理规则**：\n- 只填充属于 ' + half.range + ' 的 INSERT\n- 不属于你范围的 INSERT 直接忽略，不输出、不删除、不修改\n\n示例：你负责 ' + half.range + '，看到 INSERT_' + (half.label === 'A' ? 'C8' : 'C1') + '_PROSE → 忽略它。\n';
-      full = full + constraint;
+      full = full + constraint + settingOverlay(round);
       const outFile = require('path').join(workDir, round.promptFile);
       fs.writeFileSync(outFile, full, 'utf-8');
       console.log('  R5-' + half.label + ': ' + outFile + ' (' + full.length + '字)');
@@ -993,7 +1312,7 @@ function runAll(speechFile, options = {}) {
     }
 
     const prompt = loadRoundPrompt(round.num);
-    let full = buildRoundPrompt(prompt, round.num, round.hasSpeech ? speech : null, tendency);
+    let full = buildRoundPrompt(prompt, round.num, round.hasSpeech ? speech : null, tendency) + settingOverlay(round);
 
     // INSERT 合同注入 (从注册表自动生成)——卡7：删 'R5'（half 分支已注入半区合同并 continue）
     if (['R6a','R6b','R2.5'].includes(round.name)) {
@@ -1261,20 +1580,14 @@ function diffConflicts(snapshot, structure, opts) {
     });
   };
 
-  // S7 赢家 ↔ SC 完成方（批甲 R7a：pair 改真实键——S7.赢家 为 DERIVED_KEYS 注册派生键，模型可写；完成方为 DATA 真实键）
-  const s7Pro = v['S7.正方赢.致命'], s7Con = v['S7.反方赢.致命'];
-  const scCompleter = v['S8.PhaseIII.完成方'];
-  if (scCompleter && s7Pro !== undefined && s7Con !== undefined) {
-    const s7Winner = (s7Pro || 0) > (s7Con || 0) ? '正方' : (s7Con || 0) > (s7Pro || 0) ? '反方' : '平';
-    if (s7Winner === '反方' && scCompleter === '正方') push('S7赢家↔SC完成方', 'S7.赢家=反方', 'S8.PhaseIII.完成方=正方');
-    if (s7Winner === '正方' && scCompleter === '反方') push('S7赢家↔SC完成方', 'S7.赢家=正方', 'S8.PhaseIII.完成方=反方');
-  }
-
+  // SC formation and local win counts are different judgments, not a contradictory pair.
   // S11 类型 ↔ structure 类型记录
   const s11 = v['S11.类型'];
   if (structure && s11) {
     const orig = structure.meta && structure.meta.s11_original_type;
-    if (orig && orig !== s11) push('S11↔structure类型', 'S11.类型=' + s11, 'structure.s11_original_type=' + orig);
+    const proposal = structure.meta && structure.meta.type_override;
+    if (proposal && proposal !== s11) push('S11↔structure类型', 'S11.类型=' + s11, 'structure.type_override=' + proposal);
+    else if (orig && orig !== s11) push('S11↔structure类型', 'S11.类型=' + s11, 'structure.s11_original_type=' + orig);
   }
 
   // C4 专项（260806）：S8.碰撞终判 一致性冲突对（登记供 R4.5 仲裁）
@@ -1285,36 +1598,40 @@ function diffConflicts(snapshot, structure, opts) {
     if (s11 !== undefined && validator.TYPE1.includes(String(s11))) push('终判↔S11类型', 'S8.碰撞终判=各跑各的', 'S11.类型=' + s11);
   }
 
-  // 比分 ↔ 六向度合计（零和 10/维；胜负方向核对）
-  const proScore = v['S15.正方得分'], conScore = v['S15.反方得分'];
-  const hexadKeys = ['证伪', '证成', '理性', '感性', '场面感', '意义感'];
-  let hexPro = 0, hexCon = 0, hexOk = true;
-  for (const d of hexadKeys) {
-    const p = v['S9.' + d + '.正方'], c = v['S9.' + d + '.反方'];
-    if (p === undefined || c === undefined) { hexOk = false; break; }
-    hexPro += p; hexCon += c;
-  }
-  if (hexOk && proScore !== undefined && conScore !== undefined) {
-    const hexWinner = hexPro > hexCon ? '正方' : hexCon > hexPro ? '反方' : '平';
-    const scoreWinner = proScore > conScore ? '正方' : conScore > proScore ? '反方' : '平';
-    if (hexWinner !== '平' && scoreWinner !== '平' && hexWinner !== scoreWinner)
-      push('比分↔六向度', '六向度合计=' + hexWinner, 'S15比分=' + scoreWinner);
-  }
-
+  // An unweighted six-dimension sum cannot override an explicitly chosen criterion.
   return conflicts;
 }
 
 // 4) checkEffectiveType：G0 门禁（有效类型 = type_override ?? S11.类型）
 // data: 聚合后的 DATA values；structure: structure.json 对象；presentation: 可选
-function mergeStructureOverride(structure, adjudication) {
+function mergeStructureOverride(structure, adjudication, opts) {
+  opts = opts || {};
+  const authorityPlan = opts.authorityPlan || null;
+  if (authorityPlan && authorityPlan.mode === 'semantic-bound' &&
+      (authorityPlan.allowed !== true || authorityPlan.mutationKind !== 'projection_repair' ||
+       authorityPlan.projectionRepair !== true || authorityPlan.semanticRevisionAuthority !== false)) {
+    const e = new Error('semantic-bound structure merge 只允许 same-version projection_repair；semantic revision 必须走 review + CAS');
+    e.code = 'ERR_ADJUDICATION_AUTHORITY';
+    throw e;
+  }
   const copy = JSON.parse(JSON.stringify(structure || {}));
   const auth = (adjudication && adjudication.authoritative) || {};
   if (auth['S11.类型'] && copy.meta) copy.meta.s11_original_type = String(auth['S11.类型']);
+  if (authorityPlan && authorityPlan.mode === 'semantic-bound' && copy.meta) {
+    for (const c of ((adjudication && adjudication.conflicts) || [])) {
+      if (c.dimension !== 'S11↔structure类型' || c.adjudicated !== 'left') continue;
+      const m = String((c.pair || [])[0] || '').match(/^S11\.类型=(.*)$/);
+      if (m) copy.meta.s11_original_type = m[1];
+    }
+  }
   const smo = adjudication && adjudication.structure_meta_override;
   if (smo && copy.meta) {
     copy.meta.type_override = smo.type_override;
     copy.meta.override_reason = smo.override_reason;
   }
+  // A reviewed type is committed through DATA. Structure can only mirror it.
+  // Keep the original suggestion in the saved R4/adjudication artifacts.
+  if (auth['S11.类型'] && copy.meta) copy.meta.type_override = null;
   return copy;
 }
 
@@ -1496,7 +1813,9 @@ else if (cmd === 'sync-embed') {
     const block = startMarker + '\n```javascript\n' + srcSync.trim() + '\n```\n' + endMarker;
     const result = contentSync.slice(0, startIdx) + block + contentSync.slice(endIdx + endMarker.length);
     fs.writeFileSync(__dirname + '/Skill-Judge.md', result, 'utf-8');
-    console.log('[sync-embed] 完成：Skill-Judge.md canonical 内嵌块已更新');
+    fs.copyFileSync(__dirname + '/Skill-Judge.md', __dirname + '/Debate-Judge.md');
+    fs.copyFileSync(__dirname + '/Skill-Judge.md', __dirname + '/.claude/skills/debate-judge/SKILL.md');
+    console.log('[sync-embed] 完成：Skill-Judge.md 内嵌块已更新 + 三镜像已同步');
   }
 else if (cmd === 'build-index') {
     const speechFile = args[1];
@@ -1636,18 +1955,29 @@ else if (cmd === 'pipeline' && args[1] === 'run') {
     // A8-P3c：单一编排主入口（D1）——prompt 生成（与 run-all 同底层）→ 统一执行器 → 落盘门禁重试
     const speechFile = args[2];
     if (!speechFile) {
-      console.error('用法: node pipeline-controller.js pipeline run <辩词文件> [--provider mock|openai-compatible|codex-cli] [--dry-run] [--force] [--mock-good] [--skip-roster-confirm] [--plain] [--reader-guide] [--resume-from <节点>] [--plain-dict <外部字典.json>]');
+      console.error('用法: node pipeline-controller.js pipeline run <辩词文件> [--provider mock|openai-compatible|codex-cli] [--dry-run] [--force] [--mock-good] [--skip-roster-confirm] [--plain] [--reader-guide] [--resume-from <节点>] [--plain-dict <外部字典.json>] [--semantic-first-shadow]');
       process.exit(1);
     }
     const pIdx = args.indexOf('--provider');
     const provider = pIdx >= 3 && args[pIdx + 1] ? args[pIdx + 1] : 'auto';
     const dryRun = args.slice(3).includes('--dry-run');
+    const rsIdx = args.indexOf('--run-settings'), tendencyIdx = args.indexOf('--tendency');
+    let explicitRunSettings;
+    if (rsIdx >= 0) {
+      if (!args[rsIdx + 1] || args[rsIdx + 1].startsWith('--')) throw new Error('--run-settings 需要 JSON 文件路径或 JSON 对象');
+      const raw=args[rsIdx + 1];
+      explicitRunSettings=runSettings.normalizeRunSettings(JSON.parse(raw.trim().startsWith('{') ? raw : fs.readFileSync(raw,'utf8')));
+    }
+    if (tendencyIdx >= 0 && (!args[tendencyIdx+1] || args[tendencyIdx+1].startsWith('--'))) throw new Error('--tendency 需要倾向文本');
+    if (rsIdx >= 0 && tendencyIdx >= 0) throw new Error('--run-settings 与 --tendency 不应同时声明判准；请选择一种明确来源');
     const resumeFromIdx = args.indexOf('--resume-from');
     const resumeFrom = canonicalResumeNode(resumeFromIdx >= 3 && args[resumeFromIdx + 1] ? args[resumeFromIdx + 1] : 'auto');
     const targetedResume = !!outputDir && resumeFrom !== 'auto';
     const forceRequested = args.slice(3).includes('--force');
     const force = targetedResume ? false : forceRequested;
     const mockGood = args.slice(3).includes('--mock-good');
+    // S4A-I1：仅开放 shadow 证据通道；无 active/cutover CLI，默认 off。
+    const semanticFirstMode = resolveProductionSemanticFirstMode(args.slice(3), __dirname);
     // B1（260809 实测轮 B）：名册确认跳过开关透传——host-node 层已支持 opts.skipRosterConfirm（mock 因 provider 判定自动跳过掩盖缺口），CLI 侧补齐接线
     const skipRosterConfirm = args.slice(3).includes('--skip-roster-confirm');
     const apiCfgIdx = args.indexOf('--api-config');
@@ -1699,29 +2029,42 @@ else if (cmd === 'pipeline' && args[1] === 'run') {
         }
       }
     }
-    runAll(speechFile, { tendency: '', auto: false, force, outputDir: workDir });
+    const runOptions={ auto:false,force,outputDir:workDir };
+    if (explicitRunSettings !== undefined) runOptions.runSettings=explicitRunSettings;
+    if (tendencyIdx >= 0) runOptions.tendency=args[tendencyIdx+1];
+    runAll(speechFile, runOptions);
     if (dryRun) {
-      console.log(JSON.stringify({ ok: true, mode: 'dry-run', provider, resolvedProvider: cfg.provider, plain, readerGuide, resumePlan, plainDict, apiConfigFile: fileCfg ? (apiCfgIdx >= 3 ? args[apiCfgIdx + 1] : require('path').join(workDir, '.api-config.json')) : null, workDir, note: '仅生成 prompt 文件；定点 dry-run 不做版本快照/rewind，也不调用 API' }));
+      console.log(JSON.stringify({ ok: true, mode: 'dry-run', provider, resolvedProvider: cfg.provider, plain, readerGuide, semanticFirstMode, resumePlan, plainDict, apiConfigFile: fileCfg ? (apiCfgIdx >= 3 ? args[apiCfgIdx + 1] : require('path').join(workDir, '.api-config.json')) : null, workDir, note: '仅生成 prompt 文件；定点 dry-run 不做版本快照/rewind，也不调用 API；semantic-first shadow 也不会创建 sidecar' }));
       process.exit(0);
     }
     let rewindRemoved = [];
     if (targetedResume) {
+      if (semanticFirstMode !== 'active') host.captureReaderGuideReview(workDir);
       rewindRemoved = applyResumeRewindFs(workDir, resumePlan);
       console.log('[resume] 已归档旧版本 ' + resumeVersion.versionId + '；请求 ' + resumePlan.requestedNode + ' → 实际 ' + resumePlan.effectiveStartNode + '；失效 ' + resumePlan.invalidatedNodes.join('、'));
     }
     const mockResponder = provider === 'mock' ? (mockGood ? host.goodMockResponder : () => '<!-- mock 冒烟响应 -->') : undefined;
-    host.runPipeline({
+    const pipelineOptions = {
       workDir, cfg, mockResponder, onLog: m => console.log(m), force, plain,
+      semanticFirstMode,
       plainReplayOnly: !!(resumePlan && resumePlan.requirePlainCacheHit),
       plainDict, skipRosterConfirm
-    }).then(async res => {
+    };
+    host.runPipeline(pipelineOptions).then(async res => {
       let readerGuideApplied = false;
       if (res.ok && readerGuide) {
-        await host.applyReaderGuide(workDir, cfg, m => console.log(m), { cache: !force });
+        const guideResult = await host.applyReaderGuideWithRecovery(workDir, cfg, m => console.log(m), {
+          cache: !force,
+          consumerBinding: res.consumerBinding || null,
+          pipelineOptions
+        });
+        if (guideResult && guideResult.pipelineResult) res = guideResult.pipelineResult;
+        if (guideResult && guideResult.consumerBinding) res.consumerBinding = guideResult.consumerBinding;
         readerGuideApplied = true;
       }
       console.log(JSON.stringify({
         ok: res.ok,
+        semanticFirstMode,
         resumePlan,
         resumeVersion: resumeVersion ? { versionId: resumeVersion.versionId, dir: resumeVersion.dir } : null,
         rewindRemoved,
@@ -1809,10 +2152,11 @@ else if (cmd === 'verify-baseline') {
     console.log('    check-html <file>         检查 report.html 的 C 模块 div + <style>');
     console.log('    check-structure <file>     验证 R4 结构归约轮产出的 structure.json');
     console.log('    run-all <file> [--tendency <倾向>] [--auto] [--force]  自动编排管道');
-    console.log('    pipeline run <file> [--provider mock|openai-compatible|codex-cli] [--dry-run] [--force] [--mock-good] [--skip-roster-confirm] [--plain] [--reader-guide] [--resume-from <节点>] [--plain-dict <外部字典.json>]  单一编排主入口（执行器）');
+    console.log('    pipeline run <file> [--provider mock|openai-compatible|codex-cli] [--dry-run] [--force] [--mock-good] [--skip-roster-confirm] [--plain] [--reader-guide] [--resume-from <节点>] [--plain-dict <外部字典.json>] [--semantic-first-shadow]  单一编排主入口（执行器）');
     console.log('      普通续跑：pipeline run <file> --provider auto --output-dir <已有时间戳目录>（不带 --force；逐轮门禁复用）');
     console.log('      定点规划：pipeline resume-plan --output-dir <已有时间戳目录> --from <R1|R2|R2.5|R3|R4|R4.5|R5A|R5B|R6|R7|R8>');
     console.log('      定点续跑：pipeline run <file> --provider auto --output-dir <已有时间戳目录> --resume-from <节点> [--plain] [--reader-guide]（先只读版本归档，再共享 planner rewind）');
+    console.log('      S4A-I1 shadow：--semantic-first-shadow 仅旁路持久化 request/raw/typed gate issue；不改 prompt、不增模型调用、不推进 semantic current；默认关闭');
     console.log('    pipeline new-dir <file> [--force]  新建唯一时间戳输出目录（完整报告渲染入口）');
     console.log('    record-baseline <dir> / verify-baseline <dir>  旧目录 MD5 基线记录与零改动验收');
     console.log('  元检查:');
@@ -1864,6 +2208,14 @@ function validateHalf(content, label, opts) {
   if (label === 'A') {
     for (const e of validator.checkC7DataContract(content, { s8: opts.data })) errors.push(e);
   }
+  // Use the same verdict check as the assembled narrative while this half can
+  // still be repaired by its producing round (including cached resume outputs).
+  if (opts.data) {
+    const vc = validator.checkVerdictConsistency(content, opts.data);
+    for (const e of vc.errors) errors.push(e.rule + ': ' + e.message);
+    // The formal verdict line is owned by A; B normally restates it in prose.
+    for (const w of vc.warnings) if (!(label === 'B' && w.rule === 'D1')) warnings.push(w.rule + ': ' + w.message);
+  }
   if (errors.length > 0) return { passed: false, reason: errors.join('; '), warnings };
   return { passed: true, warnings };
 }
@@ -1882,7 +2234,7 @@ function resolvePlainFlag(argv, fileCfg) {
 // ==================== 源锚层 v1（260809）：名册抽取器 + 锚 1/2/3 ====================
 // 真问题：事实层（S8.2 表/S8 DATA/C7 表/C7 标记）悬浮于模型自述——抽取器把"谁、什么立场、第几轮"
 // 从模型转述中剥离为确定性机械抽取（外部源锚 = 锚 1 人数 + 锚 3 人名/身份；锚 2 表内自洽不冒充外部锚）。
-// 源锚层 v1.9；契约基线标识：N1N2/E1E2E3E4/D1D2D3。公开运行不依赖私有设计/审计文件。
+// 方案：Upload/方案-260809-源锚层-事实层外部锚-结构性修复.md（v1.9）；契约基线：N1N2/E1E2E3E4/D1D2D3 三份外部审计交付。
 
 // ---- 正则常量（E-1/E-4/N-2，单一事实源） ----
 // 规则 1：队伍行两形态（E-1：冒号 + 是字；形态 B 剥离句尾标点）
@@ -1913,7 +2265,7 @@ function roleTagToSideRole(tag) {
   return role ? { side, role } : null;
 }
 
-// 全角空格归一（"樊　登"→"樊登"）；名字一律按辩词原文保留（6.1：繁体辩词 → 繁体名，不简繁转换）
+// 全角空格归一（姓名内全角空格→普通规范空格）；名字一律按辩词原文保留（6.1：繁体辩词 → 繁体名，不简繁转换）
 function normalizeFullWidth(s) {
   return String(s || '').replace(/[\s\u3000]/g, '');
 }
@@ -2114,5 +2466,5 @@ function mergeRosterAliases(freshAnchor, oldAnchor) {
 
 // 锚 3 模式常量与 W2 阈值（D-3，单一事实源）
 
-module.exports = { validate: validator.validate, extractDataMarkers, normalizeMId, normalizeMIdText, isMid, isCpId, isRef, sideOfMid, normalizeStructureIds, loadRoundPrompt, loadRoundPromptFallback, buildSectionIndex, cropPromptByChapters, runAll, normalizeDebateBindingText, debateBindingSha256, assertDebateBinding, loadRunSemanticAuthorities, ERR_DEBATE_BINDING_MISMATCH, ERR_SEMANTIC_AUTHORITY, buildRoundPrompt, checkNarrative: validator.checkNarrative, checkHtml: validator.checkHtml, checkStructure: validator.checkStructure, parseStructureJson, autoFixTables, autoFixSMarkers, validateTablePairing, parseInsertRegistry, getEnums: validator.getEnums, validateRegistry, checkTerminology: validator.checkTerminology, checkTerminologyContent: validator.checkTerminologyContent, scanVersionMarkersContent, extractEmbeddedBlock, extractEmbeddedAsset, selfCheck, generateInsertContract, concatHalves, validateHalf, buildIndex, aggregateData, diffConflicts, checkEffectiveType: validator.checkEffectiveType, verifyMechanical, auditAttention, depthCheck, syncAssets, getAssetBlocks, VALID_OUTPUT_DIR_RE, ERR_OUTPUT_ISOLATION, outputIsolationError, defaultOutputRoot, resolveOutputDir, ensureFreshOutputDir, baselineManifest, parseSMarkers: validator.parseSMarkers, parseSMarkerDetail: validator.parseSMarkerDetail, sectionOfStep: validator.sectionOfStep, checkR5Contract: validator.checkR5Contract, checkVerdictConsistency: validator.checkVerdictConsistency, checkCompletionMatrix: validator.checkCompletionMatrix, checkS7Contract: validator.checkS7Contract, loadInputContract, generateDataContract, validateAdjudication, mergeAdjudicationData, mergeStructureOverride, ADJUDICATION_WHITELIST, normalizeEnumValue: validator.normalizeEnumValue, autoFixDataValues, adjudicationWhitelist, TYPE1: validator.TYPE1, TYPE2: validator.TYPE2, checkV1_V6: validator.checkV1_V6, checkC1_C7: validator.checkC1_C7, checkS8Coherence: validator.checkS8Coherence, resolvePlainFlag, extractSourceAnchor, parseS82Table: validator.parseS82Table, checkS82Anchors: validator.checkS82Anchors, matchTurnToRoster: validator.matchTurnToRoster, checkSideTriplet: validator.checkSideTriplet, normalizeRoleTag: validator.normalizeRoleTag, mergeRosterAliases, roleTagToSideRole, W2_MIN_UNRESOLVABLE: validator.W2_MIN_UNRESOLVABLE, W2_RATIO: validator.W2_RATIO, checkS8: validator.checkS8, checkS17Table: validator.checkS17Table, checkCompletionConsistency: validator.checkCompletionConsistency, detectNewContract: validator.detectNewContract, detectNewContractFromText: validator.detectNewContractFromText, isNewContractHeader: validator.isNewContractHeader, deriveDirection: validator.deriveDirection, applyDerivations: validator.applyDerivations, injectDerivedDataLines, check55Guard: validator.check55Guard, checkS102Overstrict: validator.checkS102Overstrict, normalizeForCompare: validator.normalizeForCompare, CROSS_FORMAT_COMPARE_POINTS: validator.CROSS_FORMAT_COMPARE_POINTS, R2_5_DOMAIN_RE: validator.R2_5_DOMAIN_RE, R3_DOMAIN_RE: validator.R3_DOMAIN_RE, DIMENSIONS, DIMENSION_S7_SC, DERIVED_KEYS, ADJUDICABLE_PREFIXES, LENGTH_GATE_RULES: validator.LENGTH_GATE_RULES, adjudicableKeys, canonicalResumeNode, resumeNodeOrder, planResumeStart, resumeInvalidationNames, inferResumeSettings, buildResumePlanForDir, applyResumeRewindFs, createResumeVersionSnapshotFs };
+module.exports = { validate: validator.validate, extractDataMarkers, normalizeMId, normalizeMIdText, isMid, isCpId, isRef, sideOfMid, normalizeStructureIds, loadRoundPrompt, loadRoundPromptFallback, buildSectionIndex, cropPromptByChapters, runAll, normalizeDebateBindingText, debateBindingSha256, assertDebateBinding, loadRunSemanticAuthorities, resolveProductionSemanticFirstMode, ERR_DEBATE_BINDING_MISMATCH, ERR_SEMANTIC_AUTHORITY, buildRoundPrompt, checkNarrative: validator.checkNarrative, checkHtml: validator.checkHtml, checkStructure: validator.checkStructure, parseStructureJson, autoFixTables, autoFixSMarkers, validateTablePairing, parseInsertRegistry, getEnums: validator.getEnums, validateRegistry, checkTerminology: validator.checkTerminology, checkTerminologyContent: validator.checkTerminologyContent, scanVersionMarkersContent, extractEmbeddedBlock, extractEmbeddedAsset, selfCheck, generateInsertContract, concatHalves, validateHalf, buildIndex, aggregateData, diffConflicts, checkEffectiveType: validator.checkEffectiveType, verifyMechanical, auditAttention, depthCheck, syncAssets, getAssetBlocks, VALID_OUTPUT_DIR_RE, ERR_OUTPUT_ISOLATION, outputIsolationError, defaultOutputRoot, resolveOutputDir, ensureFreshOutputDir, baselineManifest, parseSMarkers: validator.parseSMarkers, parseSMarkerDetail: validator.parseSMarkerDetail, sectionOfStep: validator.sectionOfStep, checkR5Contract: validator.checkR5Contract, checkVerdictConsistency: validator.checkVerdictConsistency, checkCompletionMatrix: validator.checkCompletionMatrix, checkS7Contract: validator.checkS7Contract, loadInputContract, generateDataContract, validateAdjudication, mergeAdjudicationData, mergeStructureOverride, ADJUDICATION_WHITELIST, normalizeEnumValue: validator.normalizeEnumValue, autoFixDataValues, adjudicationWhitelist, TYPE1: validator.TYPE1, TYPE2: validator.TYPE2, checkV1_V6: validator.checkV1_V6, checkC1_C7: validator.checkC1_C7, checkS8Coherence: validator.checkS8Coherence, resolvePlainFlag, extractSourceAnchor, parseS82Table: validator.parseS82Table, checkS82Anchors: validator.checkS82Anchors, matchTurnToRoster: validator.matchTurnToRoster, checkSideTriplet: validator.checkSideTriplet, normalizeRoleTag: validator.normalizeRoleTag, mergeRosterAliases, roleTagToSideRole, W2_MIN_UNRESOLVABLE: validator.W2_MIN_UNRESOLVABLE, W2_RATIO: validator.W2_RATIO, checkS8: validator.checkS8, checkS17Table: validator.checkS17Table, checkCompletionConsistency: validator.checkCompletionConsistency, detectNewContract: validator.detectNewContract, detectNewContractFromText: validator.detectNewContractFromText, isNewContractHeader: validator.isNewContractHeader, deriveDirection: validator.deriveDirection, applyDerivations: validator.applyDerivations, injectDerivedDataLines, check55Guard: validator.check55Guard, checkS102Overstrict: validator.checkS102Overstrict, normalizeForCompare: validator.normalizeForCompare, CROSS_FORMAT_COMPARE_POINTS: validator.CROSS_FORMAT_COMPARE_POINTS, R2_5_DOMAIN_RE: validator.R2_5_DOMAIN_RE, R3_DOMAIN_RE: validator.R3_DOMAIN_RE, DIMENSIONS, DIMENSION_S7_SC, DERIVED_KEYS, ADJUDICABLE_PREFIXES, LENGTH_GATE_RULES: validator.LENGTH_GATE_RULES, adjudicableKeys, canonicalResumeNode, resumeNodeOrder, planResumeStart, planRecoveryTask, RECOVERY_TASK_CLASSES, CONSUMER_BINDING_SCHEMA, planConsumerBinding, planAdjudicationAuthority, resumeInvalidationNames, inferResumeSettings, buildResumePlanForDir, applyResumeRewindFs, createResumeVersionSnapshotFs };
 if (require.main === module) main();

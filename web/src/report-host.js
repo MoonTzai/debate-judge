@@ -144,8 +144,16 @@ function createReportHost(options) {
     try {
       var doc = frame.contentDocument;
       if (!doc || !doc.documentElement) return;
-      var h = Math.max(600, doc.documentElement.scrollHeight || 0, doc.body ? doc.body.scrollHeight : 0);
-      frame.style.height = (h + 8) + 'px';
+      // scrollHeight is floored by the iframe viewport, so it cannot shrink after
+      // collapsing details or leaving plain mode. Measure the natural layout box.
+      var body = doc.body;
+      if (!body) return;
+      var rect = body.getBoundingClientRect();
+      var win = frame.contentWindow;
+      var css = win.getComputedStyle(body);
+      var natural = rect.bottom + (win.scrollY || 0) + (parseFloat(css.marginBottom) || 0);
+      var height = Math.ceil(Math.max(600, natural)) + 8;
+      if (frame.style.height !== height + 'px') frame.style.height = height + 'px';
     } catch (e) {}
   }
 
@@ -160,6 +168,7 @@ function createReportHost(options) {
       if (doc && doc.documentElement && WinResizeObserver) {
         resizeObserver = new WinResizeObserver(function () { syncInternalHeight(); });
         resizeObserver.observe(doc.documentElement);
+        if (doc.body) resizeObserver.observe(doc.body);
       }
     } catch (e) {}
     if (typeof options.onReady === 'function') {

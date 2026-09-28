@@ -48,7 +48,7 @@ const TITLE_RE = /^## R[\d.]+[ab]? PROMPT/mg;
 
 // SC-3：注入必红——去 R2.5 SECTION（标题保留）→ 回退切片起点必须为行首标题（内嵌文本命中即 FAIL）
 {
-  const tmp = path.join(require('os').tmpdir(), 'sj-sc3-no-r25-section-' + process.pid + '.md');
+  const tmp = path.join(process.env.TEMP, 'opencode', 'sj-sc3-no-r25-section.md');
   const noR25 = SJ
     .replace('<!-- SECTION:R2.5_START -->', '<!-- SECTION:R2.5_START_REMOVED -->')
     .replace('<!-- SECTION:R2.5_END -->', '<!-- SECTION:R2.5_END_REMOVED -->');
@@ -63,7 +63,7 @@ const TITLE_RE = /^## R[\d.]+[ab]? PROMPT/mg;
 
 // SC-4：双缺失（SECTION + 行首标题整行替换）→ null（L1661 throw 前提回归实证）
 {
-  const tmp = path.join(require('os').tmpdir(), 'sj-sc4-double-missing-' + process.pid + '.md');
+  const tmp = path.join(process.env.TEMP, 'opencode', 'sj-sc4-double-missing.md');
   const noAll = SJ
     .replace('<!-- SECTION:R2.5_START -->', '<!-- SECTION:R2.5_START_REMOVED -->')
     .replace('<!-- SECTION:R2.5_END -->', '<!-- SECTION:R2.5_END_REMOVED -->')

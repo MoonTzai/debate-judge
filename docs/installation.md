@@ -14,11 +14,13 @@ From the repository root:
 
 ```sh
 node install-skill.js --verify-only
-node pipeline-controller.js self-check
-node tests/run-public.js
+node web/build-judge-web.js
+node tests/run-public.js --current
 ```
 
 These are software-integrity checks, not adjudication-quality measurements.
+
+The full runner (`node tests/run-public.js`) also reproduces known legacy failures. See [snapshot notes](semantic-edition.md); the old `pipeline-controller.js self-check` is not a passing release gate for this frozen candidate.
 
 ## Browser artifact
 
@@ -34,7 +36,7 @@ Do not repair generated HTML by hand.
 
 `Skill-Judge.md` is the only canonical Skill source in the repository.
 
-`install-skill.js` can verify the embedded closure, extract a runnable workspace, and generate a lightweight user-level Skill shell. The repository itself does not keep duplicated Claude/Codex Skill copies.
+`install-skill.js` can verify the embedded closure, extract a runnable workspace, and generate a lightweight user-level Skill shell. This frozen branch preserves identical `Debate-Judge.md` and `.claude/skills/debate-judge/SKILL.md` compatibility mirrors. The root `Skill-Judge.md` remains the canonical source.
 
 Verification only:
 

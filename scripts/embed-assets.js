@@ -1,4 +1,4 @@
-// L5+C10b 单文件交付：将 assets/、schemas/ 与渲染器 JS 内嵌为 Skill-Judge.md 尾部块（幂等），只更新 canonical Skill。
+// L5+C10b 单文件交付：将 assets/、schemas/ 与渲染器 JS 内嵌为 Skill-Judge.md 尾部块（幂等），并同步三镜像。
 // 运行：node scripts/embed-assets.js
 'use strict';
 const fs = require('fs');
@@ -26,13 +26,20 @@ function embed(content) {
   const marker = '<!-- PIPELINE_CONTROLLER_' + 'START -->';
   const idx = content.indexOf(marker);
   if (idx < 0) throw new Error('PIPELINE_CONTROLLER_START 未找到');
-  // 幂等重建（卡 3 修复现状非幂等 bug：原删除正则 \n? 只吞一个换行 → 块区边界空行每次累积）：
-  // 只重建 PC_START 之前的块区（整块删除并吞块后空白 \s*，块序 = BLOCKS 序）；
-  // 行首锚定（^ + m，卡 8 教训同款）：源码内块标记字面量（如 contract.js loadInputContract 正则）
-  // 均非行首（前缀 content.match(/ 等）——杜绝跨内容误删；PC 块/尾部绝不触碰
-  const head = content.slice(0, idx).replace(/^<!-- EMBED_ASSET:[A-Z0-9_]+_START -->[\s\S]*?^<!-- EMBED_ASSET:[A-Z0-9_]+_END -->\s*/gm, '');
+  // Some earlier deliveries placed assets AFTER the controller. Rebuild both
+  // outer regions, retaining the controller itself and all non-asset text. Only
+  // registered, line-anchored, matched marker pairs are removed; source literals
+  // inside the controller are never interpreted as asset boundaries.
+  const endMarker = '<!-- PIPELINE_CONTROLLER_' + 'END -->';
+  const end = content.indexOf(endMarker, idx + marker.length);
+  if (end < 0) throw new Error('PIPELINE_CONTROLLER_END 未找到');
+  const controllerEnd = end + endMarker.length;
+  const names = new Set(blocks.map(b => b.name));
+  const stripAssets = region => region.replace(/^<!-- EMBED_ASSET:([A-Z0-9_]+)_START -->[\s\S]*?^<!-- EMBED_ASSET:\1_END -->\s*/gm,
+    (whole, name) => names.has(name) ? '' : whole);
+  const head = stripAssets(content.slice(0, idx));
   const blockText = blocks.map(buildBlock).join('\n') + '\n\n';
-  return head + blockText + content.slice(idx);
+  return head + blockText + content.slice(idx, controllerEnd) + stripAssets(content.slice(controllerEnd));
 }
 
 // 卡 3：EMBED_ASSET_LIST 尾部区块更新（lastIndexOf 定位，与 install-skill verify 语义一致；幂等；
@@ -50,7 +57,48 @@ function upsertAssetList(skill) {
   return skill.replace(/\n*$/, '') + '\n' + listText + '\n';
 }
 
-const skillPath = path.join(root, 'Skill-Judge.md');
-const skill = upsertAssetList(embed(fs.readFileSync(skillPath, 'utf-8')));
-fs.writeFileSync(skillPath, skill, 'utf-8');
-console.log('canonical Skill updated: Skill-Judge.md');
+function syncR6aCssTemplate(content) {
+  content = String(content).replace(/\r\n/g, '\n');
+  const marker = '### R6a-3 CSS';
+  const idx = content.indexOf(marker);
+  if (idx < 0) throw new Error('R6a-3 CSS 模板未找到');
+  const open = content.indexOf('```css', idx);
+  if (open < 0) throw new Error('R6a-3 CSS 开始围栏未找到');
+  const bodyStart = open + '```css'.length;
+  const close = content.indexOf('```', bodyStart);
+  if (close < 0) throw new Error('R6a-3 CSS 结束围栏未找到');
+  const css = fs.readFileSync(path.join(root, 'assets', 'report.css'), 'utf-8').replace(/\r\n/g, '\n').trim();
+  return content.slice(0, bodyStart) + '\n' + css + '\n' + content.slice(close);
+}
+
+function renderSkillContent(content) {
+  return upsertAssetList(embed(syncR6aCssTemplate(String(content))));
+}
+
+function writeEmbeddedMirrors() {
+  const skillPath = path.join(root, 'Skill-Judge.md');
+  const skill = renderSkillContent(fs.readFileSync(skillPath, 'utf-8'));
+  fs.writeFileSync(skillPath, skill, 'utf-8');
+  for (const m of ['Debate-Judge.md', '.claude/skills/debate-judge/SKILL.md']) {
+    fs.writeFileSync(path.join(root, m), skill, 'utf-8');
+  }
+  return skill;
+}
+
+function main() {
+  writeEmbeddedMirrors();
+  console.log('embedded blocks written:', blocks.map(b => b.name).join(', '));
+  console.log('mirrors synced: Debate-Judge.md, .claude/skills/debate-judge/SKILL.md');
+}
+
+if (require.main === module) main();
+module.exports = {
+  blocks,
+  buildBlock,
+  buildAssetList,
+  embed,
+  upsertAssetList,
+  syncR6aCssTemplate,
+  renderSkillContent,
+  writeEmbeddedMirrors
+};

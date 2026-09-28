@@ -24,6 +24,7 @@ function createEngine(bundle, hooks) {
 
   var PC = load('pipelineController');
   var host = load('hostNode');
+  var semanticWorkflow = load('semanticWorkflow');
   var api = load('apiProvider');
   var tendency = load('tendency');
   var judgeContext = load('judgeContext');
@@ -321,7 +322,31 @@ function createEngine(bundle, hooks) {
 
   async function runSession(opts) {
     var log = opts.onLog || function () {};
-    var settings = opts.settings || {};
+    var settings = Object.assign({}, opts.settings || {});
+    // A connection-only resume inherits omitted analysis fields. Explicit values,
+    // including a reset to defaults, are compared by the shared runAll binding.
+    if (opts.resumeDir) {
+      var savedSettingsPath = posixOf(opts.resumeDir).replace(/\/+$/, '') + '/.judge-run-settings.json';
+      if (vfs.existsSync(savedSettingsPath)) {
+        var savedRunSettings = JSON.parse(vfs.readFileSync(savedSettingsPath, 'utf8'));
+        var savedAnalysis = savedRunSettings && savedRunSettings.settings && savedRunSettings.settings.analysis;
+        if (savedAnalysis) ['dimWeights', 'tendencyWeights', 'depth', 'judgeContext'].forEach(function (key) {
+          if (!Object.prototype.hasOwnProperty.call(settings, key) &&
+              !(key === 'tendencyWeights' && Object.prototype.hasOwnProperty.call(settings, 'vectorWeights')))
+            settings[key] = savedAnalysis[key];
+        });
+      }
+    }
+    // S4A-I3：Web 与 Node 共用同一 semantic-workflow 模块；生产默认仍 OFF。
+    // I3 只开放显式 shadow durability，不进行 active/cutover。
+    var semanticFirstMode = String(settings.semanticFirstMode || 'off');
+    if (semanticFirstMode !== 'off' && semanticFirstMode !== 'shadow') {
+      throw new Error('[judge-web] semanticFirstMode 仅允许 off/shadow；active cutover 尚未授权');
+    }
+    if (semanticFirstMode === 'shadow' &&
+        (!semanticWorkflow || typeof semanticWorkflow.createExchangeCapture !== 'function')) {
+      throw new Error('[judge-web] semantic-workflow bundle closure 不可用');
+    }
     var resumeStartNode = canonicalResumeNode(opts.resumeStartNode || 'auto');
     var targetedResume = !!opts.resumeDir && resumeStartNode !== 'auto';
     // 定点续跑由 planner 决定失效面；force 全量覆盖与该语义互斥，避免绕过 planner 重跑上游。
@@ -405,6 +430,21 @@ function createEngine(bundle, hooks) {
         });
       });
     }
+    function queueSemanticCheckpoint(phase) {
+      if (semanticFirstMode !== 'shadow' || typeof opts.persist !== 'function') return;
+      checkpointBarrier = checkpointBarrier.then(async function () {
+        if (checkpointFailure) return;
+        try {
+          await persistRequired('semantic-checkpoint', {
+            workDir: workDir,
+            phase: String(phase || 'checkpoint'),
+            semanticFirstMode: semanticFirstMode
+          }, 'semantic checkpoint ' + String(phase || 'checkpoint'));
+        } catch (e) {
+          checkpointFailure = e;
+        }
+      });
+    }
     async function durabilityBarrierError() {
       // 所有 paid-request 与 terminal persist 共用同一 durability 汇合点：先等普通轮次，再等 PLAIN/R8 私有 checkpoint。
       // 返回首个已锁定失败而不直接抛出，供异常收口路径仍可尝试写 durable error snapshot。
@@ -418,6 +458,9 @@ function createEngine(bundle, hooks) {
     }
     var apiStubWrap = async function (cfg, msgs, o) {
       if (abortSignal && abortSignal.aborted) throw makeAbortError();
+      // host shadow capture 在调用本 seam 前已同步写 request；此处必须先把 request + 既有 raw
+      // 提交到同一 IndexedDB checkpoint barrier，成功后才允许下一笔 upstream。
+      queueSemanticCheckpoint('before-paid-request');
       await requireDurability();
       if (abortSignal && abortSignal.aborted) throw makeAbortError();
       var reqOpts = Object.assign({}, o || {});
@@ -446,22 +489,34 @@ function createEngine(bundle, hooks) {
       var r = PC.resolveOutputDir(speechPath, null, null);
       workDir = r.dir;
     }
+    log('[judge-web] ' + (opts.resumeDir
+      ? (effectiveForce && !targetedResume ? '重新分析已有会话；本次强制重算' : '续跑已有会话；按所选起点和依赖复用有效产物')
+      : '新建会话；本次使用独立工作目录') + '：' + workDir);
     // 定点续跑失败时需要恢复到“进入本次 runSession 前”的完整内存现场，而不只是恢复被删文件。
     if (targetedResume) resumeEntrySnapshot = vfs.snapshot(workDir + '/');
 
     // 3) prompt 生成（runAll；与 CLI 同源）
-    PC.runAll(speechPath, {
-      tendency: tendency.tendencyText(settings.dimWeights || {}, settings.tendencyWeights || {}),
-      auto: false,
-      force: effectiveForce,
-      outputDir: workDir
-    });
+    try {
+      PC.runAll(speechPath, {
+        runSettings: settings,
+        auto: false,
+        force: effectiveForce,
+        outputDir: workDir
+      });
+    } catch (e) {
+      if (!e || e.code !== 'ANALYSIS_SETTINGS_CHANGED') throw e;
+      if (targetedResume) {
+        removeSession(workDir);
+        restoreSession(resumeEntrySnapshot || {});
+      }
+      return { ok: false, semanticOk: null, resumeBlocked: true, error: e.message, workDir: workDir, results: [] };
+    }
 
     // 4) Judge Persona Context 独立按轮注入（严格 normalizer；非法配置 fail closed，绝不 raw fallback）
-    appendJudgeContextBlocks(workDir, settings.judgeContext, log);
+    // Shared runAll already applies the same bounded context overlay as CLI.
 
     // 5) 深度注入
-    appendDepthBlocks(workDir, settings.depth, log);
+    // Shared runAll already applies depth to R5 halves.
 
     // 5.5) 定点续跑纯规划：此时本次 prompt 已生成，但尚未 rewind、尚未写新 epoch、尚未进入 paid request。
     if (targetedResume) {
@@ -475,44 +530,13 @@ function createEngine(bundle, hooks) {
       log('[judge-web] 定点续跑计划：请求 ' + resumePlan.requestedNode + ' → 实际起点 ' + resumePlan.effectiveStartNode + '；重算 ' + resumePlan.invalidatedNodes.join('、'));
     }
 
-    // 6) 名册确认（源锚层 v1 浏览器化）
-    var anchor = null;
-    try { anchor = PC.extractSourceAnchor(vfs.readFileSync(workDir + '/.tmp-debate.txt', 'utf-8')); }
-    catch (e) { log('[judge-web] 名册抽取失败（按降级登记继续）: ' + e.message); }
-    if (anchor && anchor.extracted) {
-      anchor = PC.mergeRosterAliases(anchor, null);
-      vfs.writeFileSync(workDir + '/source-anchor.json', JSON.stringify(anchor, null, 2));
-      if (!settings.skipRosterConfirm && typeof opts.onRoster === 'function') {
-        var decision = await opts.onRoster({ anchor: anchor, workDir: workDir, session: opts });
-        if (!decision || decision.action === 'abort') {
-          if (targetedResume) { removeSession(workDir); restoreSession(resumeEntrySnapshot || {}); }
-          return { ok: false, aborted: true, workDir: workDir, results: [], resumePlan: resumePlan };
-        }
-        if (decision.action === 'edit') {
-          // 编辑名册 JSON → 重抽合并（与 CLI e 处置同语义）+ 重新确认
-          try {
-            var edited = decision.editedAnchor;
-            vfs.writeFileSync(workDir + '/source-anchor.json', JSON.stringify(edited, null, 2));
-            var fresh = PC.extractSourceAnchor(vfs.readFileSync(workDir + '/.tmp-debate.txt', 'utf-8'));
-            var remerged = PC.mergeRosterAliases(fresh, edited);
-            vfs.writeFileSync(workDir + '/source-anchor.json', JSON.stringify(remerged, null, 2));
-            vfs.writeFileSync(workDir + '/source-anchor.confirmed', JSON.stringify(
-              { by: 'judge-web（编辑重抽）', at: new Date().toISOString(), rosterHash: remerged.rosterHash }, null, 2));
-            log('[judge-web] 名册已编辑重抽并确认');
-          } catch (e) {
-            throw new Error('[judge-web] 名册编辑无效: ' + e.message);
-          }
-        } else {
-          // confirm / skip（skip 与确认等效：写确认标记，断点续跑不再问）
-          vfs.writeFileSync(workDir + '/source-anchor.confirmed', JSON.stringify(
-            { by: 'judge-web', at: new Date().toISOString(), rosterHash: anchor.rosterHash }, null, 2));
-          log('[judge-web] 名册已确认（rosterHash=' + anchor.rosterHash.slice(0, 8) + '…）');
-        }
-      }
-    }
+    // 6) 名册由共享 host 在 durable BASE 后准备；Web 不再用旧抽取器覆盖。
 
-    // 6.5) 受控 rewind：必须在 roster/plan 成功之后、pipeline-start durable BASE 之前完成。
-    if (targetedResume) applyResumeRewind(workDir, resumePlan);
+    // 6.5) 受控 rewind：规划通过后、durable BASE 前执行；人工名册取消时恢复进入现场。
+    if (targetedResume) {
+      if (semanticFirstMode !== 'active') host.captureReaderGuideReview(workDir);
+      applyResumeRewind(workDir, resumePlan);
+    }
 
     if (typeof opts.persist === 'function') {
       try {
@@ -523,7 +547,7 @@ function createEngine(bundle, hooks) {
       }
     }
 
-    // 7) 管道执行（host-node 同源；skipRosterConfirm=true —— 浏览器确认已在上方完成）
+    // 7) 管道执行（host-node 同源；名册默认自动识别，也可在原有弹窗中人工修订）
     var cfg = buildApiCfg(settings);
     var mockResponder = settings.provider === 'mock' ? host.goodMockResponder : undefined;
     var onRoundWrap = function (r) {
@@ -539,29 +563,53 @@ function createEngine(bundle, hooks) {
       queueRoundCheckpoint(r);
     };
     var res;
-    try {
-      res = await host.runPipeline({
+    var pipelineOptions = {
         workDir: workDir,
         cfg: cfg,
         mockResponder: mockResponder,
         apiStub: apiStubWrap,
         requestCompletion: apiStubWrap,
+        onAnalysisReviewCheckpoint: async function (info) {
+          await requireDurability();
+          await persistRequired('analysis-review-epoch', {workDir:workDir,plan:info.plan}, '上游语义回查');
+          var invalid = new Set(info.plan.invalidatedNodes);
+          for (var i=runEvents.length-1;i>=0;i--) if(invalid.has(runEvents[i].round)) runEvents.splice(i,1);
+          if (typeof opts.onStage === 'function') opts.onStage({stage:'ANALYSIS-REVIEW',state:'active',targetRound:info.targetRound,invalidatedNodes:info.plan.invalidatedNodes});
+        },
         onBatchCheckpoint: function (info) { queueBatchCheckpoint(info); },
         onLog: function (m) { log(m); },   // C1：日志仅人类消费（事件已结构化）
         onRound: onRoundWrap,   // C1：结构化事件（P4 注入回调）
         onStage: function (s) {
           if (typeof opts.onStage === 'function') { try { opts.onStage(s); } catch (e) {} }
         },
+        semanticFirstMode: semanticFirstMode,
         force: effectiveForce,
         plain: !!settings.plain,
         plainReplayOnly: !!(resumePlan && resumePlan.requirePlainCacheHit),
         plainDict: plainDictPath(settings, log),
-        skipRosterConfirm: true
-      });
-      // 最后一批/最后一轮之后可能没有下一笔 API，因此 terminal path 也必须等全部 durability barrier。
+        skipRosterConfirm: settings.skipRosterConfirm !== false,
+        onRoster: opts.onRoster,
+        onRosterCheckpoint: function (info) {
+          return persistRequired('round-done', { workDir: workDir, round: { round: 'ROSTER', phase: info.phase } }, '名册 ' + info.phase);
+        }
+      };
+    try {
+      res = await host.runPipeline(pipelineOptions);
+      // 最后一笔 semantic raw 之后可能没有下一笔 API，因此 host terminal 必须主动提交 semantic subtree。
+      queueSemanticCheckpoint('host-terminal');
       await requireDurability();
     } catch (e) {
-      // host 可能在最后一个 round/checkpoint 尚在落盘时先抛出；终态仍需等待这些写入收口。
+      if (targetedResume && e && e.rosterCancelled) {
+        var rosterEvidence = {};
+        ['source-anchor.json', 'source-anchor.confirmed', '.source-roster-source.txt', '.source-roster-request.json', '.source-roster-response.json'].forEach(function (name) {
+          var p = workDir + '/' + name;
+          if (vfs.existsSync(p)) rosterEvidence[p] = vfs.readFileSync(p, 'utf8');
+        });
+        removeSession(workDir); restoreSession(resumeEntrySnapshot || {});
+        Object.keys(rosterEvidence).forEach(function (p) { vfs.writeFileSync(p, rosterEvidence[p]); });
+      }
+      // host 可能在最后一个 request/raw/checkpoint 后先抛出；终态仍需等待这些写入收口。
+      queueSemanticCheckpoint('host-terminal-error');
       var durabilityError = await durabilityBarrierError() || (e && e.name === 'PersistenceError' ? e : null);
       var aborted = !durabilityError && !!e && (e.name === 'AbortError' || /aborted|abort/i.test(String(e.message || '')));
       // W-T5（E5）：中止/异常路径构建 runModel（catch 内 res 未赋值——L277 抛错时保持 undefined，必须 (res && res.results) || []，R7-A1）；
@@ -588,7 +636,11 @@ function createEngine(bundle, hooks) {
       }
       return {
         ok: false,
-        semanticOk: durabilityError ? null : false,
+        semanticOk: durabilityError || (e && e.code === 'R8_UPSTREAM_REVIEW') ? null : false,
+        upstreamReviewPending: !!(e && e.code === 'R8_UPSTREAM_REVIEW'),
+        postprocessFailed: !!(e && e.code === 'R8_UPSTREAM_REVIEW'),
+        readerGuideFailed: !!(e && e.code === 'R8_UPSTREAM_REVIEW'),
+        reportHtml: e && e.code === 'R8_UPSTREAM_REVIEW' ? readReportHtml(workDir) : null,
         persistenceFailed: !!terminalPersistenceError,
         persistenceError: terminalPersistenceError ? String(terminalPersistenceError.message || terminalPersistenceError) : null,
         aborted: aborted,
@@ -606,7 +658,7 @@ function createEngine(bundle, hooks) {
         // mock R6b 历史上是轻量手写 HTML；R8 需要正式报告的 plain-toggle runtime。
         // plain=true 时 applyPlain 已完成该迁移；plain=false 时先用现有机械 renderer 生成正式同形报告。
         if (cfg.provider === 'mock' && !settings.plain) {
-          host.renderReport(workDir);
+          host.renderReport(workDir, { consumerBinding: res.consumerBinding || null });
           var mockAdjData = workDir + '/.tmp-adjudicated-data.md';
           var mockDisclaimer = false;
           try {
@@ -625,14 +677,19 @@ function createEngine(bundle, hooks) {
         }
         log('[judge-web] 主裁决完成，开始 R8 章节导览（独立后处理）');
         if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R8', state: 'active', postprocess: true }); } catch (e) {} }
-        await host.applyReaderGuide(workDir, cfg, function (m) { log(m); }, {
+        var guideResult = await host.applyReaderGuideWithRecovery(workDir, cfg, function (m) { log(m); }, {
           cache: !effectiveForce,
           requestCompletion: apiStubWrap,
-          onBatchCheckpoint: function (info) { queueBatchCheckpoint(info); }
+          onBatchCheckpoint: function (info) { queueBatchCheckpoint(info); },
+          consumerBinding: res.consumerBinding || null,
+          pipelineOptions: pipelineOptions
         });
+        if (guideResult && guideResult.pipelineResult) res = guideResult.pipelineResult;
+        if (guideResult && guideResult.consumerBinding) res.consumerBinding = guideResult.consumerBinding;
         readerGuideApplied = true;
         if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R8', state: 'done', postprocess: true }); } catch (e) {} }
       } catch (r8e) {
+        if (r8e && r8e.pipelineResult) res = r8e.pipelineResult;
         if (typeof opts.onStage === 'function') { try { opts.onStage({ stage: 'R8', state: 'fail', postprocess: true, errors: [String(r8e && r8e.message || r8e)] }); } catch (e) {} }
         // R8 也属于 terminal path：即使它在最后一个私有 checkpoint 后、下一笔 API 前失败，
         // 也必须先等该 checkpoint 真正 durable，再写 FINAL/error，避免迟到 #RZZR8 把终态覆盖回 running。
@@ -657,7 +714,7 @@ function createEngine(bundle, hooks) {
               error: String(r8e.message || r8e),
               aborted: r8Aborted,
               postprocess: 'R8',
-              semanticOk: true,
+              semanticOk: r8e && r8e.code === 'R8_UPSTREAM_REVIEW' ? null : true,
               runModel: r8RunModel
             }, 'FINAL/R8 postprocess');
           } catch (r8pe) { r8PersistenceError = r8PersistenceError || r8pe; }
@@ -666,7 +723,8 @@ function createEngine(bundle, hooks) {
         var basePlain = vfs.existsSync(workDir + '/report-plain.html') ? vfs.readFileSync(workDir + '/report-plain.html', 'utf-8') : null;
         return {
           ok: false,
-          semanticOk: true,
+          semanticOk: r8e && r8e.code === 'R8_UPSTREAM_REVIEW' ? null : true,
+          upstreamReviewPending: !!(r8e && r8e.code === 'R8_UPSTREAM_REVIEW'),
           postprocessFailed: true,
           readerGuideFailed: true,
           readerGuideApplied: false,
@@ -721,7 +779,10 @@ function createEngine(bundle, hooks) {
     }
     return {
       ok: !!res.ok && !finalPersistenceError,
-      semanticOk: !!res.ok,
+      semanticOk: res.upstreamReviewPending ? null : !!res.ok,
+      upstreamReviewPending: !!res.upstreamReviewPending,
+      postprocessFailed: !!res.upstreamReviewPending,
+      readerGuideFailed: !!res.upstreamReviewPending,
       persistenceFailed: !!finalPersistenceError,
       persistenceError: finalPersistenceError ? String(finalPersistenceError.message || finalPersistenceError) : null,
       error: finalPersistenceError ? String(finalPersistenceError.message || finalPersistenceError) : semanticError,
@@ -732,6 +793,7 @@ function createEngine(bundle, hooks) {
       reportPlain: reportPlain,
       reportFile: settings.plain && reportPlain ? 'report-plain.html' : 'report.html',
       readerGuideApplied: readerGuideApplied,
+      semanticFirstMode: semanticFirstMode,
       resumePlan: resumePlan,
       runModel: runModel   // W-T5：终态 run 模型（F10 双通道：payload 附带 + return 附带）
     };

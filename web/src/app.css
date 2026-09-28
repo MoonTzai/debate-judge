@@ -78,10 +78,10 @@ body{
   background:
     linear-gradient(var(--world-veil),var(--world-veil)),
     radial-gradient(ellipse 120% 90% at 50% 42%,rgba(7,10,16,0) 30%,rgba(7,10,16,.46) 88%),
-    radial-gradient(ellipse 78% 54% at 50% 18%,rgba(167,124,198,.13),transparent 72%),
+    url("__JUDGE_ASSET_DARK__"),
     radial-gradient(1200px 760px at 50% -12%,rgba(126,155,195,.10),transparent 62%),
     linear-gradient(180deg,var(--canvas),var(--surface-0));
-  background-size:auto,auto,auto,auto,auto;
+  background-size:auto,auto,cover,auto,auto;
   background-position:center,center,center,center,center;
   background-attachment:scroll,scroll,fixed,scroll,scroll;
   background-repeat:no-repeat,no-repeat,no-repeat,repeat,repeat;
@@ -92,10 +92,10 @@ body.sanctum-light{
   background:
     linear-gradient(var(--world-veil),var(--world-veil)),
     radial-gradient(ellipse 120% 90% at 50% 42%,rgba(255,253,248,0) 30%,rgba(87,65,24,.26) 88%),
-    radial-gradient(ellipse 78% 54% at 50% 18%,rgba(177,130,45,.15),transparent 72%),
+    url("__JUDGE_ASSET_LIGHT__"),
     radial-gradient(1200px 760px at 50% -12%,rgba(177,130,45,.14),transparent 62%),
     linear-gradient(180deg,var(--canvas),var(--surface-0));
-  background-size:auto,auto,auto,auto,auto;
+  background-size:auto,auto,cover,auto,auto;
   background-position:center,center,center,center,center;
   background-attachment:scroll,scroll,fixed,scroll,scroll;
   background-repeat:no-repeat,no-repeat,no-repeat,repeat,repeat;
@@ -374,9 +374,9 @@ select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,va
 /* —— Phase 3 · Tribunal：状态优先，日志次级，Stop 持续可达 —— */
 .tribunal-layout{display:grid;grid-template-columns:minmax(210px,.9fr) minmax(420px,1.7fr) minmax(220px,.8fr);gap:16px;align-items:start}
 .tribunal-layout .work-surface{margin:0}
-.tribunal-current{min-width:0;position:sticky;top:92px;align-self:start;height:min(620px,calc(100vh - 112px));min-height:360px;display:flex;flex-direction:column;overflow:hidden}
+.tribunal-current{min-width:0;position:relative;top:auto;align-self:start;height:auto;min-height:360px;display:flex;flex-direction:column;overflow:hidden}
 .tribunal-current .tribunal-evidence{min-height:0;display:flex;flex:1;flex-direction:column}
-.tribunal-current .logbox{min-height:90px;max-height:none;flex:1}
+.tribunal-current .logbox{min-height:160px;height:clamp(180px,40vh,360px);max-height:360px;flex:none}
 .run-close-warning{margin:10px auto 0;max-width:860px;padding:10px 14px;border:1px solid color-mix(in srgb,var(--red) 62%,var(--line));border-radius:var(--radius-compact);background:var(--red-bg);color:var(--red);font-size:14px;font-weight:800;line-height:1.55;text-align:center;letter-spacing:.02em;background-size:240% 100%;background-position:100% 50%}
 .run-close-warning.is-active{border-color:color-mix(in srgb,var(--red) 88%,var(--line));background-image:linear-gradient(110deg,var(--red-bg) 0 34%,color-mix(in srgb,var(--red) 16%,var(--red-bg)) 49%,var(--red-bg) 64% 100%);box-shadow:0 0 0 1px color-mix(in srgb,var(--red) 24%,transparent),0 0 18px color-mix(in srgb,var(--red) 18%,transparent);animation:run-warning-sweep 4.2s linear infinite,run-warning-pulse 2.8s ease-in-out infinite}
 @keyframes run-warning-sweep{0%{background-position:120% 50%}100%{background-position:-120% 50%}}
@@ -393,7 +393,7 @@ select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,va
 .tribunal-actions #btn-back-run{order:1}
 .tribunal-actions #btn-stop{order:2;margin-left:auto}
 @media (max-width:1279px){.tribunal-layout{grid-template-columns:minmax(210px,.8fr) minmax(0,1.6fr)}.tribunal-telemetry{grid-column:1/-1}}
-@media (max-width:1024px){.tribunal-layout{grid-template-columns:1fr}.tribunal-current{top:78px;height:min(600px,calc(100vh - 94px))}.tribunal-telemetry{grid-column:auto}}
+@media (max-width:1024px){.tribunal-layout{grid-template-columns:1fr}.tribunal-current{top:auto;height:auto}.tribunal-telemetry{grid-column:auto}}
 @media (max-width:640px){.tribunal-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}.tribunal-actions .btn{min-width:0;min-height:44px}.tribunal-actions #btn-stop{margin-left:0}.run-close-warning{font-size:13px}}
 
 /* —— 进度步进器（G1/G2 保留；G3 替换为轮次时间线） —— */
@@ -651,3 +651,24 @@ body.transient-open{overflow:hidden}
   .gate-stage .scene-line{font-size:22px}
   .qt-dots{display:none}
 }
+
+/* 日志导出是运行页操作，不改变报告正文和版式。 */
+.evidence-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:16px}
+.evidence-actions{display:flex;gap:6px;flex-wrap:wrap}
+.evidence-heading .surface-subtitle{margin:0}
+.evidence-heading .btn{flex-shrink:0}
+
+/* Shared bilingual controls: display language never changes report content. */
+.ui-language-switch{display:flex;gap:0;flex-wrap:nowrap;flex:0 0 auto;border:1px solid var(--line);border-radius:var(--radius-compact);overflow:hidden}
+.sanctum-rail .ui-language-switch .btn{border:0;border-radius:0;min-height:32px;white-space:nowrap}
+.sanctum-rail .ui-language-switch .btn[aria-pressed="true"]{background:var(--brand-soft);color:var(--text-1);box-shadow:inset 0 -2px var(--accent-gold);font-weight:800}
+.ui-language-switch .btn:focus-visible{outline:2px solid var(--accent-blue);outline-offset:-3px}
+html[lang="en"] .scene-line{letter-spacing:.01em;line-height:1.4}
+html[lang="en"] .tend-grid{grid-template-columns:1fr}
+html[lang="en"] .tname{width:150px;flex:0 0 150px;white-space:normal;line-height:1.35}
+html[lang="en"] .tdev{min-width:100px;white-space:normal}
+html[lang="en"] .rb-name{width:125px;line-height:1.35}
+html[lang="en"] .tl-node{padding-top:10px;padding-bottom:10px}
+.tribunal-actions{flex-wrap:wrap}
+@media(max-width:1100px){.sanctum-rail{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"brand stage" "utilities utilities";gap:10px}.shell-brand{grid-area:brand}.shell-stage.quest-tracker{grid-area:stage;min-width:0}.shell-utilities{grid-area:utilities;min-width:0;justify-content:flex-end}}
+@media(max-width:640px){html[lang="en"] .tname{width:110px;flex-basis:110px}.shell-utilities{justify-content:flex-start;flex-wrap:wrap;overflow:visible}.tribunal-current .logbox{height:260px}.tribunal-actions .btn{white-space:normal}}

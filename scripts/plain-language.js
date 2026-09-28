@@ -221,12 +221,12 @@ function serializeHtml(root) {
 
 // ---------- 文本节点提取（翻译单元） ----------
 
-function extractUnits(root) {
+function extractUnits(root, options = {}) {
   const units = [];
   let seq = 0;
   const walk = (node, ctx) => {
     if (node.type === 'root') {
-      for (const ch of node.children) walk(ch, ctx);
+      node.children.forEach((ch, index) => walk(ch, { ...ctx, address: ctx.address.concat(index) }));
     } else if (node.type === 'element') {
       const cls = HC.attrValue(node, 'class') || '';
       const id = HC.attrValue(node, 'id') || '';
@@ -236,10 +236,15 @@ function extractUnits(root) {
       if (BLOCK_TAGS.has(node.tag)) {
         nc.blockTag = node.tag;
         nc.blockClasses = cls || null;
+        nc.blockId = 'b:' + ctx.address.join('.');
       }
+      nc.inlineTags = BLOCK_TAGS.has(node.tag) ? [] :
+        (ctx.inlineTags || []).concat(node.tag + (cls ? '.' + cls.trim().split(/\s+/).join('.') : ''));
       nc.path = ctx.path.concat(node.tag + (cls ? '.' + cls.trim().split(/\s+/).join('.') : ''));
       if (SKIP_TAGS.has(node.tag)) return;
-      for (const ch of node.children) walk(ch, nc);
+      if (node.tag === 'table') { nc.table = node; nc.tableId = 'table:' + ctx.address.join('.'); }
+      if (node.tag === 'tr') { nc.row = node; nc.rowId = 'row:' + ctx.address.join('.'); }
+      node.children.forEach((ch, index) => walk(ch, { ...nc, address: ctx.address.concat(index) }));
     } else if (node.type === 'text') {
       if (/\S/.test(node.raw)) {
         const unit = {
@@ -251,14 +256,70 @@ function extractUnits(root) {
           containerClasses: ctx.blockClasses,
           path: ctx.path
         };
+        if (options.legacyV3) unit.legacyV3 = true;
+        else {
+          unit.semanticBlockId = ctx.blockId || 'b:root';
+          unit.domAddress = ctx.address.slice();
+          unit.inlineTags = (ctx.inlineTags || []).slice();
+          unit._table = ctx.table;
+          unit._row = ctx.row;
+          unit.tableId = ctx.tableId;
+          unit.rowId = ctx.rowId;
+        }
         node.unitId = unit.id;
         units.push(unit);
         seq++;
       }
     }
   };
-  walk(root, { module: null, blockTag: null, blockClasses: null, path: [] });
+  walk(root, { module: null, blockTag: null, blockClasses: null, path: [], address: [] });
+  if (!options.legacyV3) attachReadingContext(units);
   return units;
+}
+
+// Context is source-only and has no authority to add facts to the paragraph.
+function attachReadingContext(units) {
+  const textOf = node => !node ? '' : node.type === 'text' ? node.raw :
+    SKIP_TAGS.has(node.tag) ? '' : (node.children || []).map(textOf).join('');
+  const groups = new Map();
+  for (const unit of units) {
+    if (!groups.has(unit.semanticBlockId)) groups.set(unit.semanticBlockId, []);
+    groups.get(unit.semanticBlockId).push(unit);
+  }
+  const blocks = [...groups.values()].filter(group => !isReportUiUnit(group[0]));
+  let heading = '', module = null;
+  for (let i = 0; i < blocks.length; i++) {
+    const group = blocks[i], first = group[0];
+    const originalText = group.map(u => u.text).join('');
+    if (module !== first.module) { heading = ''; module = first.module; }
+    if (first.blockType === 'heading') heading = originalText;
+    const neighbor = index => blocks[index] && blocks[index][0].module === module
+      ? blocks[index].map(u => u.text).join('') : '';
+    const context = {
+      originalText,
+      slots: group.map(u => ({ id: u.id, text: u.text })),
+      heading,
+      tableId: first.tableId, rowId: first.rowId,
+      tableHeaders: first._table ? HC.iterElementsInOrder(first._table).filter(el => el.tag === 'th').map(textOf) : [],
+      tableRow: first._row ? (first._row.children || []).filter(el => el.tag === 'td' || el.tag === 'th').map(textOf) : [],
+      previous: neighbor(i - 1), next: neighbor(i + 1)
+    };
+    for (const unit of group) unit.readingContext = context;
+  }
+  for (const unit of units) { delete unit._table; delete unit._row; }
+}
+
+// Match by the original tree position, including whitespace slots; never renumber
+// nonempty translated nodes, because a fluent joint rewrite may empty one slot.
+function alignedPlainUnits(originalHtml, plainHtml) {
+  const original = parseHtml(originalHtml), plain = parseHtml(plainHtml);
+  const diff = structureDiff(original, plain);
+  if (diff) throw new Error('白话槽位结构不一致：' + diff.path + ' :: ' + diff.reason);
+  return extractUnits(original).map(unit => {
+    let node = plain;
+    for (const index of unit.domAddress) node = node.children[index];
+    return { ...unit, text: node.raw };
+  });
 }
 
 // ---------- 机械回填 ----------
@@ -268,7 +329,8 @@ function backfillUnits(root, byId) {
     if (node.type === 'root' || node.type === 'element') {
       for (const ch of node.children) walk(ch);
     } else if (node.type === 'text' && node.unitId && byId.has(node.unitId)) {
-      node.raw = byId.get(node.unitId);
+      // Keep an empty text slot in the same DOM position after serialization.
+      node.raw = byId.get(node.unitId) === '' ? ' ' : byId.get(node.unitId);
     }
   };
   walk(root);
@@ -342,7 +404,7 @@ const STRUCT_PRESERVE_MARKERS = ['（教学发挥·非裁决事实）', '立论�
 // 可译块容器 / 关键块清单 / 容器判定 / 元素遍历：单一事实源 = html-contract.js（HC re-export，见文件尾）
 
 // 翻译单元分类：'translate' 可译；'whitelist' 机械透传（不调用翻译）
-function classifyUnit(u) {
+function classifyLegacyUnit(u) {
   if (!u || !u.text) return 'whitelist';
   // A2：报告交互控件不属于裁判正文；不得送入 R7，也不得计入双版本配对/覆盖率。
   if (isReportUiUnit(u)) return 'whitelist';
@@ -354,6 +416,29 @@ function classifyUnit(u) {
   if (HC.DISCLAIMER_TEXT && u.text.includes(HC.DISCLAIMER_TEXT)) return 'whitelist';
   for (const re of getPlainWhitelist()) if (re.test(u.text)) return 'whitelist';
   for (const mk of STRUCT_PRESERVE_MARKERS) if (u.text.includes(mk)) return 'whitelist';
+  return 'translate';
+}
+
+// Live translation: only a complete data/control label is exempt. A score or
+// structural marker inside prose is not evidence that the prose is untranslatable.
+function classifyUnit(u) {
+  if (u && u.legacyV3) return classifyLegacyUnit(u);
+  if (!u || !u.text || isReportUiUnit(u)) return 'whitelist';
+  if (HC.DISCLAIMER_TEXT && u.text.includes(HC.DISCLAIMER_TEXT)) return 'whitelist';
+  const text = u.text.trim();
+  // Structured result labels carry data only. A sentence explaining a score is
+  // still translated. This recognizes display records, never their correctness.
+  const resultLabel = text.replace(/^\*\*|\*\*$/g, '');
+  if (/^(?:(?:正方|反方)(?:（[^）]*）)?\s*(?:胜|获胜)\s*[（(]\s*\d+\s*[:：]\s*\d+\s*[）)]|(?:最终判决[·：:]\s*(?:正方|反方)获胜[·：:]|获胜[·：:])\s*比分\s*\d+\s*[:：]\s*\d+)$/.test(resultLabel)) return 'whitelist';
+  if (STRUCT_PRESERVE_MARKERS.includes(text)) return 'whitelist';
+  // Live scope must not vary with a host's filesystem/embedded Skill registry.
+  // Named stances are explanatory concepts and may themselves need plain wording.
+  // The frozen legacy lane above still uses the historical registry contract.
+  if (/^\d+[a-z]?型$/.test(text)) return 'whitelist';
+  for (const re of WHITELIST_RE) {
+    const exact = new RegExp('^(?:' + re.source + ')$', re.flags);
+    if (exact.test(text)) return 'whitelist';
+  }
   return 'translate';
 }
 
@@ -398,8 +483,7 @@ function mergePlainIntoOriginal(originalHtml, plainHtml) {
   for (let i = 0; i < ea.length; i++) {
     const oa = ea[i];
     if (!HC.isUnitContainer(oa)) continue;
-    // C1 关键块（.po/.wn）禁止注入属性：checkHtml D3 用精确 class 正则，注入 data-* 会导致误判
-    if (HC.isKeyBlockElement(oa)) continue;
+    // D3 already accepts extra attributes; key explanations also need a plain version.
     const origInner = innerHtml(oa);
     const plainInner = innerHtml(eb[i]);
     if (origInner === plainInner) continue;
@@ -466,8 +550,8 @@ function comparableUnits(html) {
 }
 
 function checkSemanticPlain(origHtml, plainHtml, dict) {
-  const origAll = extractUnits(parseHtml(origHtml));
-  const plainAll = extractUnits(parseHtml(plainHtml));
+  const origAll = extractUnits(parseHtml(origHtml), { legacyV3: true });
+  const plainAll = extractUnits(parseHtml(plainHtml), { legacyV3: true });
   const orig = origAll.filter(u => !isReportUiUnit(u));
   const plain = plainAll.filter(u => !isReportUiUnit(u));
   const requirements = annotateSemanticRequirements(origAll, dict);
@@ -561,7 +645,9 @@ function getPlainWhitelist(skillPath, force) {
 // changed = 文本不同的单元；whitelistResidue = 被判白名单却文本不同的单元（>0 → ok=false）
 function compareVersions(origHtml, plainHtml) {
   const units = comparableUnits(origHtml);
-  const plainUnits = comparableUnits(plainHtml);
+  let plainUnits;
+  try { plainUnits = alignedPlainUnits(origHtml, plainHtml).filter(u => !isReportUiUnit(u)); }
+  catch (_) { plainUnits = comparableUnits(plainHtml); } // historical UI-only insertions
   const changed = [];
   const whitelistResidue = [];
   for (let i = 0; i < units.length; i++) {
@@ -590,7 +676,7 @@ function compareVersions(origHtml, plainHtml) {
 // 白名单机械重放：新判白名单的单元还原原文、其余保留译文，走 processReportAsync 机械回填
 async function reapplyWhitelist(origHtml, llmPlainHtml) {
   const units = extractUnits(parseHtml(origHtml));
-  const llmUnits = extractUnits(parseHtml(llmPlainHtml));
+  const llmUnits = alignedPlainUnits(origHtml, llmPlainHtml);
   const byId = new Map();
   let reverted = 0;
   for (let i = 0; i < units.length; i++) {
@@ -662,7 +748,7 @@ function finalizeProcess(root, units, byId, html, opts) {
 
 function processReport(html, opts = {}) {
   const root = parseHtml(html);
-  const units = extractUnits(root);
+  const units = extractUnits(root, opts);
   const byId = new Map();
   if (typeof opts.translate === 'function') {
     for (const u of units) {
@@ -678,7 +764,7 @@ function processReport(html, opts = {}) {
 // 白名单/结构保留单元机械透传（不调用翻译），防判决/比分/ID/标题被改写。
 async function processReportAsync(html, opts = {}) {
   const root = parseHtml(html);
-  const units = extractUnits(root);
+  const units = extractUnits(root, opts);
   const byId = new Map();
   if (typeof opts.translateUnits === 'function') {
     const toTranslate = units.filter(u => classifyUnit(u) === 'translate');
@@ -778,6 +864,8 @@ module.exports = {
   parseHtml,
   serializeHtml,
   extractUnits,
+  alignedPlainUnits,
+  classifyLegacyUnit,
   backfillUnits,
   escapeHtml,
   escapeAttr,
